@@ -1,0 +1,25 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.ambr$
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: ["--unsafe"]
+      - id: check-toml
+
+  - repo: https://github.com/sirosen/texthooks
+    rev: 0.6.8
+    hooks:
+      - id: fix-smartquotes
+      - id: fix-spaces
+
+  - repo: local
+    hooks:
+      - id: openagent
+        name: format and lint openagent
+        language: system
+        entry: make -C libs/openagent format lint
+        files: ^libs/openagent/
+        pass_filenames: false

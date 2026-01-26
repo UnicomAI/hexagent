@@ -1,0 +1,124 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openagent"
+dynamic = ["version"]
+description = "A general-purpose agent harness that gives LLM agents a CLI-based computer to complete tasks the way humans do"
+requires-python = ">=3.11,<4.0"
+authors = [
+    { name = "Anqi (Anthony) Tang", email = "anqi.tang.ai@gmail.com" }
+]
+dependencies = [
+    "langchain-core>=1.2.6,<2.0.0",
+    "langchain>=1.2.3,<2.0.0",
+    "langchain-anthropic>=1.3.1,<2.0.0",
+    "langchain-openai>=1.0.2,<2.0.0",
+    "wcmatch",
+    "e2b>=2.0.0,<3.0.0",
+]
+
+[project.urls]
+Repository = "https://github.com/an7tang/openagent"
+Issues = "https://github.com/an7tang/openagent/issues"
+
+[dependency-groups]
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist",
+    "ruff>=0.12.2,<0.13.0",
+    "mypy>=1.18.1,<1.19.0",
+    "pytest-asyncio>=1.3.0",
+]
+
+[tool.hatch.version]
+source = "vcs"
+tag-pattern = "openagent==(?P<version>.*)"
+raw-options = { root = "../.." }
+fallback-version = "0.0.0"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/openagent",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["openagent"]
+
+[tool.ruff]
+line-length = 150
+# Exclude any files that shouldn't be linted
+exclude = []
+
+[tool.ruff.format]
+docstring-code-format = true  # Formats code blocks in docstrings
+
+[tool.ruff.lint]
+select = [
+    "ALL"  # Enable all rules by default
+]
+ignore = [
+    "COM812",  # Messes with the formatter
+    "ISC001",  # Messes with the formatter
+    "PERF203", # Rarely useful
+    "SLF001",  # Private member access
+    "PLC0415", # Imports should be at the top. Not always desirable
+    "PLR0913", # Too many arguments in function definition
+    "PLC0414", # Inconsistent with how type checkers expect to be notified of intentional re-exports
+    "C901",    # Too complex
+]
+unfixable = ["B028"]  # Rules that shouldn't be auto-fixed
+
+[tool.ruff.lint.pyupgrade]
+keep-runtime-typing = true
+
+[tool.ruff.lint.flake8-annotations]
+allow-star-arg-any = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"  # Google-style docstrings
+ignore-var-parameters = true
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "D1",      # Skip documentation rules in tests
+    "S101",    # Allow asserts in tests
+    "S311",    # Allow pseudo-random generators in tests
+    # Add more test-specific ignores
+]
+
+"openagent/backends/filesystem.py" = ["BLE001", "D102", "D205", "D417", "DTZ006", "EM101", "EM102", "FBT001", "FBT002", "PLR0912", "S112", "TRY003"]
+"openagent/backends/protocol.py" = ["B024", "B027", "FBT001", "FBT002"]
+"openagent/backends/sandbox.py" = ["FBT001", "FBT002", "PLR2004"]
+"openagent/backends/utils.py" = ["D301", "E501", "EM101", "FBT001", "RET504", "RUF005", "TRY003"]
+"openagent/middleware/filesystem.py" = ["EM102", "TRY003"]
+"tests/integration_tests/test_hitl.py" = ["ANN201", "C419", "E501", "PLR2004", "TID252"]
+"tests/unit_tests/backends/test_filesystem_backend.py" = ["ANN201", "ARG005", "B007", "B011", "INP001", "PLR2004", "PT015", "PT018"]
+"tests/unit_tests/backends/test_filesystem_backend_async.py" = ["ANN201", "ARG005", "B007", "INP001", "PLR2004", "PT011", "PT018"]
+"tests/unit_tests/chat_model.py" = ["ARG002", "D301", "PLR0912", "RUF012"]
+"tests/unit_tests/middleware/test_validate_path.py" = ["ANN201"]
+"tests/unit_tests/test_end_to_end.py" = ["ARG002", "PLR2004"]
+"tests/unit_tests/test_todo_middleware.py" = ["E501", "PLR2004"]
+"tests/utils.py" = ["ANN001", "ANN201", "RUF012", "SIM118"]
+"openagent/core/protocols.py" = ["ANN001", "ASYNC109", "D102", "PYI034"]
+"openagent/core/results.py" = ["D101", "D301", "EM101", "FBT001", "FBT002", "FBT003", "TRY003"]
+"openagent/execution/local_session.py" = ["ASYNC109", "BLE001", "EM101", "EM102", "PLR0912", "PLR0915", "S603", "S607", "SIM105", "TRY003"]
+"openagent/execution/e2b_session.py" = ["BLE001", "EM101", "EM102", "S110", "SIM102", "SIM105", "TRY003"]
+"openagent/tools/cli.py" = ["ARG002", "EM101", "FBT001", "FBT002", "TRY003"]
+"tests/unit_tests/execution/test_local_session.py" = ["ANN201", "PLR2004", "S108"]
+"tests/unit_tests/execution/test_e2b_session.py" = ["ANN201", "ARG001", "PLR2004", "S108", "SIM117"]
+"tests/unit_tests/execution/test_protocol_flexibility.py" = ["ANN201", "ARG002"]
+"tests/unit_tests/tools/test_cli.py" = ["ANN201", "S108"]
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true
+enable_error_code = ["deprecated"]
+# Optional: reduce strictness if needed
+disallow_any_generics = false
+warn_return_any = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
