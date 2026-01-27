@@ -150,12 +150,19 @@ class TestRun:
             assert "你好世界" in result.stdout
             assert result.exit_code == 0
 
-    async def test_trailing_newline_stripped(self) -> None:
-        """Test trailing newlines are stripped from output."""
+    async def test_single_trailing_newline_stripped(self) -> None:
+        """Test only a single trailing newline is stripped (removesuffix)."""
+        async with LocalNativeComputer() as computer:
+            # echo appends one \n — removesuffix removes exactly that one
+            result = await computer.run("echo hello")
+            assert result.stdout == "hello"
+
+    async def test_multiple_trailing_newlines_preserve_inner(self) -> None:
+        """Test removesuffix only strips the last newline, preserving others."""
         async with LocalNativeComputer() as computer:
             result = await computer.run("printf 'hello\\n\\n'")
-            # All trailing newlines are stripped by rstrip("\n")
-            assert result.stdout == "hello"
+            # removesuffix("\n") strips one trailing \n, leaving "hello\n"
+            assert result.stdout == "hello\n"
 
 
 class TestTimeout:

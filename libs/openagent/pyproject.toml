@@ -116,6 +116,7 @@ ignore-var-parameters = true
 strict = true
 ignore_missing_imports = true
 enable_error_code = ["deprecated"]
+exclude = ["sandbox/"]
 # Optional: reduce strictness if needed
 disallow_any_generics = false
 warn_return_any = false

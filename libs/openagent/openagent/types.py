@@ -20,16 +20,16 @@ class ToolResult:
     r"""Base result type for tool execution.
 
     This is a generic result type that can represent output from any tool,
-    including text output, errors, images, or system messages.
+    including text output, error, image, or system message.
 
     Follows Anthropic's ToolResult pattern with support for combining results
     and boolean truthiness.
 
     Attributes:
-        output: Standard output text from the tool.
-        error: Error message if the operation failed.
+        output: The text output from the tool.
+        error: Error message if the tool execution failed.
         base64_image: Base64-encoded image data if tool produced an image.
-        system: System-level messages or metadata.
+        system: System-level message or metadata for the agent.
 
     Examples:
         Basic usage:
@@ -139,28 +139,43 @@ class ToolResult:
         """
         return replace(self, **kwargs)
 
+    def __str__(self) -> str:
+        """Return the text representation of this result."""
+        return self.to_text()
+
     def to_text(self) -> str:
         r"""Convert the result to a plain text string.
 
         Formats the result for consumption by LLMs or other text-based interfaces.
-        Order: output first, then error (if any), then system (if any).
+
+        - Output comes first, error on the next line if both present.
+        - If neither output nor error exists, a default system notice is emitted.
+          Any existing system message is appended on the next line.
+        - If output/error *and* system are present, system is separated by a
+          blank line.
 
         Returns:
             A formatted string representation of the result.
 
         Examples:
             ```python
-            result = ToolResult(output="hello")
-            print(result.to_text())  # "hello"
+            ToolResult(output="hello").to_text()
+            # "hello"
 
-            result = ToolResult(error="file not found")
-            print(result.to_text())  # "<error>file not found</error>"
+            ToolResult(error="file not found").to_text()
+            # "<error>file not found</error>"
 
-            result = ToolResult(output="partial", error="failed")
+            ToolResult(output="partial", error="failed").to_text()
             # "partial\n<error>failed</error>"
 
-            result = ToolResult(output="done", system="session restarted")
-            # "done\n<system>session restarted</system>"
+            ToolResult(output="done", system="session restarted").to_text()
+            # "done\n\n<system>session restarted</system>"
+
+            ToolResult().to_text()
+            # "<system>Tool ran without output or errors</system>"
+
+            ToolResult(system="session restarted").to_text()
+            # "<system>Tool ran without output or errors\nsession restarted</system>"
             ```
         """
         parts: list[str] = []
@@ -168,9 +183,19 @@ class ToolResult:
             parts.append(self.output)
         if self.error:
             parts.append(f"<error>{self.error}</error>")
+
+        content = "\n".join(parts)
+
+        if not content:
+            system_msg = "Tool ran without output or errors"
+            if self.system:
+                system_msg += f"\n{self.system}"
+            return f"<system>{system_msg}</system>"
+
         if self.system:
-            parts.append(f"\n<system-reminder>{self.system}</system-reminder>")
-        return "\n".join(parts)
+            return f"{content}\n\n<system>{self.system}</system>"
+
+        return content
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -190,29 +215,6 @@ class CLIResult:
     stderr: str = ""
     exit_code: int = 0
     metadata: ExecutionMetadata | None = None
-
-    def to_text(self) -> str:
-        """Convert the CLI result to a plain text string."""
-        if self.exit_code == 0:
-            parts: list[str] = []
-            if self.stdout:
-                parts.append(self.stdout)
-            if self.stderr:
-                parts.append(f"<stderr>{self.stderr}</stderr>")
-            return "\n".join(parts) if parts else ""
-
-        # Non-zero exit code: format as error
-        error_parts: list[str] = [f"Exit Code {self.exit_code}"]
-        if self.stderr:
-            error_parts.append(self.stderr)
-        if self.stdout:
-            error_parts.append(f"\n{self.stdout}")
-        error_content = "\n".join(error_parts)
-        return f"<error>{error_content}</error>"
-
-
-# Re-export CLIError for backward compatibility
-from openagent.exceptions import CLIError as CLIError  # noqa: E402
 
 
 # Tool Input Schemas

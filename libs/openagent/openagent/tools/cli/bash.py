@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+from openagent.exceptions import CLIError
 from openagent.tools.base import BaseAgentTool
-from openagent.types import BashToolParams, ToolResult
+from openagent.types import BashToolParams, CLIResult, ToolResult
 
 if TYPE_CHECKING:
     from openagent.computer import Computer
@@ -56,13 +57,31 @@ class BashTool(BaseAgentTool[BashToolParams]):
             params: Validated parameters containing command.
 
         Returns:
-            ToolResult with output from the command.
+            ToolResult with output on success, or error on non-zero exit.
+            Never both—output and error are mutually exclusive.
         """
-        result = await self._computer.run(params.command)
+        try:
+            result: CLIResult = await self._computer.run(params.command)
+        except CLIError as exc:
+            return ToolResult(
+                error=str(exc),
+                system=(
+                    "This error did not come from your command. Your computer's"
+                    " infrastructure has failed — this is never expected and"
+                    " indicates a problem only the human developer can fix."
+                    " Do not retry. Stop what you are doing and report this"
+                    " failure to the user."
+                ),
+            )
 
-        # Convert CLIResult to ToolResult
-        if result.exit_code != 0:
-            error_msg = result.stderr or result.stdout or f"Command failed with exit code {result.exit_code}"
-            return ToolResult(error=error_msg)
+        if result.exit_code == 0:
+            parts = [p for p in (result.stdout, result.stderr) if p]
+            return ToolResult(output="\n".join(parts) if parts else "")
 
-        return ToolResult(output=result.stdout or "")
+        # Non-zero exit: exit code + stderr (tightly coupled), then stdout
+        error = f"Exit code {result.exit_code}"
+        if result.stderr:
+            error += f"\n{result.stderr}"
+        if result.stdout:
+            error += f"\n\n{result.stdout}"
+        return ToolResult(error=error)

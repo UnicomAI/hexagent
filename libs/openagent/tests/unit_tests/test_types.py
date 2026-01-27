@@ -150,35 +150,6 @@ class TestCLIResult:
         assert result.exit_code == 0
         assert result.metadata is None
 
-    def test_to_text_success(self) -> None:
-        """CLIResult.to_text for successful command."""
-        result = CLIResult(stdout="hello", exit_code=0)
-        assert result.to_text() == "hello"
-
-    def test_to_text_success_with_stderr(self) -> None:
-        """CLIResult.to_text for successful command with stderr."""
-        result = CLIResult(stdout="output", stderr="warning", exit_code=0)
-        text = result.to_text()
-        assert "output" in text
-        assert "<stderr>warning</stderr>" in text
-
-    def test_to_text_failure(self) -> None:
-        """CLIResult.to_text for failed command."""
-        result = CLIResult(stderr="No such file", exit_code=1)
-        text = result.to_text()
-        assert "<error>" in text
-        assert "Exit Code 1" in text
-        assert "No such file" in text
-
-    def test_to_text_failure_with_stdout(self) -> None:
-        """CLIResult.to_text for failed command with stdout."""
-        result = CLIResult(stdout="partial", stderr="failed", exit_code=1)
-        text = result.to_text()
-        assert "<error>" in text
-        assert "Exit Code 1" in text
-        assert "failed" in text
-        assert "partial" in text
-
     def test_frozen_dataclass(self) -> None:
         """CLIResult is a frozen dataclass."""
         from dataclasses import FrozenInstanceError
