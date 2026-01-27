@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Guidance for Claude Code when working in this repository.
+Guidance for working in this repository.
 
 ## Project Overview
 
@@ -58,3 +58,7 @@ uv run pytest tests/unit_tests/core/test_results.py -v
 Full permission to refactor, rename, restructure, or break APIs.
 
 If something feels wrong or if there's better architecture or code design, actively propose your suggestions. Don't preserve patterns just because they exist.
+
+## Review Guidelines
+
+When reviewing code/PRs, focus on **correctness, logic, and code quality**. Since the project is still pre-experimental, backward compatibility should never block a better design.
