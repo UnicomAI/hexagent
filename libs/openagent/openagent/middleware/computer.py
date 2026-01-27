@@ -23,7 +23,7 @@ from langchain.agents.middleware.types import (
 from langchain_core.tools import BaseTool
 
 from openagent.computer import Computer
-from openagent.tools import create_computer_tools
+from openagent.tools import create_cli_tools
 from openagent.tools.adapter import to_langchain_tool
 
 COMPUTER_SYSTEM_PROMPT = """## Computer Tools
@@ -102,14 +102,14 @@ class ComputerMiddleware(AgentMiddleware):
     def _create_langchain_tools(self) -> list[BaseTool]:
         """Create LangChain tools from the Computer.
 
-        Uses create_computer_tools() to create all agent tools, then converts
+        Uses create_cli_tools() to create all agent tools, then converts
         them to LangChain format. Descriptions and schemas are derived from
         the OpenAgent tools themselves.
 
         Returns:
             List of LangChain BaseTool instances.
         """
-        agent_tools = create_computer_tools(self._computer)
+        agent_tools = create_cli_tools(self._computer)
         return [to_langchain_tool(tool) for tool in agent_tools]
 
     def wrap_model_call(
