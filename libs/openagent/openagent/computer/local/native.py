@@ -74,8 +74,8 @@ class LocalNativeComputer(AsyncComputerMixin):
             msg = f"timed out after {effective_timeout}s"
             raise CLIError(msg) from None
 
-        stdout = stdout_bytes.decode("utf-8", errors="replace").rstrip("\n")
-        stderr = stderr_bytes.decode("utf-8", errors="replace").rstrip("\n")
+        stdout = stdout_bytes.decode("utf-8", errors="replace").removesuffix("\n")
+        stderr = stderr_bytes.decode("utf-8", errors="replace").removesuffix("\n")
 
         return CLIResult(
             stdout=stdout,

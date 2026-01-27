@@ -308,8 +308,8 @@ class RemoteE2BComputer(AsyncComputerMixin):
             raise CLIError(msg) from e
 
         return CLIResult(
-            stdout=stdout.rstrip("\n"),
-            stderr=stderr.rstrip("\n"),
+            stdout=stdout.removesuffix("\n"),
+            stderr=stderr.removesuffix("\n"),
             exit_code=exit_code,
             metadata=ExecutionMetadata(duration_ms=int((time.monotonic() - start_time) * 1000)),
         )

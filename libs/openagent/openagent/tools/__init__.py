@@ -19,7 +19,8 @@ Available tools:
 Factory functions:
 - create_bash_tool: Create the bash tool
 - create_filesystem_tools: Create file operation tools (read, write, edit, ls, glob, grep)
-- create_computer_tools: Create all computer tools sharing a Computer instance
+- create_cli_tools: Create all CLI tools sharing a Computer instance
+- create_cli_tools: Create all CLI tools sharing a Computer instance
 
 Utilities:
 - to_langchain_tool: Convert BaseAgentTool to LangChain BaseTool
@@ -27,7 +28,7 @@ Utilities:
 
 from openagent.tools.adapter import to_langchain_tool
 from openagent.tools.base import BaseAgentTool
-from openagent.tools.computer import (
+from openagent.tools.cli import (
     BashTool,
     EditTool,
     GlobTool,
@@ -36,7 +37,7 @@ from openagent.tools.computer import (
     ReadTool,
     WriteTool,
     create_bash_tool,
-    create_computer_tools,
+    create_cli_tools,
     create_filesystem_tools,
 )
 
@@ -50,7 +51,7 @@ __all__ = [
     "ReadTool",
     "WriteTool",
     "create_bash_tool",
-    "create_computer_tools",
+    "create_cli_tools",
     "create_filesystem_tools",
     "to_langchain_tool",
 ]
