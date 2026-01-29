@@ -12,14 +12,12 @@ Available tools:
 - ReadTool: Read file contents with line numbers
 - WriteTool: Create or overwrite files
 - EditTool: Perform string replacements in files
-- LSTool: List directory contents
 - GlobTool: Find files by pattern
 - GrepTool: Search for patterns in files
 
 Factory functions:
 - create_bash_tool: Create the bash tool
-- create_filesystem_tools: Create file operation tools (read, write, edit, ls, glob, grep)
-- create_cli_tools: Create all CLI tools sharing a Computer instance
+- create_filesystem_tools: Create file operation tools (read, write, edit, glob, grep)
 - create_cli_tools: Create all CLI tools sharing a Computer instance
 
 Utilities:
@@ -33,7 +31,6 @@ from openagent.tools.cli import (
     EditTool,
     GlobTool,
     GrepTool,
-    LSTool,
     ReadTool,
     WriteTool,
     create_bash_tool,
@@ -47,7 +44,6 @@ __all__ = [
     "EditTool",
     "GlobTool",
     "GrepTool",
-    "LSTool",
     "ReadTool",
     "WriteTool",
     "create_bash_tool",

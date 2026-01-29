@@ -256,12 +256,6 @@ class EditToolParams(BaseModel):
     replace_all: bool = Field(default=False, description="Replace all occurences of old_string (default false)")
 
 
-class LSToolParams(BaseModel):
-    """Input schema for ls tool."""
-
-    path: str = Field(default=".", description="Directory path to list")
-
-
 class GlobToolParams(BaseModel):
     """Input schema for glob tool."""
 
