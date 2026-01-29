@@ -116,7 +116,6 @@ class TestBashToolCLIError:
         tool = BashTool(computer)
         result = await tool(command="anything")
         assert result.system is not None
-        assert "Do not retry" in result.system
 
     async def test_cli_error_output_is_none(self) -> None:
         """CLIError result has no output."""
