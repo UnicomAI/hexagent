@@ -111,6 +111,7 @@ ignore-var-parameters = true
 "tests/unit_tests/execution/test_e2b_session.py" = ["ANN201", "ARG001", "PLR2004", "S108", "SIM117"]
 "tests/unit_tests/execution/test_protocol_flexibility.py" = ["ANN201", "ARG002"]
 "tests/unit_tests/tools/test_cli.py" = ["ANN201", "S108"]
+"tests/unit_tests/tools/cli/test_glob.py" = ["PLR2004"]
 
 [tool.mypy]
 strict = true
