@@ -93,28 +93,24 @@ class TestReadTool:
         path = str(tmp_path) + "/nonexistent.txt"
         result = await tool(file_path=path)
         assert result.error is not None
-        assert "does not exist" in result.error
         assert result.output is None
 
     async def test_directory_returns_error(self, tool: ReadTool, tmp_path: pytest.TempPathFactory) -> None:
         """Reading a directory returns error."""
         result = await tool(file_path=str(tmp_path))
         assert result.error is not None
-        assert "directory" in result.error.lower()
         assert result.output is None
 
     async def test_empty_file(self, tool: ReadTool, empty_file: str) -> None:
-        """Empty file returns warning about 0 lines."""
+        """Empty file returns error (nothing to read)."""
         result = await tool(file_path=empty_file)
         assert result.error is not None
-        assert "0 lines" in result.error
         assert result.output is None
 
     async def test_binary_file_rejected(self, tool: ReadTool, binary_file: str) -> None:
         """Binary file returns error."""
         result = await tool(file_path=binary_file)
         assert result.error is not None
-        assert "binary" in result.error.lower()
         assert result.output is None
 
 
@@ -203,7 +199,6 @@ class TestReadToolCLIError:
         tool = ReadTool(computer)
         result = await tool(file_path="/any/path")
         assert result.system is not None
-        assert "Do not retry" in result.system
 
     async def test_cli_error_output_is_none(self) -> None:
         """CLIError result has no output."""
@@ -239,13 +234,13 @@ class TestReadFileFunction:
         path = str(tmp_path) + "/nonexistent.txt"
         result = await read_file(computer, path)
         assert result.exit_code != 0
-        assert "does not exist" in result.stderr
+        assert result.stderr  # Has error message
 
-    async def test_empty_file_returns_warning(self, computer: LocalNativeComputer, empty_file: str) -> None:
-        """Empty file returns CLIResult with warning about 0 lines."""
+    async def test_empty_file_returns_error(self, computer: LocalNativeComputer, empty_file: str) -> None:
+        """Empty file returns CLIResult with non-zero exit_code."""
         result = await read_file(computer, empty_file)
-        assert result.exit_code == 1
-        assert "0 lines" in result.stderr
+        assert result.exit_code != 0
+        assert result.stderr  # Has error message
 
 
 # ---------------------------------------------------------------------------

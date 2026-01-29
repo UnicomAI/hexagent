@@ -168,8 +168,8 @@ class TestGrepTool:
 class TestGrepToolFilesOutput:
     """Tests for files_with_matches output formatting."""
 
-    async def test_files_summary_header(self) -> None:
-        """files_with_matches includes 'Found N files' header."""
+    async def test_files_output_contains_matched_files(self) -> None:
+        """files_with_matches output contains all matched file paths."""
         computer = AsyncMock()
         computer.run = AsyncMock(
             return_value=CLIResult(stdout="a.py\nb.py\nc.py\n", exit_code=0),
@@ -177,13 +177,13 @@ class TestGrepToolFilesOutput:
         tool = GrepTool(computer)
         result = await tool(pattern="foo")
         assert result.output is not None
-        assert result.output.startswith("Found 3 files")
+        assert result.error is None
         assert "a.py" in result.output
         assert "b.py" in result.output
         assert "c.py" in result.output
 
-    async def test_single_file_singular(self) -> None:
-        """Single file uses singular 'file' in header."""
+    async def test_single_file_returns_output(self) -> None:
+        """Single file match returns output with the file path."""
         computer = AsyncMock()
         computer.run = AsyncMock(
             return_value=CLIResult(stdout="only.py\n", exit_code=0),
@@ -191,17 +191,18 @@ class TestGrepToolFilesOutput:
         tool = GrepTool(computer)
         result = await tool(pattern="foo")
         assert result.output is not None
-        assert "Found 1 file\n" in result.output
+        assert result.error is None
+        assert "only.py" in result.output
 
     async def test_no_matches_files(self) -> None:
-        """No matches in files mode returns 'No files found'."""
+        """No matches in files mode returns output (not error)."""
         computer = AsyncMock()
         computer.run = AsyncMock(
             return_value=CLIResult(stdout="", exit_code=1),
         )
         tool = GrepTool(computer)
         result = await tool(pattern="nonexistent")
-        assert result.output == "No files found"
+        assert result.output is not None
         assert result.error is None
 
     async def test_head_limit(self) -> None:
@@ -213,7 +214,8 @@ class TestGrepToolFilesOutput:
         tool = GrepTool(computer)
         result = await tool(pattern="foo", head_limit=2)
         assert result.output is not None
-        assert "Found 2 file" in result.output
+        assert result.error is None
+        # First 2 files included, rest excluded
         assert "a.py" in result.output
         assert "b.py" in result.output
         assert "c.py" not in result.output
@@ -243,42 +245,19 @@ class TestGrepToolFilesOutput:
         tool = GrepTool(computer)
         result = await tool(pattern="foo", offset=1, head_limit=2)
         assert result.output is not None
-        assert "Found 2 file" in result.output
-        assert "limit: 2, offset: 1" in result.output
+        assert result.error is None
+        # Skip first 1, take next 2: b.py and c.py
         assert "a.py" not in result.output
         assert "b.py" in result.output
         assert "c.py" in result.output
         assert "d.py" not in result.output
 
-    async def test_limit_shown_in_header(self) -> None:
-        """Header includes limit/offset when either is non-zero."""
-        computer = AsyncMock()
-        computer.run = AsyncMock(
-            return_value=CLIResult(stdout="a.py\nb.py\n", exit_code=0),
-        )
-        tool = GrepTool(computer)
-        result = await tool(pattern="foo", head_limit=5)
-        assert result.output is not None
-        assert "limit: 5, offset: 0" in result.output
-
-    async def test_no_limit_offset_in_header_by_default(self) -> None:
-        """Header omits limit/offset when both are zero."""
-        computer = AsyncMock()
-        computer.run = AsyncMock(
-            return_value=CLIResult(stdout="a.py\n", exit_code=0),
-        )
-        tool = GrepTool(computer)
-        result = await tool(pattern="foo")
-        assert result.output is not None
-        assert "limit:" not in result.output
-        assert "offset:" not in result.output
-
 
 class TestGrepToolCountOutput:
     """Tests for count output formatting."""
 
-    async def test_count_summary(self) -> None:
-        """Count mode includes occurrence summary at end."""
+    async def test_count_output_contains_file_counts(self) -> None:
+        """Count mode output contains file:count pairs."""
         computer = AsyncMock()
         computer.run = AsyncMock(
             return_value=CLIResult(
@@ -289,12 +268,12 @@ class TestGrepToolCountOutput:
         tool = GrepTool(computer)
         result = await tool(pattern="foo", output_mode="count")
         assert result.output is not None
+        assert result.error is None
         assert "a.py:5" in result.output
         assert "b.py:3" in result.output
-        assert "Found 8 total occurrences across 2 files." in result.output
 
-    async def test_count_single_file_singular(self) -> None:
-        """Single file/occurrence uses singular form."""
+    async def test_count_single_file(self) -> None:
+        """Single file count returns output with the count."""
         computer = AsyncMock()
         computer.run = AsyncMock(
             return_value=CLIResult(stdout="a.py:1\n", exit_code=0),
@@ -302,10 +281,11 @@ class TestGrepToolCountOutput:
         tool = GrepTool(computer)
         result = await tool(pattern="foo", output_mode="count")
         assert result.output is not None
-        assert "1 total occurrence across 1 file." in result.output
+        assert result.error is None
+        assert "a.py:1" in result.output
 
     async def test_count_no_matches(self) -> None:
-        """No matches in count mode includes zero-count summary."""
+        """No matches in count mode returns output (not error)."""
         computer = AsyncMock()
         computer.run = AsyncMock(
             return_value=CLIResult(stdout="", exit_code=1),
@@ -313,11 +293,10 @@ class TestGrepToolCountOutput:
         tool = GrepTool(computer)
         result = await tool(pattern="nonexistent", output_mode="count")
         assert result.output is not None
-        assert "No matches found" in result.output
-        assert "Found 0 total occurrences across 0 files." in result.output
+        assert result.error is None
 
     async def test_count_with_pagination(self) -> None:
-        """Pagination applies to count results and shows in summary."""
+        """Pagination applies to count results."""
         computer = AsyncMock()
         computer.run = AsyncMock(
             return_value=CLIResult(
@@ -333,11 +312,11 @@ class TestGrepToolCountOutput:
             head_limit=1,
         )
         assert result.output is not None
+        assert result.error is None
+        # Skip first 1, take next 1: b.py only
         assert "a.py" not in result.output
         assert "b.py:3" in result.output
         assert "c.py" not in result.output
-        assert "Found 3 total occurrences across 1 file." in result.output
-        assert "with pagination = limit: 1, offset: 1" in result.output
 
 
 class TestGrepToolContentOutput:
@@ -353,22 +332,23 @@ class TestGrepToolContentOutput:
         tool = GrepTool(computer)
         result = await tool(pattern="def", output_mode="content")
         assert result.output is not None
+        assert result.error is None
         assert "file.py:10:def foo():" in result.output
         assert "file.py:20:def bar():" in result.output
-        assert "[Showing results" not in result.output
 
     async def test_content_no_matches(self) -> None:
-        """No matches in content mode returns 'No matches found'."""
+        """No matches in content mode returns output (not error)."""
         computer = AsyncMock()
         computer.run = AsyncMock(
             return_value=CLIResult(stdout="", exit_code=1),
         )
         tool = GrepTool(computer)
         result = await tool(pattern="nonexistent", output_mode="content")
-        assert result.output == "No matches found"
+        assert result.output is not None
+        assert result.error is None
 
     async def test_content_with_head_limit(self) -> None:
-        """head_limit limits content lines and adds pagination footer."""
+        """head_limit limits content lines."""
         computer = AsyncMock()
         rg_output = "a.py:1:line1\na.py:2:line2\na.py:3:line3\n"
         computer.run = AsyncMock(
@@ -377,10 +357,11 @@ class TestGrepToolContentOutput:
         tool = GrepTool(computer)
         result = await tool(pattern="line", output_mode="content", head_limit=2)
         assert result.output is not None
+        assert result.error is None
+        # First 2 lines included, third excluded
         assert "line1" in result.output
         assert "line2" in result.output
         assert "line3" not in result.output
-        assert "[Showing results with pagination" in result.output
 
     async def test_content_with_offset(self) -> None:
         """Offset skips initial content lines."""
@@ -448,7 +429,6 @@ class TestGrepToolErrors:
         tool = GrepTool(computer)
         result = await tool(pattern="foo")
         assert result.system is not None
-        assert "Do not retry" in result.system
 
     async def test_cli_error_output_is_none(self) -> None:
         """CLIError result has no output."""

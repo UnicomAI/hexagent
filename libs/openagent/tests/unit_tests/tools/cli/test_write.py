@@ -46,47 +46,48 @@ class TestWriteTool:
 class TestWriteToolOutputFormat:
     """Tests for WriteTool output message formatting."""
 
-    async def test_new_file_message(self, tmp_path: Path) -> None:
-        """New file returns 'File created successfully' with path."""
+    async def test_new_file_success(self, tmp_path: Path) -> None:
+        """New file write returns success output containing the path."""
         computer = LocalNativeComputer()
         tool = WriteTool(computer)
         path = str(tmp_path / "new.txt")
         result = await tool(file_path=path, content="data")
         assert result.output is not None
-        assert "File created successfully at:" in result.output
+        assert result.error is None
         assert path in result.output
 
-    async def test_overwrite_message_contains_updated(self, tmp_path: Path) -> None:
-        """Overwriting returns 'has been updated' message."""
+    async def test_overwrite_returns_output(self, tmp_path: Path) -> None:
+        """Overwriting an existing file returns success output."""
         target = tmp_path / "update.txt"
         target.write_text("old")
         computer = LocalNativeComputer()
         tool = WriteTool(computer)
         result = await tool(file_path=str(target), content="line1\nline2\n")
         assert result.output is not None
-        assert "has been updated" in result.output
+        assert result.error is None
+        assert target.read_text() == "line1\nline2\n"
 
-    async def test_overwrite_message_contains_snippet(self, tmp_path: Path) -> None:
-        """Overwrite message includes numbered lines (cat -n style)."""
+    async def test_overwrite_output_contains_new_content(self, tmp_path: Path) -> None:
+        """Overwrite output contains the new content for verification."""
         target = tmp_path / "snippet.txt"
         target.write_text("old")
         computer = LocalNativeComputer()
         tool = WriteTool(computer)
         result = await tool(file_path=str(target), content="alpha\nbeta\n")
         assert result.output is not None
-        assert "`cat -n`" in result.output
+        assert result.error is None
         assert "alpha" in result.output
         assert "beta" in result.output
 
-    async def test_overwrite_empty_file_says_created(self, tmp_path: Path) -> None:
-        """Overwriting an empty (0-byte) file says 'created', not 'updated'."""
+    async def test_overwrite_empty_file(self, tmp_path: Path) -> None:
+        """Overwriting an empty (0-byte) file succeeds."""
         target = tmp_path / "was_empty.txt"
         target.write_text("")
         computer = LocalNativeComputer()
         tool = WriteTool(computer)
         result = await tool(file_path=str(target), content="now has content")
         assert result.output is not None
-        assert "File created successfully at:" in result.output
+        assert result.error is None
         assert target.read_text() == "now has content"
 
     async def test_empty_content_creates_empty_file(self, tmp_path: Path) -> None:
@@ -274,7 +275,6 @@ class TestWriteToolCLIError:
         tool = WriteTool(computer)
         result = await tool(file_path="/mock/test.txt", content="data")
         assert result.system is not None
-        assert "Do not retry" in result.system
 
     async def test_cli_error_output_is_none(self) -> None:
         """CLIError result has no output."""

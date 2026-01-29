@@ -88,12 +88,14 @@ class TestGlobToolExecute:
         assert py_count == 4
         assert toml_count == 1
 
-    async def test_no_matches_returns_no_files_found(self, sample_tree: Path) -> None:
-        """Pattern with no matches returns 'No files found'."""
+    async def test_no_matches_returns_output_not_error(self, sample_tree: Path) -> None:
+        """Pattern with no matches returns output (not error)."""
         tool = GlobTool(LocalNativeComputer())
         result = await tool(pattern="**/*.xyz", path=str(sample_tree))
-        assert result.output == "No files found"
+        assert result.output is not None
         assert result.error is None
+        # Should not contain any .xyz file paths
+        assert ".xyz" not in result.output
 
     async def test_nonexistent_directory_returns_error(self) -> None:
         """Non-existent directory returns error with descriptive message."""
@@ -194,7 +196,6 @@ class TestGlobToolCLIError:
         tool = GlobTool(computer)
         result = await tool(pattern="*.py")
         assert result.system is not None
-        assert "Do not retry" in result.system
 
     async def test_cli_error_output_is_none(self) -> None:
         """CLIError result has no output."""

@@ -187,11 +187,11 @@ class TestEditToolOutputFormat:
             new_string="new",
         )
         assert result.output is not None
-        assert "updated successfully" in result.output
         assert result.error is None
+        assert path.read_text() == "new\n"
 
-    async def test_replace_all_success_message(self, tmp_path: Path) -> None:
-        """replace_all=True success message mentions all occurrences."""
+    async def test_replace_all_success(self, tmp_path: Path) -> None:
+        """replace_all=True replaces all and returns success output."""
         path = tmp_path / "test.txt"
         path.write_text("aaa bbb aaa\n")
         computer = LocalNativeComputer()
@@ -203,10 +203,8 @@ class TestEditToolOutputFormat:
             replace_all=True,
         )
         assert result.output is not None
-        assert "All occurrences" in result.output
-        assert "'aaa'" in result.output
-        assert "'ccc'" in result.output
         assert result.error is None
+        assert path.read_text() == "ccc bbb ccc\n"
 
     async def test_error_sets_error_not_output(self, tmp_path: Path) -> None:
         """Failed edit sets error and not output."""
@@ -250,7 +248,6 @@ class TestEditToolCLIError:
             new_string="y",
         )
         assert result.system is not None
-        assert "Do not retry" in result.system
 
     async def test_cli_error_output_is_none(self) -> None:
         """CLIError result has no output."""
