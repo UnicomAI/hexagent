@@ -229,7 +229,7 @@ class ReadToolParams(BaseModel):
 
     file_path: str = Field(description="The absolute path to the file to read")
     offset: int = Field(
-        default=0,
+        default=1,
         ge=0,
         description="The line number to start reading from. Only provide if the file is too large to read at once",
     )
