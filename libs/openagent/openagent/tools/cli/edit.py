@@ -18,7 +18,7 @@ import json
 import shlex
 from typing import TYPE_CHECKING, Literal
 
-from openagent.exceptions import CLIError
+from openagent.exceptions import CLI_INFRA_ERROR_SYSTEM_REMINDER, CLIError
 from openagent.tools.base import BaseAgentTool
 from openagent.types import CLIResult, EditToolParams, ToolResult
 
@@ -202,16 +202,7 @@ class EditTool(BaseAgentTool[EditToolParams]):
                 replace_all=params.replace_all,
             )
         except CLIError as exc:
-            return ToolResult(
-                error=str(exc),
-                system=(
-                    "This error did not come from your command. Your computer's"
-                    " infrastructure has failed — this is never expected and"
-                    " indicates a problem only the human developer can fix."
-                    " Do not retry. Stop what you are doing and report this"
-                    " failure to the user."
-                ),
-            )
+            return ToolResult(error=str(exc), system=CLI_INFRA_ERROR_SYSTEM_REMINDER)
 
         if result.exit_code == 0:
             return ToolResult(output=result.stdout or "")

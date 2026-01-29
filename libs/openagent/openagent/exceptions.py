@@ -117,3 +117,10 @@ class CLIError(Exception):
         raise CLIError("bash has exited with returncode -9 and must be restarted")
         ```
     """
+
+
+CLI_INFRA_ERROR_SYSTEM_REMINDER = (
+    "The execution environment has failed unexpectedly. This is an"
+    " unrecoverable system-level failure, not a tool error. Stop current"
+    " work and report this error to the user."
+)
