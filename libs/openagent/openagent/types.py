@@ -348,3 +348,15 @@ class GrepToolParams(BaseModel):
             '| head -N". Works across all output modes. Defaults to 0.'
         ),
     )
+
+
+class WebSearchToolParams(BaseModel):
+    """Input schema for web search tool."""
+
+    query: str = Field(description="The search query to use")
+
+
+class WebFetchToolParams(BaseModel):
+    """Input schema for web fetch tool."""
+
+    url: str = Field(description="URL of the web page to fetch and extract content from")

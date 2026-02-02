@@ -7,13 +7,17 @@ computer/ for Computer implementations.
 Base class:
 - BaseAgentTool: Abstract base class for agent tools
 
-Available tools:
+CLI tools:
 - BashTool: Execute bash commands on a Computer
 - ReadTool: Read file contents with line numbers
 - WriteTool: Create or overwrite files
 - EditTool: Perform string replacements in files
 - GlobTool: Find files by pattern
 - GrepTool: Search for patterns in files
+
+Web tools:
+- WebSearchTool: Search the web for information
+- WebFetchTool: Fetch and extract content from web pages
 
 Factory functions:
 - create_bash_tool: Create the bash tool
@@ -37,6 +41,10 @@ from openagent.tools.cli import (
     create_cli_tools,
     create_filesystem_tools,
 )
+from openagent.tools.web import (
+    WebFetchTool,
+    WebSearchTool,
+)
 
 __all__ = [
     "BaseAgentTool",
@@ -45,6 +53,8 @@ __all__ = [
     "GlobTool",
     "GrepTool",
     "ReadTool",
+    "WebFetchTool",
+    "WebSearchTool",
     "WriteTool",
     "create_bash_tool",
     "create_cli_tools",

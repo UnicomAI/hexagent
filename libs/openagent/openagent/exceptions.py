@@ -88,6 +88,33 @@ class ToolError(Exception):
     """
 
 
+class ExternalServiceError(Exception):
+    """External service call failed.
+
+    Base exception for all external service failures. Use this to catch
+    any external service error regardless of the specific service type.
+
+    Subclasses:
+        WebAPIError: Web API calls (fetch, search providers)
+    """
+
+
+class WebAPIError(ExternalServiceError):
+    """Web API call failed.
+
+    Raised when a web provider (fetch or search) cannot complete
+    the request due to API errors, invalid responses, or service issues.
+
+    Examples:
+        ```python
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise WebAPIError(f"Firecrawl: {e}") from e
+        ```
+    """
+
+
 class CLIError(Exception):
     """Error raised when the computer has an infrastructure failure.
 
