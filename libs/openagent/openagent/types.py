@@ -360,3 +360,10 @@ class WebFetchToolParams(BaseModel):
     """Input schema for web fetch tool."""
 
     url: str = Field(description="URL of the web page to fetch and extract content from")
+
+
+class SkillToolParams(BaseModel):
+    """Input schema for skill tool."""
+
+    skill: str = Field(description="The skill name to invoke (e.g., 'commit', 'review-pr', 'pdf')")
+    args: str | None = Field(default=None, description="Optional arguments for the skill")

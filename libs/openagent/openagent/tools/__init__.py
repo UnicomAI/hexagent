@@ -19,6 +19,9 @@ Web tools:
 - WebSearchTool: Search the web for information
 - WebFetchTool: Fetch and extract content from web pages
 
+Skill tools:
+- SkillTool: Invoke specialized skills by name
+
 Factory functions:
 - create_bash_tool: Create the bash tool
 - create_filesystem_tools: Create file operation tools (read, write, edit, glob, grep)
@@ -41,6 +44,7 @@ from openagent.tools.cli import (
     create_cli_tools,
     create_filesystem_tools,
 )
+from openagent.tools.skill import SkillTool
 from openagent.tools.web import (
     WebFetchTool,
     WebSearchTool,
@@ -53,6 +57,7 @@ __all__ = [
     "GlobTool",
     "GrepTool",
     "ReadTool",
+    "SkillTool",
     "WebFetchTool",
     "WebSearchTool",
     "WriteTool",
