@@ -17,6 +17,11 @@ Pre-Experimental (0.0.x).
 
 Backward compatibility is not a concern. Clean architecture and code quality always win. Refactor, rename, restructure, or break APIs as needed. Don't preserve patterns just because they exist.
 
+## Instructions on Helping Human
+
+- When asked for architecture or design work, prioritize deep conceptual analysis and design philosophy BEFORE jumping to concrete code or file structures. Ask clarifying questions about constraints, trade-offs, and design principles first. Only move to implementation details when explicitly asked.
+- When discussing architecture for OpenAgent, maintain awareness that the project values: framework-agnostic design, clean patterns, and separation of concerns. Avoid coupling to specific LLM providers or frameworks (except integration dir, e.g. langchain/).
+
 ## Commands
 
 This project uses **uv** for dependency management and running Python.

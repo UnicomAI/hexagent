@@ -1,12 +1,16 @@
 """Agent middleware for wiring runtime modules to LangChain.
 
 This middleware coordinates the runtime modules (CapabilityRegistry,
-SystemPromptAssembler, ContextManager, PermissionGate, SystemReminder)
-with LangChain's agent infrastructure.
+CompactionController, PermissionGate) with LangChain's agent infrastructure.
+
+All compaction decisions are delegated to the framework-agnostic
+CompactionController. This middleware translates the returned ContextUpdate
+into LangChain-specific message operations.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Protocol
 
 from langchain.agents.middleware.types import (
@@ -17,24 +21,33 @@ from langchain.agents.middleware.types import (
     ModelRequest,
     ModelResponse,
     ToolCallRequest,
+    hook_config,
 )
-from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langgraph.types import Overwrite as LangGraphOverwrite
 
 from openagent.langchain.adapter import to_langchain_tool
 from openagent.runtime import (
     CapabilityRegistry,
-    ContextManager,
+    CompactionController,
+    CompactionPhase,
     PermissionGate,
     PermissionResult,
-    SystemPromptAssembler,
-    SystemReminder,
+)
+from openagent.runtime.context import (
+    Append,
+    ContextUpdate,
+    Overwrite,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Sequence
+    from collections.abc import Awaitable
 
     from langchain_core.tools import BaseTool
     from langgraph.runtime import Runtime
+
+# Type alias for token counter function
+TokenCounter = Callable[[Sequence[BaseMessage]], int]
 
 
 class ApprovalCallback(Protocol):
@@ -83,12 +96,15 @@ class ApprovalCallback(Protocol):
 # Average characters per token (rough estimate for English text)
 _CHARS_PER_TOKEN = 4
 
+# Minimum messages required before compaction can trigger.
+# A single summary message after compaction should not re-trigger.
+_MIN_MESSAGES_FOR_COMPACTION = 2
+
 
 def _estimate_tokens(messages: Sequence[BaseMessage]) -> int:
     """Estimate token count from messages.
 
     Uses a simple heuristic: ~4 characters per token for English text.
-    This is a rough estimate, not exact tokenization.
 
     Args:
         messages: The messages to estimate tokens for.
@@ -102,7 +118,6 @@ def _estimate_tokens(messages: Sequence[BaseMessage]) -> int:
         if isinstance(content, str):
             total_chars += len(content)
         elif isinstance(content, list):
-            # Handle content blocks (list of dicts or strings)
             for block in content:
                 if isinstance(block, str):
                     total_chars += len(block)
@@ -114,122 +129,80 @@ def _estimate_tokens(messages: Sequence[BaseMessage]) -> int:
 class AgentMiddleware(LangChainAgentMiddleware):
     """Middleware that wires runtime modules to LangChain agent hooks.
 
-    This middleware is designed for async-first usage (ainvoke, astream).
-    Sync hooks are provided only as pass-through stubs for interface compliance.
+    Delegates compaction decisions to the framework-agnostic
+    ``CompactionController`` and translates the returned ``ContextUpdate``
+    into LangChain message operations.
 
     Coordinates:
     - CapabilityRegistry: Provides tools to the agent
-    - SystemPromptAssembler: Builds system prompts from typed data
-    - ContextManager: Injects compaction prompt when token threshold exceeded
+    - CompactionController: 3-phase stateless compaction protocol
     - PermissionGate: Validates tool calls with optional human-in-the-loop
-    - SystemReminder: Injects contextual reminders into user messages
 
     Hook mapping:
     - tools property: Provides tools from CapabilityRegistry
-    - abefore_model: Injects reminders and compaction prompt
-    - awrap_model_call: Injects system prompt
+    - abefore_model: Applies CompactionController.pre_model_update()
+    - aafter_model: Applies CompactionController.post_model_transition()
+    - awrap_model_call: Injects pre-assembled system prompt
     - awrap_tool_call: Validates via PermissionGate, calls approval callback
 
     Examples:
-        Basic usage:
-        ```python
-        from openagent.langchain import AgentMiddleware
-        from openagent.runtime import (
-            CapabilityRegistry,
-            SystemPromptAssembler,
-            ContextManager,
-            PermissionGate,
-        )
+        Basic usage::
 
-        registry = CapabilityRegistry()
-        registry.register_tool(bash_tool)
-
-        middleware = AgentMiddleware(
-            registry=registry,
-            assembler=SystemPromptAssembler(),
-            context_manager=ContextManager(),
-            permission_gate=PermissionGate(),
-            base_prompt="You are a helpful assistant.",
-        )
-        ```
-
-        With reminders and approval callback:
-        ```python
-        from openagent.runtime import SystemReminder
-
-        reminder = SystemReminder()
-        reminder.add(
-            condition=lambda s: len(s["messages"]) > 10,
-            text="Consider summarizing progress so far.",
-        )
-
-
-        async def approve(name, args, prompt):
-            return input(f"Allow {name}? [y/n]: ").lower() == "y"
-
-
-        middleware = AgentMiddleware(
-            registry=registry,
-            assembler=SystemPromptAssembler(),
-            context_manager=ContextManager(),
-            permission_gate=permission_gate,
-            base_prompt="You are a helpful assistant.",
-            system_reminder=reminder,
-            environment={"platform": "darwin", "cwd": "/project"},
-            approval_callback=approve,
-        )
-        ```
+            middleware = AgentMiddleware(
+                registry=registry,
+                system_prompt="You are a helpful assistant.",
+                permission_gate=PermissionGate(),
+                compaction_prompt=library.get("compaction/request"),
+                summary_rebuild_template=library.get("compaction/summary_rebuild"),
+            )
     """
 
     def __init__(
         self,
         registry: CapabilityRegistry,
-        assembler: SystemPromptAssembler,
-        context_manager: ContextManager,
+        system_prompt: str,
         permission_gate: PermissionGate,
-        base_prompt: str,
-        user_instructions: str | None = None,
-        system_reminder: SystemReminder | None = None,
-        environment: dict[str, str] | None = None,
+        *,
+        compaction_prompt: str,
+        summary_rebuild_template: str,
+        compaction_threshold: int = 100_000,
+        count_tokens: TokenCounter | None = None,
         approval_callback: ApprovalCallback | None = None,
     ) -> None:
         """Initialize the middleware.
 
         Args:
             registry: The capability registry providing tools.
-            assembler: The system prompt assembler.
-            context_manager: The context manager for compaction decisions.
+            system_prompt: The pre-assembled system prompt.
             permission_gate: The permission gate for validating tool calls.
-            base_prompt: The base agent prompt/persona.
-            user_instructions: Optional additional user instructions.
-            system_reminder: Optional SystemReminder for injecting contextual
-                reminders into messages based on conditions.
-            environment: Optional environment context (key-value pairs) to include
-                in the system prompt.
-            approval_callback: Optional callback for human-in-the-loop approval
-                of tool calls that return NEEDS_APPROVAL.
+            compaction_prompt: Prompt for requesting conversation summaries.
+                Canonical source: ``compaction/request`` in PromptLibrary.
+            summary_rebuild_template: Template for rebuilding context after
+                compaction.  Must contain ``{summary_content}`` placeholder.
+                Canonical source: ``compaction/summary_rebuild`` in PromptLibrary.
+            compaction_threshold: Token count that triggers context compaction.
+            count_tokens: Optional function to count tokens in messages. If not
+                provided, uses character-based estimation (~4 chars/token).
+            approval_callback: Optional callback for human-in-the-loop approval.
         """
         self._registry = registry
-        self._assembler = assembler
-        self._context_manager = context_manager
+        self._system_prompt = system_prompt
         self._permission_gate = permission_gate
-        self._base_prompt = base_prompt
-        self._user_instructions = user_instructions
-        self._system_reminder = system_reminder
-        self._environment = environment
         self._approval_callback = approval_callback
+        self._count_tokens = count_tokens or _estimate_tokens
+        self._summary_rebuild_template = summary_rebuild_template
+
+        self._compaction = CompactionController(
+            compaction_prompt,
+            threshold=compaction_threshold,
+        )
 
         # Cache for converted LangChain tools
         self._tools_cache: list[BaseTool] | None = None
 
-        # Track if compaction prompt was injected this session
-        self._compaction_injected = False
-
     @property
     def tools(self) -> Sequence[BaseTool]:  # type: ignore[override]
         """Get tools from the registry as LangChain tools.
-
-        Tools are converted lazily and cached.
 
         Returns:
             Sequence of LangChain BaseTool instances.
@@ -238,41 +211,6 @@ class AgentMiddleware(LangChainAgentMiddleware):
             self._tools_cache = [to_langchain_tool(tool) for tool in self._registry.get_tools()]
         return self._tools_cache
 
-    def _build_system_prompt(self, existing_prompt: str | None) -> str:
-        """Build the complete system prompt.
-
-        Args:
-            existing_prompt: Any existing system prompt from the request.
-
-        Returns:
-            The assembled system prompt.
-        """
-        assembled = self._assembler.assemble(
-            base=self._base_prompt,
-            tools=self._registry.get_tools(),
-            skills=self._registry.get_skills(),
-            mcps=self._registry.get_mcps(),
-            environment=self._environment,
-            user_instructions=self._user_instructions,
-        )
-
-        # Prepend any existing prompt from the request
-        if existing_prompt:
-            return f"{existing_prompt}\n\n{assembled}"
-        return assembled
-
-    def _check_compaction(self, messages: Sequence[BaseMessage]) -> bool:
-        """Check if context compaction is needed.
-
-        Args:
-            messages: The current message history.
-
-        Returns:
-            True if compaction threshold is exceeded.
-        """
-        token_estimate = _estimate_tokens(messages)
-        return self._context_manager.needs_compaction(token_estimate)
-
     # --- Async hooks (primary implementations) ---
 
     async def abefore_model(
@@ -280,62 +218,67 @@ class AgentMiddleware(LangChainAgentMiddleware):
         state: AgentState,
         _runtime: Runtime[Any] | None = None,
     ) -> dict[str, Any] | None:
-        """Inject reminders and compaction prompt before model call.
+        """Apply compaction updates before model call.
 
-        This hook runs before each LLM call and can modify the message
-        history. It handles:
-
-        1. Compaction prompt injection: When token count exceeds threshold,
-           injects a message asking the agent to summarize (once per session).
-
-        2. Reminder injection: If SystemReminder is configured, checks
-           conditions and augments the last user message with triggered
-           reminders.
+        Delegates to ``CompactionController.pre_model_update()`` and
+        translates the returned ``ContextUpdate`` into LangChain message
+        operations.
 
         Args:
             state: The current agent state containing messages.
-            runtime: The LangGraph runtime context.
+            _runtime: The LangGraph runtime context.
 
         Returns:
-            State updates dict with modified messages, or None if no changes.
+            State updates dict, or None if no changes.
         """
-        messages = list(state["messages"])
-        modified = False
+        phase = CompactionPhase(state.get("compaction_phase", CompactionPhase.NONE))
+        update, new_phase = self._compaction.pre_model_update(phase)
 
-        # 1. Check compaction and inject prompt if needed (once per session)
-        if not self._compaction_injected and self._check_compaction(messages):
-            self._compaction_injected = True
-            compaction_msg = HumanMessage(
-                content=self._context_manager.compaction_prompt,
-            )
-            messages.append(compaction_msg)
-            modified = True
+        if update is not None:
+            return self._apply_context_update(state["messages"], update, new_phase)
 
-        # 2. Inject reminders if configured
-        if self._system_reminder is not None:
-            # Find the last HumanMessage to augment
-            for i in range(len(messages) - 1, -1, -1):
-                msg = messages[i]
-                if isinstance(msg, HumanMessage):
-                    content = msg.content
-                    if isinstance(content, str):
-                        augmented = self._system_reminder.inject(content, state)
-                        if augmented != content:
-                            messages[i] = HumanMessage(
-                                content=augmented,
-                                id=getattr(msg, "id", None),
-                            )
-                            modified = True
-                    break
+        return None
 
-        return {"messages": messages} if modified else None
+    @hook_config(can_jump_to=["model"])
+    async def aafter_model(
+        self,
+        state: AgentState,
+        _runtime: Runtime[Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Check for compaction after model response.
+
+        Delegates to ``CompactionController.post_model_transition()`` and
+        returns phase transition with jump-to-model if needed.
+
+        Args:
+            state: The current agent state with messages.
+            _runtime: The LangGraph runtime context.
+
+        Returns:
+            State updates dict with phase transition and jump, or None.
+        """
+        messages = state["messages"]
+        phase = CompactionPhase(state.get("compaction_phase", CompactionPhase.NONE))
+
+        # Need at least 2 messages to compact; a single summary message
+        # after compaction should not re-trigger the cycle.
+        if phase == CompactionPhase.NONE and len(messages) < _MIN_MESSAGES_FOR_COMPACTION:
+            return None
+
+        token_count = self._count_tokens(messages)
+        should_rerun, new_phase = self._compaction.post_model_transition(token_count, phase)
+
+        if should_rerun:
+            return {"compaction_phase": new_phase, "jump_to": "model"}
+
+        return None
 
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        """Inject system prompt before model call.
+        """Inject pre-assembled system prompt before model call.
 
         Args:
             request: The model request being processed.
@@ -344,8 +287,7 @@ class AgentMiddleware(LangChainAgentMiddleware):
         Returns:
             The model response from the handler.
         """
-        system_prompt = self._build_system_prompt(request.system_prompt)
-        updated_request = request.override(system_prompt=system_prompt)  # type: ignore[call-arg]
+        updated_request = request.override(system_prompt=self._system_prompt)  # type: ignore[call-arg]
         return await handler(updated_request)
 
     async def awrap_tool_call(  # type: ignore[override]
@@ -365,7 +307,6 @@ class AgentMiddleware(LangChainAgentMiddleware):
         tool_name = request.tool_call["name"]
         tool_args = request.tool_call.get("args", {})
 
-        # Check permission
         decision = await self._permission_gate.check(tool_name, tool_args)
 
         if decision.result == PermissionResult.DENIED:
@@ -373,13 +314,11 @@ class AgentMiddleware(LangChainAgentMiddleware):
 
         if decision.result == PermissionResult.NEEDS_APPROVAL:
             if self._approval_callback is None:
-                # No callback provided, treat as denied
                 return self._create_denied_response(
                     request,
                     f"Action requires approval: {decision.approval_prompt or 'No details provided'}",
                 )
 
-            # Request approval via callback
             approved = await self._approval_callback(
                 tool_name,
                 tool_args,
@@ -389,8 +328,84 @@ class AgentMiddleware(LangChainAgentMiddleware):
             if not approved:
                 return self._create_denied_response(request, "Action denied by user")
 
-        # Permission granted (or approved), proceed with execution
         return await handler(request)
+
+    # --- Private helpers ---
+
+    def _apply_context_update(
+        self,
+        messages: Sequence[BaseMessage],
+        update: ContextUpdate,
+        new_phase: CompactionPhase,
+    ) -> dict[str, Any]:
+        """Translate a ContextUpdate into LangChain state updates.
+
+        Args:
+            messages: The current message history.
+            update: The context update to apply.
+            new_phase: The new compaction phase after this update.
+
+        Returns:
+            State updates dict with modified messages and phase.
+        """
+        if isinstance(update, Overwrite):
+            rebuilt = self._rebuild_with_summary(messages)
+            return {
+                "messages": LangGraphOverwrite(rebuilt),
+                "compaction_phase": new_phase,
+            }
+
+        if isinstance(update, Append):
+            msgs = list(messages)
+            msg_cls = HumanMessage if update.role == "user" else AIMessage
+            msgs.append(msg_cls(content=update.content))
+            return {"messages": msgs}
+
+        # Inject
+        msgs = list(messages)
+        last = msgs[-1]
+        if isinstance(last.content, str):
+            content = last.content
+        elif isinstance(last.content, list):
+            content = "".join(block if isinstance(block, str) else block.get("text", "") for block in last.content if isinstance(block, (str, dict)))
+        else:
+            content = str(last.content)
+        new_content = f"{update.content}\n\n{content}" if update.position == "prepend" else f"{content}\n\n{update.content}"
+        kwargs: dict[str, Any] = {"content": new_content}
+        if last.id is not None:
+            kwargs["id"] = last.id
+        if isinstance(last, ToolMessage):
+            kwargs["tool_call_id"] = last.tool_call_id
+        msgs[-1] = last.__class__(**kwargs)
+        return {"messages": msgs}
+
+    def _rebuild_with_summary(
+        self,
+        messages: Sequence[BaseMessage],
+    ) -> list[BaseMessage]:
+        """Extract summary from last AIMessage and rebuild message history.
+
+        Args:
+            messages: Current message history including summary response.
+
+        Returns:
+            Rebuilt message list with summary as initial context.
+        """
+        summary_content = ""
+        for msg in reversed(messages):
+            if isinstance(msg, AIMessage):
+                content = msg.content
+                if isinstance(content, str):
+                    summary_content = content
+                elif isinstance(content, list):
+                    summary_content = "".join(
+                        block if isinstance(block, str) else block.get("text", "") for block in content if isinstance(block, (str, dict))
+                    )
+                break
+
+        return [
+            HumanMessage(content=self._summary_rebuild_template.format(summary_content=summary_content)),
+        ]
 
     def _create_denied_response(
         self,
@@ -404,56 +419,51 @@ class AgentMiddleware(LangChainAgentMiddleware):
             tool_call_id=request.tool_call.get("id", ""),
         )
 
-    # --- Sync hooks (stubs for interface compliance) ---
+    # --- Sync hooks (for interface compliance) ---
 
     def before_model(
         self,
         state: AgentState,
         _runtime: Runtime[Any] | None = None,
     ) -> dict[str, Any] | None:
-        """Sync version of abefore_model.
+        """Sync version of abefore_model."""
+        phase = CompactionPhase(state.get("compaction_phase", CompactionPhase.NONE))
+        update, new_phase = self._compaction.pre_model_update(phase)
 
-        Implements the same logic as abefore_model for sync invocation.
-        Note: This is provided for sync API compatibility, but async API
-        is preferred for full functionality.
-        """
-        messages = list(state["messages"])
-        modified = False
+        if update is not None:
+            return self._apply_context_update(state["messages"], update, new_phase)
 
-        # Check compaction and inject prompt if needed (once per session)
-        if not self._compaction_injected and self._check_compaction(messages):
-            self._compaction_injected = True
-            compaction_msg = HumanMessage(
-                content=self._context_manager.compaction_prompt,
-            )
-            messages.append(compaction_msg)
-            modified = True
+        return None
 
-        # Inject reminders if configured
-        if self._system_reminder is not None:
-            for i in range(len(messages) - 1, -1, -1):
-                msg = messages[i]
-                if isinstance(msg, HumanMessage):
-                    content = msg.content
-                    if isinstance(content, str):
-                        augmented = self._system_reminder.inject(content, state)
-                        if augmented != content:
-                            messages[i] = HumanMessage(
-                                content=augmented,
-                                id=getattr(msg, "id", None),
-                            )
-                            modified = True
-                    break
+    @hook_config(can_jump_to=["model"])
+    def after_model(
+        self,
+        state: AgentState,
+        _runtime: Runtime[Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Sync version of aafter_model."""
+        messages = state["messages"]
+        phase = CompactionPhase(state.get("compaction_phase", CompactionPhase.NONE))
 
-        return {"messages": messages} if modified else None
+        if phase == CompactionPhase.NONE and len(messages) < _MIN_MESSAGES_FOR_COMPACTION:
+            return None
+
+        token_count = self._count_tokens(messages)
+        should_rerun, new_phase = self._compaction.post_model_transition(token_count, phase)
+
+        if should_rerun:
+            return {"compaction_phase": new_phase, "jump_to": "model"}
+
+        return None
 
     def wrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelResponse:
-        """Sync stub. Use awrap_model_call for full functionality."""
-        return handler(request)
+        """Inject pre-assembled system prompt before model call (sync)."""
+        updated_request = request.override(system_prompt=self._system_prompt)  # type: ignore[call-arg]
+        return handler(updated_request)
 
     def wrap_tool_call(  # type: ignore[override]
         self,

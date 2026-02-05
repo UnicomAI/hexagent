@@ -38,7 +38,7 @@ class SkillTool(BaseAgentTool[SkillToolParams]):
     """
 
     name: str = "skill"
-    description: str = "Execute a skill by name with optional arguments"
+    description: str = "Execute a skill by name with optional arguments."
     args_schema = SkillToolParams
 
     def __init__(self, registered_skills: AbstractSet[str] | None = None) -> None:

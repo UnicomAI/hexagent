@@ -149,7 +149,7 @@ class GrepTool(BaseAgentTool[GrepToolParams]):
     """
 
     name: Literal["grep"] = "grep"
-    description: str = "A powerful search tool built on ripgrep."
+    description: str = "Search file contents using ripgrep."
     args_schema = GrepToolParams
 
     def __init__(self, computer: Computer) -> None:

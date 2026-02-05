@@ -1,0 +1,3 @@
+## Skills
+
+{skill_list}

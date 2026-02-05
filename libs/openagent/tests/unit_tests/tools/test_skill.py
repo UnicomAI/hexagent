@@ -16,7 +16,7 @@ class TestSkillTool:
     def test_description(self) -> None:
         """SkillTool has a description."""
         tool = SkillTool()
-        assert tool.description
+        assert tool.description != ""
 
     async def test_execute_registered_skill(self) -> None:
         """Execute with registered skill name."""

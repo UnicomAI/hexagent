@@ -8,25 +8,32 @@ like humans do.
 """
 
 from openagent.langchain import create_agent
+from openagent.prompts import PromptLibrary, SystemPromptAssembler
 from openagent.runtime import (
+    Append,
     CapabilityRegistry,
-    ContextManager,
+    CompactionController,
+    CompactionPhase,
+    Inject,
+    Overwrite,
     PermissionDecision,
     PermissionGate,
     PermissionResult,
     SafetyRule,
-    SystemPromptAssembler,
-    SystemReminder,
 )
 
 __all__ = [
+    "Append",
     "CapabilityRegistry",
-    "ContextManager",
+    "CompactionController",
+    "CompactionPhase",
+    "Inject",
+    "Overwrite",
     "PermissionDecision",
     "PermissionGate",
     "PermissionResult",
+    "PromptLibrary",
     "SafetyRule",
     "SystemPromptAssembler",
-    "SystemReminder",
     "create_agent",
 ]

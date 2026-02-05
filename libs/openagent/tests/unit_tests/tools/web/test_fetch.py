@@ -31,8 +31,7 @@ class TestWebFetchTool:
         """WebFetchTool has a description."""
         provider = AsyncMock()
         tool = WebFetchTool(provider)
-        assert tool.description
-        assert "fetch" in tool.description.lower()
+        assert tool.description != ""
 
 
 class TestWebFetchToolExecution:

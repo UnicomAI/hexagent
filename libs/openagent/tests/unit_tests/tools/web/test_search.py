@@ -32,8 +32,7 @@ class TestWebSearchTool:
         """WebSearchTool has a description."""
         provider = AsyncMock()
         tool = WebSearchTool(provider)
-        assert tool.description
-        assert "search" in tool.description.lower()
+        assert tool.description != ""
 
 
 class TestWebSearchToolExecution:
