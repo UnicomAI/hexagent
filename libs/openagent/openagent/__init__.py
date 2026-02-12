@@ -7,7 +7,6 @@ Core Philosophy: Give agents a CLI-based computer, allowing them to work
 like humans do.
 """
 
-from openagent.config import AgentConfig, CompactionConfig, SkillsConfig
 from openagent.harness import (
     PermissionDecision,
     PermissionGate,
@@ -16,6 +15,7 @@ from openagent.harness import (
     SafetyRule,
     SkillResolver,
 )
+from openagent.harness.model import ModelProfile
 from openagent.langchain import create_agent
 from openagent.prompts import (
     FRESH_SESSION,
@@ -27,11 +27,10 @@ from openagent.types import AgentContext, CompactionPhase, GitContext, SkillCata
 __all__ = [
     "FRESH_SESSION",
     "RESUMED_SESSION",
-    "AgentConfig",
     "AgentContext",
-    "CompactionConfig",
     "CompactionPhase",
     "GitContext",
+    "ModelProfile",
     "PermissionDecision",
     "PermissionGate",
     "PermissionResult",
@@ -39,7 +38,6 @@ __all__ = [
     "SafetyRule",
     "SkillCatalog",
     "SkillResolver",
-    "SkillsConfig",
     "compose",
     "create_agent",
 ]

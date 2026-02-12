@@ -6,6 +6,7 @@ This package contains modules that augment the agent loop:
 - System reminder rules for dynamic message annotation
 """
 
+from openagent.harness.model import ModelProfile
 from openagent.harness.permission import (
     PermissionDecision,
     PermissionGate,
@@ -19,11 +20,13 @@ from openagent.harness.reminders import (
     evaluate_reminders,
     initial_available_skills,
 )
-from openagent.harness.skills import SkillResolver
+from openagent.harness.skills import DEFAULT_SKILL_PATHS, SkillResolver
 
 __all__ = [
     "BUILTIN_REMINDERS",
+    "DEFAULT_SKILL_PATHS",
     "REMINDER_TAG",
+    "ModelProfile",
     "PermissionDecision",
     "PermissionGate",
     "PermissionResult",

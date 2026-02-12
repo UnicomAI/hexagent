@@ -17,6 +17,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SKILL_PATHS: tuple[str, ...] = (
+    "/mnt/skills",
+    "~/.openagent/skills",
+    ".openagent/skills",
+)
+
 _SKILL_FILENAME = "SKILL.md"
 _SKILL_DELIMITER = "===SKILL_FILE==="
 

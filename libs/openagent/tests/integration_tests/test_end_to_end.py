@@ -8,16 +8,35 @@ from langchain_core.language_models import LanguageModelInput
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import Runnable
-from langchain_core.tools import BaseTool, tool
+from langchain_core.tools import BaseTool
+from pydantic import BaseModel, Field
 
 from openagent.computer import LocalNativeComputer
 from openagent.langchain import create_agent
+from openagent.tools.base import BaseAgentTool
+from openagent.types import ToolResult
 
 
-@tool(description="Sample tool")
-def sample_tool(sample_input: str) -> str:
+class SampleToolParams(BaseModel):
+    """Input schema for the sample tool."""
+
+    sample_input: str = Field(description="Sample input string")
+
+
+class SampleTool(BaseAgentTool[SampleToolParams]):
     """A sample tool that returns the input string."""
-    return sample_input
+
+    name: str = "sample_tool"
+    description: str = "Sample tool"
+    instruction: str = "A sample tool that echoes back its input."
+    args_schema = SampleToolParams
+
+    async def execute(self, params: SampleToolParams) -> ToolResult:
+        """Execute the sample tool."""
+        return ToolResult(output=params.sample_input)
+
+
+sample_tool = SampleTool()
 
 
 class FixedGenericFakeChatModel(GenericFakeChatModel):

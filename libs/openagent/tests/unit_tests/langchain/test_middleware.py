@@ -26,7 +26,6 @@ from openagent.langchain.middleware import (
     OpenAgentState,
     _create_denied_response,
     _detect_skill_call,
-    _estimate_tokens,
     _extract_summary,
     _extract_text_content,
 )
@@ -34,6 +33,8 @@ from openagent.types import AgentContext, CompactionPhase, Skill
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    import pytest
 
 from ..conftest import core_tools
 
@@ -54,7 +55,7 @@ def _make_middleware(
     gate: PermissionGate | None = None,
     skill_resolver: Any = None,
     reminders: Sequence[Reminder] = (),
-    count_tokens: Any = None,
+    using_default_threshold: bool = False,
     approval_callback: Any = None,
     compaction_threshold: int = 100_000,
 ) -> AgentMiddleware:
@@ -64,7 +65,7 @@ def _make_middleware(
         permission_gate=gate or PermissionGate(),
         compaction_prompt=COMPACTION_PROMPT,
         compaction_threshold=compaction_threshold,
-        count_tokens=count_tokens,
+        using_default_threshold=using_default_threshold,
         approval_callback=approval_callback,
         skill_resolver=skill_resolver,
         reminders=reminders,
@@ -82,19 +83,6 @@ def _state(
 # ---------------------------------------------------------------------------
 # Pure helper tests
 # ---------------------------------------------------------------------------
-
-
-class TestEstimateTokens:
-    def test_string_content(self) -> None:
-        msgs = [HumanMessage(content="a" * 100)]
-        assert _estimate_tokens(msgs) == 25  # 100 / 4
-
-    def test_list_content_with_text_blocks(self) -> None:
-        msgs = [HumanMessage(content=[{"type": "text", "text": "a" * 80}])]
-        assert _estimate_tokens(msgs) == 20
-
-    def test_empty_messages(self) -> None:
-        assert _estimate_tokens([]) == 0
 
 
 class TestExtractTextContent:
@@ -236,17 +224,22 @@ class TestCompactionIntercept:
 # ---------------------------------------------------------------------------
 
 
+def _ai_with_usage(content: str, total_tokens: int) -> AIMessage:
+    """Create an AIMessage with usage_metadata for compaction tests."""
+    return AIMessage(
+        content=content,
+        usage_metadata={"input_tokens": total_tokens - 100, "output_tokens": 100, "total_tokens": total_tokens},
+    )
+
+
 class TestCompactionTrigger:
     async def test_triggers_when_tokens_exceed_threshold(self) -> None:
-        def high_count(_messages: Sequence[BaseMessage]) -> int:
-            return 200_000
-
-        mw = _make_middleware(count_tokens=high_count, compaction_threshold=100_000)
+        mw = _make_middleware(compaction_threshold=100_000)
         state = _state(
             [
                 SystemMessage(content=SYSTEM_PROMPT),
                 HumanMessage(content="Hello"),
-                AIMessage(content="Response"),
+                _ai_with_usage("Response", total_tokens=200_000),
             ]
         )
         result = await mw.aafter_model(state)
@@ -254,26 +247,32 @@ class TestCompactionTrigger:
         assert result["compaction_phase"] == CompactionPhase.REQUESTING
 
     async def test_does_not_trigger_below_threshold(self) -> None:
-        def low_count(_messages: Sequence[BaseMessage]) -> int:
-            return 100
-
-        mw = _make_middleware(count_tokens=low_count, compaction_threshold=100_000)
+        mw = _make_middleware(compaction_threshold=100_000)
         state = _state(
             [
                 SystemMessage(content=SYSTEM_PROMPT),
                 HumanMessage(content="Hello"),
-                AIMessage(content="Response"),
+                _ai_with_usage("Response", total_tokens=100),
             ]
         )
         result = await mw.aafter_model(state)
         assert result is None
 
     async def test_does_not_trigger_with_too_few_messages(self) -> None:
-        def high_count(_messages: Sequence[BaseMessage]) -> int:
-            return 200_000
-
-        mw = _make_middleware(count_tokens=high_count, compaction_threshold=100_000)
+        mw = _make_middleware(compaction_threshold=100_000)
         state = _state([HumanMessage(content="short")])  # only 1 message
+        result = await mw.aafter_model(state)
+        assert result is None
+
+    async def test_does_not_trigger_without_usage_metadata(self) -> None:
+        mw = _make_middleware(compaction_threshold=100_000)
+        state = _state(
+            [
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content="Hello"),
+                AIMessage(content="Response"),  # no usage_metadata
+            ]
+        )
         result = await mw.aafter_model(state)
         assert result is None
 
@@ -286,6 +285,23 @@ class TestCompactionTrigger:
         result = await mw.aafter_model(state)
         assert result is not None
         assert result["compaction_phase"] == CompactionPhase.APPLYING
+
+    async def test_logs_warning_on_default_threshold(self, caplog: pytest.LogCaptureFixture) -> None:
+        mw = _make_middleware(
+            compaction_threshold=100_000,
+            using_default_threshold=True,
+        )
+        state = _state(
+            [
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content="Hello"),
+                _ai_with_usage("Response", total_tokens=200_000),
+            ]
+        )
+        with caplog.at_level("WARNING", logger="openagent.langchain.middleware"):
+            result = await mw.aafter_model(state)
+        assert result is not None
+        assert "fallback threshold" in caplog.text
 
 
 # ---------------------------------------------------------------------------

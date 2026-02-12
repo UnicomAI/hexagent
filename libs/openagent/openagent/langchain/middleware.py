@@ -9,7 +9,7 @@ pre-model pipeline runs: intercepts -> appenders -> annotators.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import logging
 from typing import TYPE_CHECKING, Any, NotRequired, Protocol
 
 from langchain.agents.middleware.types import (
@@ -31,13 +31,13 @@ from langchain_core.messages import (
 from langgraph.types import Command
 from langgraph.types import Overwrite as LangGraphOverwrite
 
-from openagent.config import DEFAULT_COMPACTION_THRESHOLD
 from openagent.harness import PermissionGate, PermissionResult, Reminder, evaluate_reminders
+from openagent.harness.model import _FALLBACK_COMPACTION_THRESHOLD
 from openagent.langchain.adapter import to_langchain_tool
 from openagent.types import AgentContext, CompactionPhase
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable
+    from collections.abc import Awaitable, Callable, Sequence
 
     from langchain_core.tools import BaseTool
     from langgraph.runtime import Runtime
@@ -46,8 +46,7 @@ if TYPE_CHECKING:
     from openagent.tools.base import BaseAgentTool
     from openagent.types import MCPServer, Skill
 
-# Type alias for token counter function
-TokenCounter = Callable[[Sequence[BaseMessage]], int]
+logger = logging.getLogger(__name__)
 
 
 class ApprovalCallback(Protocol):
@@ -84,28 +83,9 @@ class ApprovalCallback(Protocol):
         ...
 
 
-# Average characters per token (rough estimate for English text)
-_CHARS_PER_TOKEN = 4
-
 # Minimum messages required before compaction can trigger.
 # A single summary message after compaction should not re-trigger.
 _MIN_MESSAGES_FOR_COMPACTION = 2
-
-
-def _estimate_tokens(messages: Sequence[BaseMessage]) -> int:
-    """Estimate token count from messages (~4 chars/token heuristic)."""
-    total_chars = 0
-    for msg in messages:
-        content = msg.content
-        if isinstance(content, str):
-            total_chars += len(content)
-        elif isinstance(content, list):
-            for block in content:
-                if isinstance(block, str):
-                    total_chars += len(block)
-                elif isinstance(block, dict) and "text" in block:
-                    total_chars += len(str(block["text"]))
-    return total_chars // _CHARS_PER_TOKEN
 
 
 def _extract_text_content(content: str | list[Any]) -> str:
@@ -219,8 +199,8 @@ class AgentMiddleware(LangChainAgentMiddleware):
         mcps: Sequence[MCPServer] = (),
         permission_gate: PermissionGate,
         compaction_prompt: str,
-        compaction_threshold: int = DEFAULT_COMPACTION_THRESHOLD,
-        count_tokens: TokenCounter | None = None,
+        compaction_threshold: int = _FALLBACK_COMPACTION_THRESHOLD,
+        using_default_threshold: bool = False,
         approval_callback: ApprovalCallback | None = None,
         skill_resolver: SkillResolver | None = None,
         reminders: Sequence[Reminder] = (),
@@ -236,7 +216,8 @@ class AgentMiddleware(LangChainAgentMiddleware):
             permission_gate: Gate for validating tool calls.
             compaction_prompt: Prompt for requesting conversation summaries.
             compaction_threshold: Token count that triggers compaction.
-            count_tokens: Optional token counter. Defaults to char-based estimate.
+            using_default_threshold: True when using the fallback threshold
+                (no ModelProfile provided). Enables a warning log on trigger.
             approval_callback: Optional callback for human-in-the-loop approval.
             skill_resolver: Optional resolver for injecting skill content.
             reminders: Reminder rules for dynamic system-reminder injection.
@@ -250,7 +231,7 @@ class AgentMiddleware(LangChainAgentMiddleware):
         self._permission_gate = permission_gate
         self._compaction_prompt = compaction_prompt
         self._compaction_threshold = compaction_threshold
-        self._count_tokens: TokenCounter = count_tokens or _estimate_tokens
+        self._using_default_threshold = using_default_threshold
         self._approval_callback = approval_callback
         self._skill_resolver = skill_resolver
         self._reminders = list(reminders)
@@ -263,6 +244,20 @@ class AgentMiddleware(LangChainAgentMiddleware):
         if self._tools_cache is None:
             self._tools_cache = [to_langchain_tool(tool) for tool in self._tools]
         return self._tools_cache
+
+    @staticmethod
+    def _get_total_tokens(messages: Sequence[BaseMessage]) -> int | None:
+        """Extract total_tokens from the last AIMessage's usage_metadata.
+
+        Returns None if unavailable (e.g. fake models in tests).
+        """
+        for msg in reversed(messages):
+            if isinstance(msg, AIMessage):
+                metadata = msg.usage_metadata
+                if metadata is not None:
+                    return metadata["total_tokens"]
+                return None
+        return None
 
     # --- Async hooks (primary implementations) ---
 
@@ -355,8 +350,15 @@ class AgentMiddleware(LangChainAgentMiddleware):
 
         # Trigger compaction if threshold exceeded
         if phase == CompactionPhase.NONE and len(messages) >= _MIN_MESSAGES_FOR_COMPACTION:
-            token_count = self._count_tokens(messages)
-            if token_count >= self._compaction_threshold:
+            token_count = self._get_total_tokens(messages)
+            if token_count is not None and token_count >= self._compaction_threshold:
+                if self._using_default_threshold:
+                    logger.warning(
+                        "Compaction triggered at %d tokens using fallback threshold %d. "
+                        "Pass a ModelProfile to create_agent for model-aware compaction.",
+                        token_count,
+                        self._compaction_threshold,
+                    )
                 return {"compaction_phase": CompactionPhase.REQUESTING, "jump_to": "model"}
 
         # Advance state machine: LLM just generated the summary

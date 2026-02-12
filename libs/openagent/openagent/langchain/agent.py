@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING, Any
 from langchain.agents import create_agent as _create_langchain_agent
 from langchain.chat_models import init_chat_model
 
-from openagent.config import AgentConfig
-from openagent.harness import BUILTIN_REMINDERS, PermissionGate, SkillResolver
+from openagent.harness import BUILTIN_REMINDERS, DEFAULT_SKILL_PATHS, PermissionGate, SkillResolver
+from openagent.harness.model import _FALLBACK_COMPACTION_THRESHOLD, ModelProfile
 from openagent.langchain.middleware import AgentMiddleware
 from openagent.prompts import FRESH_SESSION, RESUMED_SESSION, compose, load, substitute
 from openagent.tools import SkillTool, WebFetchTool, WebSearchTool, create_cli_tools
@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 
     from langchain_core.language_models import BaseChatModel
     from langchain_core.messages import BaseMessage
-    from langchain_core.tools import BaseTool
     from langgraph.graph.state import CompiledStateGraph
     from langgraph.store.base import BaseStore
     from langgraph.types import Checkpointer
@@ -37,13 +36,13 @@ if TYPE_CHECKING:
 
 
 async def create_agent(
-    model: str | BaseChatModel,
+    model: str | BaseChatModel | ModelProfile,
     computer: Computer,
     *,
-    config: AgentConfig | None = None,
+    skill_paths: Sequence[str] = DEFAULT_SKILL_PATHS,
     search_provider: SearchProvider | None = None,
     fetch_provider: FetchProvider | None = None,
-    extra_tools: Sequence[BaseTool | Callable[..., Any] | dict[str, Any]] | None = None,
+    extra_tools: Sequence[BaseAgentTool[Any]] | None = None,
     checkpointer: Checkpointer | None = None,
     store: BaseStore | None = None,
     reminders: Sequence[Reminder] = BUILTIN_REMINDERS,
@@ -59,13 +58,17 @@ async def create_agent(
 
     Args:
         model: The model to use, e.g. ``"openai:gpt-5.2"``.
-            Accepts a LangChain ``init_chat_model`` specifier or a
-            pre-configured ``BaseChatModel`` instance.
+            Accepts a LangChain ``init_chat_model`` specifier, a
+            pre-configured ``BaseChatModel`` instance, or a
+            ``ModelProfile`` for context-window-aware compaction.
         computer: The Computer instance that CLI tools execute against.
-        config: Agent configuration. Defaults to ``AgentConfig()``.
+        skill_paths: Directories to scan for skill folders.
+            Defaults to ``DEFAULT_SKILL_PATHS``. Pass ``()`` to disable.
         search_provider: Web search provider.
         fetch_provider: Web fetch provider.
-        extra_tools: Additional tools beyond the built-in set.
+        extra_tools: Additional ``BaseAgentTool`` instances beyond the
+            built-in set. Merged with default tools and fully visible in
+            the system prompt, ``AgentContext``, and compaction rebuild.
         checkpointer: LangGraph checkpointer for conversation persistence.
         store: LangGraph store for cross-thread memory.
         reminders: Reminder rules for dynamic system-reminder injection.
@@ -82,36 +85,38 @@ async def create_agent(
             agent = await create_agent("openai:gpt-5.2", LocalNativeComputer())
             result = await agent.ainvoke({"messages": [...]})
 
-        With a pre-configured model and skills::
+        With model-aware compaction::
 
-            config = AgentConfig(
-                skills=SkillsConfig(search_paths=("/mnt/skills",)),
-            )
-            agent = await create_agent(model, computer, config=config)
+            profile = ModelProfile(model="openai:gpt-5.2", context_window=128_000)
+            agent = await create_agent(profile, computer)
+
+        With skills::
+
+            agent = await create_agent(model, computer, skill_paths=("/mnt/skills",))
     """
-    config = config or AgentConfig()
-
     # Initialize model
-    resolved_model = _resolve_model(model)
+    resolved_model, compaction_threshold, using_default_threshold = _resolve_model_config(model)
 
-    # Build default tools
-    default_tools: list[BaseAgentTool[Any]] = list(create_cli_tools(computer))
+    # Build tools
+    tools: list[BaseAgentTool[Any]] = list(create_cli_tools(computer))
     if search_provider is not None:
-        default_tools.append(WebSearchTool(search_provider))
+        tools.append(WebSearchTool(search_provider))
     if fetch_provider is not None:
-        default_tools.append(WebFetchTool(fetch_provider))
+        tools.append(WebFetchTool(fetch_provider))
+    if extra_tools is not None:
+        tools.extend(extra_tools)
 
     # Discover skills
     resolver: SkillResolver | None = None
     skills: list[Skill] = []
-    if config.skills.search_paths:
-        resolver = SkillResolver(computer, config.skills.search_paths)
+    if skill_paths:
+        resolver = SkillResolver(computer, list(skill_paths))
         skills = await resolver.discover()
-        default_tools.append(SkillTool(catalog=resolver))
+        tools.append(SkillTool(catalog=resolver))
 
     # Assemble initial system prompt
     ctx = AgentContext(
-        tools=default_tools,
+        tools=tools,
         skills=skills,
         mcps=[],
     )
@@ -120,18 +125,19 @@ async def create_agent(
     # Create rebuild callback for compaction
     rebuild = _make_rebuild_callback(
         resolver=resolver,
-        tools=default_tools,
+        tools=tools,
         summary_template=load("user_prompt_compaction_summary_rebuild"),
     )
 
     # Create middleware (THE runtime)
     middleware = AgentMiddleware(
-        tools=default_tools,
+        tools=tools,
         system_prompt=assembled_prompt,
         skills=skills,
         permission_gate=PermissionGate(),
         compaction_prompt=load("user_prompt_compaction_request"),
-        compaction_threshold=config.compaction.threshold,
+        compaction_threshold=compaction_threshold,
+        using_default_threshold=using_default_threshold,
         skill_resolver=resolver,
         reminders=list(reminders),
         rebuild_callback=rebuild,
@@ -139,20 +145,31 @@ async def create_agent(
 
     # NOTE: system_prompt=None — we manage the SystemMessage in state["messages"]
     # via the middleware's first-turn injection and compaction rebuild.
+    # All tools are provided by the middleware (via its .tools property).
     return _create_langchain_agent(
         resolved_model,
-        tools=extra_tools,
         middleware=[middleware],
         checkpointer=checkpointer,
         store=store,
     ).with_config({"recursion_limit": 1000})
 
 
-def _resolve_model(model: str | BaseChatModel) -> BaseChatModel:
-    """Resolve model argument to a BaseChatModel instance."""
-    if isinstance(model, str):
-        return init_chat_model(model)
-    return model
+def _resolve_model_config(
+    model: str | BaseChatModel | ModelProfile,
+) -> tuple[BaseChatModel, int, bool]:
+    """Resolve model argument to (model, compaction_threshold, using_default).
+
+    Returns:
+        A tuple of (resolved BaseChatModel, compaction threshold,
+        using_default_threshold).
+    """
+    if isinstance(model, ModelProfile):
+        resolved = init_chat_model(model.model) if isinstance(model.model, str) else model.model
+        assert model.compaction_threshold is not None  # noqa: S101
+        return resolved, model.compaction_threshold, False
+
+    resolved = init_chat_model(model) if isinstance(model, str) else model
+    return resolved, _FALLBACK_COMPACTION_THRESHOLD, True
 
 
 def _make_rebuild_callback(
