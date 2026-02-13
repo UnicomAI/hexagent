@@ -9,16 +9,17 @@ skill injection, reminder annotation) and tool call permission gating.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from langchain_core.messages import (
     AIMessage,
-    BaseMessage,
     HumanMessage,
     SystemMessage,
     ToolMessage,
 )
 
+from openagent.harness.model import ModelProfile
 from openagent.harness.permission import PermissionDecision, PermissionGate, PermissionResult, SafetyRule
 from openagent.harness.reminders import Reminder
 from openagent.langchain.middleware import (
@@ -26,15 +27,13 @@ from openagent.langchain.middleware import (
     OpenAgentState,
     _create_denied_response,
     _detect_skill_call,
-    _extract_summary,
     _extract_text_content,
 )
+from openagent.prompts.content import load
 from openagent.types import AgentContext, CompactionPhase, Skill
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    import pytest
 
 from ..conftest import core_tools
 
@@ -43,11 +42,6 @@ from ..conftest import core_tools
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = "You are a test agent."
-COMPACTION_PROMPT = "Please summarize the conversation."
-
-
-async def _noop_rebuild(summary: str) -> list[BaseMessage]:
-    return [SystemMessage(content="rebuilt"), HumanMessage(content=summary)]
 
 
 def _make_middleware(
@@ -55,26 +49,26 @@ def _make_middleware(
     gate: PermissionGate | None = None,
     skill_resolver: Any = None,
     reminders: Sequence[Reminder] = (),
-    using_default_threshold: bool = False,
     approval_callback: Any = None,
     compaction_threshold: int = 100_000,
 ) -> AgentMiddleware:
+    profile = ModelProfile(
+        model=MagicMock(),
+        compaction_threshold=compaction_threshold,
+    )
     return AgentMiddleware(
+        model=profile,
         tools=core_tools(),
         system_prompt=SYSTEM_PROMPT,
         permission_gate=gate or PermissionGate(),
-        compaction_prompt=COMPACTION_PROMPT,
-        compaction_threshold=compaction_threshold,
-        using_default_threshold=using_default_threshold,
         approval_callback=approval_callback,
         skill_resolver=skill_resolver,
         reminders=reminders,
-        rebuild_callback=_noop_rebuild,
     )
 
 
 def _state(
-    messages: list[BaseMessage],
+    messages: list[SystemMessage | HumanMessage | AIMessage | ToolMessage],
     phase: CompactionPhase = CompactionPhase.NONE,
 ) -> OpenAgentState:
     return {"messages": messages, "compaction_phase": phase}  # type: ignore[typeddict-item]
@@ -94,19 +88,6 @@ class TestExtractTextContent:
         assert _extract_text_content(content) == "hello world"
 
 
-class TestExtractSummary:
-    def test_extracts_from_last_ai_message(self) -> None:
-        messages = [HumanMessage(content="q"), AIMessage(content="summary text")]
-        assert _extract_summary(messages) == "summary text"
-
-    def test_returns_empty_without_ai_message(self) -> None:
-        assert _extract_summary([HumanMessage(content="q")]) == ""
-
-    def test_picks_last_ai_message(self) -> None:
-        messages = [AIMessage(content="old"), AIMessage(content="latest")]
-        assert _extract_summary(messages) == "latest"
-
-
 class TestCreateDeniedResponse:
     def test_denied_with_reason(self) -> None:
         request = type("R", (), {"tool_call": {"id": "call_1", "name": "bash", "args": {}}})()
@@ -122,7 +103,7 @@ class TestCreateDeniedResponse:
 
 class TestDetectSkillCall:
     def test_detects_recent_skill_call(self) -> None:
-        messages: list[BaseMessage] = [
+        messages = [
             HumanMessage(content="run commit"),
             AIMessage(
                 content="",
@@ -133,7 +114,7 @@ class TestDetectSkillCall:
         assert _detect_skill_call(messages) == "commit"
 
     def test_returns_none_if_no_skill_call(self) -> None:
-        messages: list[BaseMessage] = [
+        messages = [
             HumanMessage(content="echo hi"),
             AIMessage(
                 content="",
@@ -145,7 +126,7 @@ class TestDetectSkillCall:
 
     def test_returns_none_if_already_injected(self) -> None:
         """After skill injection, a HumanMessage follows the ToolMessage."""
-        messages: list[BaseMessage] = [
+        messages = [
             AIMessage(
                 content="",
                 tool_calls=[{"id": "tc_1", "name": "skill", "args": {"skill": "commit"}}],
@@ -160,7 +141,7 @@ class TestDetectSkillCall:
 
 
 # ---------------------------------------------------------------------------
-# abefore_model — system prompt injection
+# abefore_agent — system prompt injection
 # ---------------------------------------------------------------------------
 
 
@@ -168,7 +149,7 @@ class TestSystemPromptInjection:
     async def test_injects_system_prompt_on_first_turn(self) -> None:
         mw = _make_middleware()
         state = _state([HumanMessage(content="Hello")])
-        result = await mw.abefore_model(state)
+        result = await mw.abefore_agent(state)
         assert result is not None
         messages = result["messages"].value
         assert isinstance(messages[0], SystemMessage)
@@ -177,7 +158,7 @@ class TestSystemPromptInjection:
     async def test_does_not_duplicate_system_prompt(self) -> None:
         mw = _make_middleware()
         state = _state([SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content="Hello")])
-        result = await mw.abefore_model(state)
+        result = await mw.abefore_agent(state)
         # No overwrite needed — system prompt already present
         assert result is None
 
@@ -196,10 +177,10 @@ class TestCompactionIntercept:
         )
         result = await mw.abefore_model(state)
         assert result is not None
-        messages = result["messages"].value
-        last = messages[-1]
-        assert isinstance(last, HumanMessage)
-        assert last.content == COMPACTION_PROMPT
+        messages = result["messages"]
+        assert len(messages) == 1
+        assert isinstance(messages[0], HumanMessage)
+        assert messages[0].content == load("user_prompt_compaction_request")
 
     async def test_applying_phase_rebuilds_messages(self) -> None:
         mw = _make_middleware()
@@ -216,7 +197,21 @@ class TestCompactionIntercept:
         messages = result["messages"].value
         assert len(messages) == 2  # rebuilt: [SystemMessage, HumanMessage]
         assert isinstance(messages[0], SystemMessage)
+        assert isinstance(messages[1], HumanMessage)
+        assert "This is the summary." in messages[1].content
         assert result["compaction_phase"] == CompactionPhase.NONE
+
+    async def test_applying_phase_raises_if_last_message_not_ai(self) -> None:
+        mw = _make_middleware()
+        state = _state(
+            [
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content="Hello"),
+            ],
+            phase=CompactionPhase.APPLYING,
+        )
+        with pytest.raises(TypeError, match="AIMessage"):
+            await mw.abefore_model(state)
 
 
 # ---------------------------------------------------------------------------
@@ -286,23 +281,6 @@ class TestCompactionTrigger:
         assert result is not None
         assert result["compaction_phase"] == CompactionPhase.APPLYING
 
-    async def test_logs_warning_on_default_threshold(self, caplog: pytest.LogCaptureFixture) -> None:
-        mw = _make_middleware(
-            compaction_threshold=100_000,
-            using_default_threshold=True,
-        )
-        state = _state(
-            [
-                SystemMessage(content=SYSTEM_PROMPT),
-                HumanMessage(content="Hello"),
-                _ai_with_usage("Response", total_tokens=200_000),
-            ]
-        )
-        with caplog.at_level("WARNING", logger="openagent.langchain.middleware"):
-            result = await mw.aafter_model(state)
-        assert result is not None
-        assert "fallback threshold" in caplog.text
-
 
 # ---------------------------------------------------------------------------
 # abefore_model — skill injection
@@ -328,10 +306,10 @@ class TestSkillInjection:
         )
         result = await mw.abefore_model(state)
         assert result is not None
-        messages = result["messages"].value
-        last = messages[-1]
-        assert isinstance(last, HumanMessage)
-        assert "Skill content for commit" in last.content
+        appended = result["messages"]
+        assert len(appended) == 1
+        assert isinstance(appended[0], HumanMessage)
+        assert "Skill content for commit" in appended[0].content
 
     async def test_no_injection_without_skill_call(self) -> None:
         resolver = AsyncMock()
@@ -347,7 +325,7 @@ class TestSkillInjection:
         assert result is None
         resolver.load_content.assert_not_called()
 
-    async def test_handles_skill_load_failure_gracefully(self) -> None:
+    async def test_skill_load_failure_injects_reminder(self) -> None:
         resolver = AsyncMock()
         resolver.load_content = AsyncMock(side_effect=KeyError("not found"))
 
@@ -363,10 +341,13 @@ class TestSkillInjection:
                 ToolMessage(content="Launching skill: unknown", tool_call_id="tc_1"),
             ]
         )
-        # Should not raise — just skip injection
         result = await mw.abefore_model(state)
-        # System prompt already present, skill load failed → no overwrite
-        assert result is None
+        assert result is not None
+        appended = result["messages"]
+        assert len(appended) == 1
+        assert isinstance(appended[0], HumanMessage)
+        assert "<system-reminder>" in appended[0].content
+        assert "unknown" in appended[0].content
 
 
 # ---------------------------------------------------------------------------

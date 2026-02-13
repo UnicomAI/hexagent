@@ -30,6 +30,13 @@ description: No name here
 Body text.
 """
 
+_EMPTY_BODY_SKILL_MD = """\
+---
+name: empty
+description: Skill with no body
+---
+"""
+
 
 class MockComputer:
     """Fake Computer that returns preconfigured CLI results."""
@@ -139,6 +146,12 @@ class TestSkillResolverDiscover:
         skills = await resolver.discover()
         assert len(skills) == 0
 
+    async def test_discover_skips_empty_body(self) -> None:
+        output = f"===SKILL_FILE===:/mnt/skills/empty\n{_EMPTY_BODY_SKILL_MD}\n"
+        resolver = self._make_resolver(output)
+        skills = await resolver.discover()
+        assert len(skills) == 0
+
     async def test_discover_empty_search_paths(self) -> None:
         resolver = SkillResolver(MockComputer(), search_paths=())
         skills = await resolver.discover()
@@ -176,7 +189,7 @@ class TestSkillResolverLoadContent:
         assert content.startswith("Base directory for this skill: /mnt/skills/pdf")
         assert "# PDF Skill" in content
 
-    async def test_load_content_caches_result(self) -> None:
+    async def test_load_content_reads_fresh_each_time(self) -> None:
         batch_output = f"===SKILL_FILE===:/mnt/skills/pdf\n{_VALID_SKILL_MD}\n"
         responses = {
             "for f in": CLIResult(stdout=batch_output, exit_code=0),
@@ -186,12 +199,24 @@ class TestSkillResolverLoadContent:
         await resolver.discover()
         first = await resolver.load_content("pdf")
         second = await resolver.load_content("pdf")
-        assert first is second  # same object (cached)
+        assert first == second
+        assert first is not second  # not cached, fresh read each time
 
     async def test_load_content_raises_for_unknown_skill(self) -> None:
         resolver = SkillResolver(MockComputer(), search_paths=())
         with pytest.raises(KeyError, match="Skill not discovered"):
             await resolver.load_content("nonexistent")
+
+    async def test_load_content_raises_on_empty_body(self) -> None:
+        batch_output = f"===SKILL_FILE===:/mnt/skills/pdf\n{_VALID_SKILL_MD}\n"
+        responses = {
+            "for f in": CLIResult(stdout=batch_output, exit_code=0),
+            "cat": CLIResult(stdout=_EMPTY_BODY_SKILL_MD, exit_code=0),
+        }
+        resolver = SkillResolver(MockComputer(responses), search_paths=("/mnt/skills",))
+        await resolver.discover()
+        with pytest.raises(RuntimeError, match="has no content body"):
+            await resolver.load_content("pdf")
 
     async def test_load_content_raises_on_read_failure(self) -> None:
         batch_output = f"===SKILL_FILE===:/mnt/skills/pdf\n{_VALID_SKILL_MD}\n"

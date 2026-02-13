@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING
 
 from openagent.harness.reminders import (
     BUILTIN_REMINDERS,
-    REMINDER_TAG,
     Message,
     Reminder,
     evaluate_reminders,
     initial_available_skills,
 )
+from openagent.prompts.tags import SYSTEM_REMINDER_TAG, Tag
 from openagent.types import AgentContext, Skill
 
 if TYPE_CHECKING:
@@ -55,7 +55,7 @@ class TestEvaluateReminders:
         r = Reminder(rule=_always_fire, position="prepend")
         prepends, appends = evaluate_reminders([r], [_user_msg("hi")], AgentContext())
         assert len(prepends) == 1
-        assert prepends[0] == f"<{REMINDER_TAG}>reminder content</{REMINDER_TAG}>"
+        assert prepends[0] == SYSTEM_REMINDER_TAG("reminder content")
         assert appends == []
 
     def test_append_reminder_wraps_in_tag(self) -> None:
@@ -63,7 +63,7 @@ class TestEvaluateReminders:
         prepends, appends = evaluate_reminders([r], [_user_msg("hi")], AgentContext())
         assert prepends == []
         assert len(appends) == 1
-        assert appends[0] == f"<{REMINDER_TAG}>reminder content</{REMINDER_TAG}>"
+        assert appends[0] == SYSTEM_REMINDER_TAG("reminder content")
 
     def test_none_rules_are_filtered(self) -> None:
         reminders = [
@@ -85,8 +85,9 @@ class TestEvaluateReminders:
 
     def test_custom_tag_name(self) -> None:
         r = Reminder(rule=_always_fire, position="prepend")
-        prepends, _ = evaluate_reminders([r], [_user_msg("hi")], AgentContext(), tag="custom")
-        assert prepends[0] == "<custom>reminder content</custom>"
+        custom = Tag("custom")
+        prepends, _ = evaluate_reminders([r], [_user_msg("hi")], AgentContext(), tag=custom)
+        assert prepends[0] == custom("reminder content")
 
 
 # ---------------------------------------------------------------------------

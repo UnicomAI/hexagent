@@ -17,14 +17,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from openagent.prompts.content import load, substitute
+from openagent.prompts.tags import SYSTEM_REMINDER_TAG, Tag
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from openagent.types import AgentContext
-
-REMINDER_TAG = "system-reminder"
-"""XML tag name used to wrap injected reminders."""
 
 # OpenAI-compatible message format.
 # Expected keys: "role" (str), "content" (str | list),
@@ -49,7 +47,7 @@ def evaluate_reminders(
     reminders: Sequence[Reminder],
     messages: Sequence[Message],
     ctx: AgentContext,
-    tag: str = REMINDER_TAG,
+    tag: Tag = SYSTEM_REMINDER_TAG,
 ) -> tuple[list[str], list[str]]:
     """Evaluate reminder rules and return tagged strings ready for injection.
 
@@ -61,7 +59,7 @@ def evaluate_reminders(
         reminders: Rules to evaluate (in declared order).
         messages: Message history as OpenAI-compatible dicts.
         ctx: Snapshot of agent capabilities.
-        tag: XML tag name to wrap each reminder.
+        tag: Callable tag to wrap each reminder.
 
     Returns:
         (prepends, appends) — tagged strings ready for injection.
@@ -71,7 +69,7 @@ def evaluate_reminders(
     for reminder in reminders:
         content = reminder.rule(messages, ctx)
         if content is not None:
-            wrapped = f"<{tag}>{content}</{tag}>"
+            wrapped = tag(content)
             if reminder.position == "prepend":
                 prepends.append(wrapped)
             else:

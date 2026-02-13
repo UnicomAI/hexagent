@@ -1,8 +1,8 @@
 """Skill discovery and content loading.
 
 SkillResolver scans configured directories on a Computer for skill
-folders, parses SKILL.md frontmatter for metadata, and lazily loads
-skill content with caching.
+folders, parses SKILL.md frontmatter for metadata, and loads
+skill content on demand (always fresh from disk).
 """
 
 from __future__ import annotations
@@ -105,7 +105,6 @@ class SkillResolver:
         self._computer = computer
         self._search_paths = tuple(search_paths)
         self._skills: dict[str, Skill] = {}
-        self._content_cache: dict[str, str] = {}
 
     @property
     def search_paths(self) -> tuple[str, ...]:
@@ -161,7 +160,7 @@ class SkillResolver:
             # Parse batched output into individual skill chunks
             for skill_dir, raw_content in self._parse_batch_output(result.stdout):
                 try:
-                    metadata, _body = _parse_frontmatter(raw_content)
+                    metadata, body = _parse_frontmatter(raw_content)
                 except ValueError:
                     logger.warning("Skipping %s: invalid SKILL.md frontmatter", skill_dir)
                     continue
@@ -175,6 +174,10 @@ class SkillResolver:
                     )
                     continue
 
+                if not body:
+                    logger.warning("Skipping %s: SKILL.md has no content body", skill_dir)
+                    continue
+
                 skill = Skill(name=name, description=description, path=skill_dir)
                 self._skills[name] = skill
                 discovered.append(skill)
@@ -182,7 +185,7 @@ class SkillResolver:
         return discovered
 
     async def load_content(self, name: str) -> str:
-        r"""Load the skill's markdown body, with caching.
+        r"""Load the skill's markdown body (always fresh from disk).
 
         Returns the content wrapped with the skill's base directory:
         ``Base directory for this skill: {path}\n\n{body}``
@@ -197,9 +200,6 @@ class SkillResolver:
             KeyError: If the skill name was not discovered.
             RuntimeError: If the SKILL.md content cannot be read.
         """
-        if name in self._content_cache:
-            return self._content_cache[name]
-
         if name not in self._skills:
             msg = f"Skill not discovered: {name}"
             raise KeyError(msg)
@@ -218,9 +218,11 @@ class SkillResolver:
             msg = f"Failed to parse {skill_file}: {exc}"
             raise RuntimeError(msg) from exc
 
-        content = f"Base directory for this skill: {skill.path}\n\n{body}"
-        self._content_cache[name] = content
-        return content
+        if not body:
+            msg = f"Skill '{name!r}' has no content body in {skill_file}"
+            raise RuntimeError(msg)
+
+        return f"Base directory for this skill: {skill.path}\n\n{body}"
 
     @staticmethod
     def _parse_batch_output(output: str) -> list[tuple[str, str]]:

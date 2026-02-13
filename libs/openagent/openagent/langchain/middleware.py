@@ -28,12 +28,13 @@ from langchain_core.messages import (
     ToolMessage,
     convert_to_openai_messages,
 )
-from langgraph.types import Command
+from langgraph.types import Command as LangGraphCommand
 from langgraph.types import Overwrite as LangGraphOverwrite
 
 from openagent.harness import PermissionGate, PermissionResult, Reminder, evaluate_reminders
-from openagent.harness.model import _FALLBACK_COMPACTION_THRESHOLD
 from openagent.langchain.adapter import to_langchain_tool
+from openagent.prompts import RESUMED_SESSION, compose, load, substitute
+from openagent.prompts.tags import SYSTEM_REMINDER_TAG
 from openagent.types import AgentContext, CompactionPhase
 
 if TYPE_CHECKING:
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
     from langgraph.runtime import Runtime
 
+    from openagent.harness.model import ModelProfile
     from openagent.harness.skills import SkillResolver
     from openagent.tools.base import BaseAgentTool
     from openagent.types import MCPServer, Skill
@@ -93,14 +95,6 @@ def _extract_text_content(content: str | list[Any]) -> str:
     if isinstance(content, str):
         return content
     return "".join(block if isinstance(block, str) else block.get("text", "") for block in content if isinstance(block, (str, dict)))
-
-
-def _extract_summary(messages: Sequence[BaseMessage]) -> str:
-    """Extract summary text from the last AIMessage."""
-    for msg in reversed(messages):
-        if isinstance(msg, AIMessage):
-            return _extract_text_content(msg.content)
-    return ""
 
 
 def _rebuild_message(msg: BaseMessage, new_content: str) -> BaseMessage:
@@ -176,7 +170,7 @@ class AgentMiddleware(LangChainAgentMiddleware):
     """The OpenAgent runtime, implemented as LangChain middleware.
 
     Coordinates:
-    - System prompt injection (first turn)
+    - System prompt injection (before-agent, once per invocation)
     - Compaction (3-phase inlined state machine)
     - Skill injection (appender)
     - Reminder rules (annotators)
@@ -193,49 +187,41 @@ class AgentMiddleware(LangChainAgentMiddleware):
     def __init__(
         self,
         *,
+        model: ModelProfile,
         tools: Sequence[BaseAgentTool[Any]],
         system_prompt: str,
+        permission_gate: PermissionGate,
         skills: Sequence[Skill] = (),
         mcps: Sequence[MCPServer] = (),
-        permission_gate: PermissionGate,
-        compaction_prompt: str,
-        compaction_threshold: int = _FALLBACK_COMPACTION_THRESHOLD,
-        using_default_threshold: bool = False,
-        approval_callback: ApprovalCallback | None = None,
         skill_resolver: SkillResolver | None = None,
         reminders: Sequence[Reminder] = (),
-        rebuild_callback: Callable[[str], Awaitable[list[BaseMessage]]],
+        approval_callback: ApprovalCallback | None = None,
     ) -> None:
         """Initialize the middleware.
 
         Args:
+            model: The main model profile.  The middleware extracts
+                ``compaction_threshold`` from it.
             tools: Agent tools (framework-agnostic).
             system_prompt: Assembled system prompt for first-turn injection.
+            permission_gate: Gate for validating tool calls.
             skills: Discovered skills.
             mcps: MCP server descriptors.
-            permission_gate: Gate for validating tool calls.
-            compaction_prompt: Prompt for requesting conversation summaries.
-            compaction_threshold: Token count that triggers compaction.
-            using_default_threshold: True when using the fallback threshold
-                (no ModelProfile provided). Enables a warning log on trigger.
-            approval_callback: Optional callback for human-in-the-loop approval.
             skill_resolver: Optional resolver for injecting skill content.
             reminders: Reminder rules for dynamic system-reminder injection.
-            rebuild_callback: Callback that rebuilds messages after compaction.
-                Receives summary text, returns [SystemMessage, HumanMessage].
+            approval_callback: Optional callback for human-in-the-loop approval.
         """
-        self._tools = list(tools)
+        self._model = model
         self._system_prompt = system_prompt
-        self._skills = list(skills)
+        self._tools = list(tools)
         self._mcps = list(mcps)
-        self._permission_gate = permission_gate
-        self._compaction_prompt = compaction_prompt
-        self._compaction_threshold = compaction_threshold
-        self._using_default_threshold = using_default_threshold
-        self._approval_callback = approval_callback
+        self._skills = list(skills)
         self._skill_resolver = skill_resolver
         self._reminders = list(reminders)
-        self._rebuild_callback = rebuild_callback
+        self._permission_gate = permission_gate
+        self._approval_callback = approval_callback
+        self._compaction_prompt = load("user_prompt_compaction_request")
+        self._summary_template = load("user_prompt_compaction_summary_rebuild")
         self._tools_cache: list[BaseTool] | None = None
 
     @property
@@ -259,7 +245,42 @@ class AgentMiddleware(LangChainAgentMiddleware):
                 return None
         return None
 
+    async def _rebuild_after_compaction(self, summary: str) -> list[BaseMessage]:
+        """Rebuild messages after compaction.
+
+        1. Re-discovers skills from filesystem (live snapshot)
+        2. Composes fresh system prompt using RESUMED_SESSION profile
+        3. Returns [SystemMessage(new_prompt), HumanMessage(summary)]
+        """
+        current_skills: list[Skill] = []
+        if self._skill_resolver is not None:
+            current_skills = await self._skill_resolver.discover()
+
+        ctx = AgentContext(tools=self._tools, skills=current_skills, mcps=self._mcps)
+        new_system_prompt = compose(RESUMED_SESSION, ctx)
+        summary_content = substitute(self._summary_template, SUMMARY_CONTENT=summary)
+
+        return [
+            SystemMessage(content=new_system_prompt),
+            HumanMessage(content=summary_content),
+        ]
+
     # --- Async hooks (primary implementations) ---
+
+    async def abefore_agent(
+        self,
+        state: AgentState,
+        _runtime: Runtime[Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """One-time setup before agent execution starts.
+
+        Injects the system prompt if not already present.
+        """
+        messages = list(state["messages"])
+        if not messages or not isinstance(messages[0], SystemMessage):
+            messages = [SystemMessage(content=self._system_prompt), *messages]
+            return {"messages": LangGraphOverwrite(messages)}
+        return None
 
     async def abefore_model(
         self,
@@ -268,32 +289,33 @@ class AgentMiddleware(LangChainAgentMiddleware):
     ) -> dict[str, Any] | None:
         """Three-group pre-model pipeline.
 
-        Step 0: System prompt injection (first turn only).
         Group 1: Intercepts (compaction phases, early exit).
         Group 2: Appenders (skill injection).
         Group 3: Annotators (system reminders).
         """
         messages = list(state["messages"])
-        need_overwrite = False
-
-        # --- STEP 0: System prompt injection (first turn only) ---
-        if not messages or not isinstance(messages[0], SystemMessage):
-            messages = [SystemMessage(content=self._system_prompt), *messages]
-            need_overwrite = True
 
         # --- GROUP 1: Intercepts (compaction phases) ---
         phase = CompactionPhase(state.get("compaction_phase", CompactionPhase.NONE))
 
         if phase == CompactionPhase.REQUESTING:
-            messages.append(HumanMessage(content=self._compaction_prompt))
+            appended = [HumanMessage(content=self._compaction_prompt)]
             return {
-                "messages": LangGraphOverwrite(messages),
+                "messages": appended,
                 "compaction_phase": phase,
             }
 
         if phase == CompactionPhase.APPLYING:
-            summary = _extract_summary(messages)
-            rebuilt = await self._rebuild_callback(summary)
+            last = messages[-1]
+            if not isinstance(last, AIMessage):
+                msg = (
+                    f"Compaction state machine bug: APPLYING phase requires "
+                    f"the model's summary as the last message (AIMessage), "
+                    f"but got {type(last).__name__}. "
+                )
+                raise TypeError(msg)
+            summary = _extract_text_content(last.content)
+            rebuilt = await self._rebuild_after_compaction(summary)
             return {
                 "messages": LangGraphOverwrite(rebuilt),
                 "compaction_phase": CompactionPhase.NONE,
@@ -305,17 +327,19 @@ class AgentMiddleware(LangChainAgentMiddleware):
             if skill_name is not None:
                 try:
                     content = await self._skill_resolver.load_content(skill_name)
-                except (KeyError, RuntimeError):
-                    content = None
-                if content is not None:
-                    messages = [*messages, HumanMessage(content=content)]
-                    need_overwrite = True
+                except (KeyError, RuntimeError) as exc:
+                    template = load("system_reminder_skill_launch_failure")
+                    content = SYSTEM_REMINDER_TAG(
+                        substitute(template, SKILL_NAME=skill_name, FAILURE_MSG=repr(exc)),
+                    )
+                appended = [HumanMessage(content=content)]
+                return {
+                    "messages": appended,
+                }
 
         # --- GROUP 3: Annotators (system reminders) ---
         if self._reminders:
-            # Evaluate against ORIGINAL messages (before our modifications)
-            original_for_rules = state["messages"]
-            openai_msgs = convert_to_openai_messages(original_for_rules)
+            openai_msgs = convert_to_openai_messages(messages)
             ctx = AgentContext(
                 tools=self._tools,
                 skills=self._skills,
@@ -330,12 +354,11 @@ class AgentMiddleware(LangChainAgentMiddleware):
                 parts = [*prepends, content_str, *appends]
                 new_content = "\n\n".join(part for part in parts if part)
 
-                messages = [*messages[:-1], _rebuild_message(last_msg, new_content)]  # type: ignore[list-item]
-                need_overwrite = True
+                patched = [*messages[:-1], _rebuild_message(last_msg, new_content)]
+                return {
+                    "messages": LangGraphOverwrite(patched),
+                }
 
-        # --- RETURN ---
-        if need_overwrite:
-            return {"messages": LangGraphOverwrite(messages)}
         return None
 
     @hook_config(can_jump_to=["model"])
@@ -351,14 +374,9 @@ class AgentMiddleware(LangChainAgentMiddleware):
         # Trigger compaction if threshold exceeded
         if phase == CompactionPhase.NONE and len(messages) >= _MIN_MESSAGES_FOR_COMPACTION:
             token_count = self._get_total_tokens(messages)
-            if token_count is not None and token_count >= self._compaction_threshold:
-                if self._using_default_threshold:
-                    logger.warning(
-                        "Compaction triggered at %d tokens using fallback threshold %d. "
-                        "Pass a ModelProfile to create_agent for model-aware compaction.",
-                        token_count,
-                        self._compaction_threshold,
-                    )
+            threshold = self._model.compaction_threshold
+            assert threshold is not None  # noqa: S101  # always set by __post_init__
+            if token_count is not None and token_count >= threshold:
                 return {"compaction_phase": CompactionPhase.REQUESTING, "jump_to": "model"}
 
         # Advance state machine: LLM just generated the summary
@@ -370,8 +388,8 @@ class AgentMiddleware(LangChainAgentMiddleware):
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
-    ) -> ToolMessage | Command[Any]:
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | LangGraphCommand[Any]]],
+    ) -> ToolMessage | LangGraphCommand[Any]:
         """Check permission before tool execution."""
         tool_name = request.tool_call["name"]
         tool_args = request.tool_call.get("args", {})

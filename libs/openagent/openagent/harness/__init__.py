@@ -15,7 +15,6 @@ from openagent.harness.permission import (
 )
 from openagent.harness.reminders import (
     BUILTIN_REMINDERS,
-    REMINDER_TAG,
     Reminder,
     evaluate_reminders,
     initial_available_skills,
@@ -25,7 +24,6 @@ from openagent.harness.skills import DEFAULT_SKILL_PATHS, SkillResolver
 __all__ = [
     "BUILTIN_REMINDERS",
     "DEFAULT_SKILL_PATHS",
-    "REMINDER_TAG",
     "ModelProfile",
     "PermissionDecision",
     "PermissionGate",
