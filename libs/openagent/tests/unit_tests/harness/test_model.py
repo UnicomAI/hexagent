@@ -11,14 +11,15 @@ from langchain_core.language_models import BaseChatModel
 
 from openagent.harness.model import (
     _DEFAULT_COMPACTION_RATIO,
-    _FALLBACK_COMPACTION_THRESHOLD,
     ModelProfile,
 )
 
 
-def _stub_model() -> BaseChatModel:
+def _stub_model(name: str = "test-model") -> BaseChatModel:
     """Minimal BaseChatModel stub for unit tests."""
-    return MagicMock(spec=BaseChatModel)
+    mock = MagicMock(spec=BaseChatModel)
+    mock.model_name = name
+    return mock
 
 
 class TestModelProfile:
@@ -42,8 +43,8 @@ class TestModelProfile:
     def test_context_window_defaults_to_none(self) -> None:
         profile = ModelProfile(model=_stub_model())
         assert profile.context_window is None
-        assert profile.compaction_threshold == _FALLBACK_COMPACTION_THRESHOLD
+        assert profile.compaction_threshold is None
 
-    def test_fallback_compaction_threshold_without_context_window(self) -> None:
+    def test_no_derivation_without_context_window(self) -> None:
         profile = ModelProfile(model=_stub_model())
-        assert profile.compaction_threshold == _FALLBACK_COMPACTION_THRESHOLD
+        assert profile.compaction_threshold is None

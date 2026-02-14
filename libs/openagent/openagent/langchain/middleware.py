@@ -375,7 +375,7 @@ class AgentMiddleware(LangChainAgentMiddleware):
         if phase == CompactionPhase.NONE and len(messages) >= _MIN_MESSAGES_FOR_COMPACTION:
             token_count = self._get_total_tokens(messages)
             threshold = self._model.compaction_threshold
-            assert threshold is not None  # noqa: S101  # always set by __post_init__
+            assert threshold is not None  # noqa: S101  # guaranteed by _resolve_to_profile
             if token_count is not None and token_count >= threshold:
                 return {"compaction_phase": CompactionPhase.REQUESTING, "jump_to": "model"}
 

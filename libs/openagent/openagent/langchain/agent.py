@@ -8,6 +8,7 @@ in state["messages"] by the middleware, not by LangChain's auto-prepend.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from langchain.agents import create_agent as _create_langchain_agent
@@ -117,18 +118,11 @@ async def create_agent(
 
             agent = await create_agent(model, computer, skill_paths=("/mnt/skills",))
     """
-    # 1. Resolve models
+    # 1. Resolve models (warns + applies fallback if threshold unknown)
     main_profile = _resolve_to_profile(model)
     fast_profile = _resolve_to_profile(fast_model) if fast_model is not None else main_profile
 
-    # 2. Warn at construction time if context_window unknown
-    if main_profile.context_window is None:
-        logger.warning(
-            "No context_window specified. Using fallback compaction threshold (%d). Pass a ModelProfile to create_agent for model-aware compaction.",
-            _FALLBACK_COMPACTION_THRESHOLD,
-        )
-
-    # 3. Build completion model from fast_profile (for web tools)
+    # 2. Build completion model from fast_profile (for web tools)
     completion_model: CompletionModel | None = None
     if search_provider is not None or fetch_provider is not None:
         completion_model = _create_completion_model(fast_profile)
@@ -180,16 +174,33 @@ async def create_agent(
 def _resolve_to_profile(
     model: str | BaseChatModel | ModelProfile,
 ) -> ModelProfile:
-    """Resolve any model input to a ModelProfile.
+    """Resolve any model input to a ModelProfile with guaranteed threshold.
 
     - ``str`` → ``init_chat_model(str)`` → ``ModelProfile(model=resolved)``
     - ``BaseChatModel`` → ``ModelProfile(model=model)``
     - ``ModelProfile`` → returned as-is
+
+    If ``compaction_threshold`` is still ``None`` after construction
+    (neither explicit nor derived from ``context_window``), applies
+    ``_FALLBACK_COMPACTION_THRESHOLD`` and logs a warning.
     """
     if isinstance(model, ModelProfile):
-        return model
-    resolved = init_chat_model(model) if isinstance(model, str) else model
-    return ModelProfile(model=resolved)
+        profile = model
+    else:
+        resolved = init_chat_model(model) if isinstance(model, str) else model
+        profile = ModelProfile(model=resolved)
+
+    if profile.context_window is None and profile.compaction_threshold is None:
+        logger.warning(
+            "Neither context_window nor compaction_threshold provided for model '%s'. "
+            "A fallback threshold of %d tokens will be used to trigger compaction when context grows too long. "
+            "[Suggestion: To ensure reliable execution, consider configuring a ModelProfile with context_window and/or compaction_threshold.]",
+            getattr(profile.model, "model_name", type(profile.model).__name__),
+            _FALLBACK_COMPACTION_THRESHOLD,
+        )
+        profile = replace(profile, compaction_threshold=_FALLBACK_COMPACTION_THRESHOLD)
+
+    return profile
 
 
 def _create_completion_model(profile: ModelProfile) -> CompletionModel:
@@ -211,7 +222,7 @@ def _create_completion_model(profile: ModelProfile) -> CompletionModel:
         )
         return str(resp.content)
 
-    assert profile.compaction_threshold is not None  # noqa: S101  # always set by __post_init__
+    assert profile.compaction_threshold is not None  # noqa: S101  # guaranteed by _resolve_to_profile
     return CompletionModel(
         _complete,
         max_input_chars=int(profile.compaction_threshold * _CHARS_PER_TOKEN),
