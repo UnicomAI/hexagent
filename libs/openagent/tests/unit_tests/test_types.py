@@ -6,19 +6,26 @@ from datetime import UTC, datetime
 
 import pytest
 
+from openagent.mcp import McpClient
 from openagent.types import (
     AgentContext,
     CLIResult,
     CompactionPhase,
     EnvironmentContext,
     GitContext,
-    MCPServer,
     Skill,
     SkillCatalog,
     ToolResult,
 )
 
 from .conftest import make_tool
+
+
+def _make_mcp_client(name: str, instructions: str = "") -> McpClient:
+    """Create an McpClient with pre-set instructions for testing."""
+    client = McpClient(name, {"type": "http", "url": "https://example.com"})
+    client._instructions = instructions
+    return client
 
 
 class TestToolResultBool:
@@ -237,7 +244,7 @@ class TestAgentContext:
         ctx = AgentContext(
             tools=[make_tool("Bash")],
             skills=[Skill(name="commit", description="desc", path="/p")],
-            mcps=[MCPServer(name="gh", description="desc")],
+            mcps=[_make_mcp_client("gh", "GitHub API")],
             environment=EnvironmentContext(
                 working_dir="/home/user",
                 is_git_repo=True,

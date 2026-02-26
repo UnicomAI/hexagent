@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, fields, replace
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, Protocol, TypedDict, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from openagent.computer.base import ExecutionMetadata
+    from openagent.mcp import McpClient
     from openagent.tools.base import BaseAgentTool
 
 
@@ -478,21 +479,6 @@ class SkillCatalog(Protocol):
 
 
 @dataclass(frozen=True)
-class MCPServer:
-    """An MCP (Model Context Protocol) server capability.
-
-    MCP servers provide external tools and resources to the agent.
-
-    Attributes:
-        name: Unique identifier for the MCP server.
-        description: Human-readable description for prompt assembly.
-    """
-
-    name: str
-    description: str
-
-
-@dataclass(frozen=True)
 class EnvironmentContext:
     """Detected runtime environment properties.
 
@@ -533,6 +519,50 @@ class GitContext:
     recent_commits: str
 
 
+# ---------------------------------------------------------------------------
+# MCP server configuration
+# ---------------------------------------------------------------------------
+
+
+class McpStdioServerConfig(TypedDict):
+    """Configuration for a stdio-based MCP server.
+
+    The subprocess is spawned with ``command`` and optional ``args`` / ``env``.
+    """
+
+    type: Literal["stdio"]
+    command: str
+    args: NotRequired[list[str]]
+    env: NotRequired[dict[str, str]]
+
+
+class McpSseServerConfig(TypedDict):
+    """Configuration for an SSE-based MCP server."""
+
+    type: Literal["sse"]
+    url: str
+    headers: NotRequired[dict[str, str]]
+
+
+class McpHttpServerConfig(TypedDict):
+    """Configuration for a Streamable-HTTP MCP server."""
+
+    type: Literal["http"]
+    url: str
+    headers: NotRequired[dict[str, str]]
+
+
+McpServerConfig = McpStdioServerConfig | McpSseServerConfig | McpHttpServerConfig
+"""Union of all supported MCP server configurations.
+
+Discriminated by the ``type`` key:
+
+- ``"stdio"`` → :class:`McpStdioServerConfig`
+- ``"sse"`` → :class:`McpSseServerConfig`
+- ``"http"`` → :class:`McpHttpServerConfig`
+"""
+
+
 @dataclass(frozen=True)
 class AgentContext:
     """Frozen snapshot of agent capabilities and session state.
@@ -545,7 +575,7 @@ class AgentContext:
         model_name: Model name string (e.g. ``"gpt-5.2"``).
         tools: Currently registered tools.
         skills: Currently registered skills.
-        mcps: Currently registered MCP servers.
+        mcps: Connected MCP clients.
         environment: Detected runtime environment, if available.
         git: Git repository snapshot, if available.
     """
@@ -553,7 +583,7 @@ class AgentContext:
     model_name: str = ""
     tools: list[BaseAgentTool[Any]] = field(default_factory=list)
     skills: list[Skill] = field(default_factory=list)
-    mcps: list[MCPServer] = field(default_factory=list)
+    mcps: list[McpClient] = field(default_factory=list)
     environment: EnvironmentContext | None = None
     git: GitContext | None = None
 

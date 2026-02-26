@@ -101,14 +101,7 @@ def tool_instructions(ctx: AgentContext) -> str | None:
         except KeyError:
             if tool.instruction:
                 tool_sections.append(f"## {tool.name}\n\n{tool.instruction}")
-                continue
-            msg = (
-                f"Missing tool instruction: no '{main_key}.md' file "
-                f"and tool '{tool.name}' has no instruction text. "
-                f"Create '{main_key}.md' in prompts/ or set "
-                f"tool.instruction on the tool class."
-            )
-            raise KeyError(msg)  # noqa: B904
+            continue
 
         parts: list[str] = [raw]
 
@@ -132,5 +125,5 @@ def mcps(ctx: AgentContext) -> str | None:
     """MCP server listing."""
     if not ctx.mcps:
         return None
-    items = "\n".join(f"- **{m.name}**: {m.description}" for m in ctx.mcps)
+    items = "\n".join(f"- **{m.name}**{': ' + m.instructions if m.instructions else ''}" for m in ctx.mcps)
     return f"# MCP Servers\n\nThe following MCP (Model Context Protocol) servers provide additional capabilities and tools.\n\n{items}"

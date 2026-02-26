@@ -8,8 +8,9 @@ in state["messages"] by the middleware, not by LangChain's auto-prepend.
 from __future__ import annotations
 
 import logging
+from contextlib import AsyncExitStack
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from langchain.agents import create_agent as _create_langchain_agent
 from langchain.chat_models import init_chat_model
@@ -22,22 +23,141 @@ from openagent.tools import SkillTool, WebFetchTool, WebSearchTool, create_cli_t
 from openagent.types import AgentContext, CompletionModel
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import AsyncIterator, Mapping, Sequence
+    from types import TracebackType
 
     from langchain_core.language_models import BaseChatModel
+    from langchain_core.runnables import RunnableConfig
     from langgraph.graph.state import CompiledStateGraph
     from langgraph.store.base import BaseStore
     from langgraph.types import Checkpointer
 
     from openagent.computer import Computer
     from openagent.harness import Reminder
+    from openagent.mcp import McpClient
     from openagent.tools.base import BaseAgentTool
     from openagent.tools.web import FetchProvider, SearchProvider
-    from openagent.types import Skill
+    from openagent.types import McpServerConfig, Skill
 
 logger = logging.getLogger(__name__)
 
 _CHARS_PER_TOKEN = 3  # Rough approximation; no tokenizer available yet.
+
+
+class Agent:
+    """An OpenAgent agent with managed resources.
+
+    Wraps a compiled LangGraph agent and owns async resources
+    (e.g. MCP connections) that must be cleaned up.
+
+    Use as an async context manager or call ``aclose()`` explicitly::
+
+        async with await create_agent(model, computer, ...) as agent:
+            print(agent.model_name)  # resolved model name
+            print(len(agent.tools))  # all registered tools
+            result = await agent.ainvoke({"messages": [...]})
+
+    Attributes:
+        model_name: Resolved model name string.
+        tools: All registered tools (core + web + extra + MCP).
+        skills: Discovered skills.
+        mcps: Connected MCP clients (name, instructions, tools, status).
+        system_prompt: The assembled initial system prompt.
+        graph: The underlying LangGraph compiled graph.
+    """
+
+    def __init__(
+        self,
+        graph: CompiledStateGraph[Any],
+        resources: AsyncExitStack,
+        *,
+        model_name: str,
+        tools: list[BaseAgentTool[Any]],
+        skills: list[Skill],
+        mcps: list[McpClient],
+        system_prompt: str,
+    ) -> None:
+        """Initialize the agent with a graph, resources, and metadata."""
+        self._graph = graph
+        self._resources = resources
+        self._model_name = model_name
+        self._tools = tools
+        self._skills = skills
+        self._mcps = mcps
+        self._system_prompt = system_prompt
+
+    @property
+    def model_name(self) -> str:
+        """Resolved model name string."""
+        return self._model_name
+
+    @property
+    def tools(self) -> list[BaseAgentTool[Any]]:
+        """All registered tools (core + web + extra + MCP)."""
+        return list(self._tools)
+
+    @property
+    def skills(self) -> list[Skill]:
+        """Discovered skills."""
+        return list(self._skills)
+
+    @property
+    def mcps(self) -> list[McpClient]:
+        """Connected MCP clients (name, instructions, tools, status)."""
+        return list(self._mcps)
+
+    @property
+    def system_prompt(self) -> str:
+        """The assembled initial system prompt."""
+        return self._system_prompt
+
+    @property
+    def graph(self) -> CompiledStateGraph[Any]:
+        """The underlying LangGraph compiled graph."""
+        return self._graph
+
+    async def ainvoke(
+        self,
+        input: dict[str, Any],  # noqa: A002
+        config: RunnableConfig | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Invoke the agent (single response)."""
+        return await self._graph.ainvoke(input, config, **kwargs)
+
+    async def astream(
+        self,
+        input: dict[str, Any],  # noqa: A002
+        config: RunnableConfig | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        """Stream agent events."""
+        async for event in self._graph.astream(input, config, **kwargs):
+            yield event
+
+    async def aclose(self) -> None:
+        """Release all owned resources (MCP connections, etc.)."""
+        await self._resources.aclose()
+
+    async def __aenter__(self) -> Self:
+        """Enter the async context manager."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Exit the async context manager and release resources."""
+        await self.aclose()
+
+    def __repr__(self) -> str:
+        """Return a string representation of the agent."""
+        tool_count = len(self._tools)
+        skill_count = len(self._skills)
+        mcp_count = len(self._mcps)
+        return f"Agent(model={self._model_name!r}, tools={tool_count}, skills={skill_count}, mcps={mcp_count})"
 
 
 async def create_agent(
@@ -46,13 +166,14 @@ async def create_agent(
     *,
     fast_model: str | BaseChatModel | ModelProfile | None = None,
     extra_tools: Sequence[BaseAgentTool[Any]] | None = None,
+    mcp_servers: Mapping[str, McpServerConfig] | None = None,
     search_provider: SearchProvider | None = None,
     fetch_provider: FetchProvider | None = None,
     skill_paths: Sequence[str] = DEFAULT_SKILL_PATHS,
     reminders: Sequence[Reminder] = BUILTIN_REMINDERS,
     checkpointer: Checkpointer | None = None,
     store: BaseStore | None = None,
-) -> CompiledStateGraph[Any]:
+) -> Agent:
     """Create an OpenAgent agent using LangChain.
 
     OpenAgent agents require a LLM that supports tool calling.
@@ -75,6 +196,10 @@ async def create_agent(
         extra_tools: Additional ``BaseAgentTool`` instances beyond the
             built-in set. Merged with default tools and fully visible in
             the system prompt, ``AgentContext``, and compaction rebuild.
+        mcp_servers: MCP server configurations keyed by server name.
+            The name is used as the tool prefix (``mcp__<name>__<tool>``).
+            OpenAgent connects to each server, discovers their tools,
+            and manages connections for the agent's lifetime.
         search_provider: Web search provider.
         fetch_provider: Web fetch provider.
         skill_paths: Directories to scan for skill folders.
@@ -87,88 +212,102 @@ async def create_agent(
         store: LangGraph store for cross-thread memory.
 
     Returns:
-        A configured OpenAgent agent.
+        A configured OpenAgent agent. Use as an async context manager
+        to ensure MCP connections are cleaned up.
 
     Examples:
         Basic usage::
 
-            agent = await create_agent("openai:gpt-5.2", LocalNativeComputer())
-            result = await agent.ainvoke({"messages": [...]})
+            async with await create_agent("openai:gpt-5.2", LocalNativeComputer()) as agent:
+                result = await agent.ainvoke({"messages": [...]})
 
-        With model-aware compaction::
+        With MCP servers::
 
-            from langchain.chat_models import init_chat_model
-
-            profile = ModelProfile(
-                model=init_chat_model("openai:gpt-5.2"),
-                context_window=128_000,
-            )
-            agent = await create_agent(profile, computer)
-
-        With a fast model for web tool summarization::
-
-            agent = await create_agent(
+            async with await create_agent(
                 model,
                 computer,
-                fast_model="openai:gpt-4.1-mini",
-                search_provider=my_search,
-            )
-
-        With skills::
-
-            agent = await create_agent(model, computer, skill_paths=("/mnt/skills",))
+                mcp_servers={
+                    "gh": {"type": "http", "url": "https://mcp.github.com/mcp"},
+                },
+            ) as agent:
+                result = await agent.ainvoke({"messages": [...]})
     """
-    # 1. Resolve models (warns + applies fallback if threshold unknown)
-    main_profile = _resolve_to_profile(model)
-    fast_profile = _resolve_to_profile(fast_model) if fast_model is not None else main_profile
+    # 1. Resource stack for managed async resources
+    resources = AsyncExitStack()
+    await resources.__aenter__()
 
-    # 4. Build tools
-    tools: list[BaseAgentTool[Any]] = list(create_cli_tools(computer))
-    if search_provider is not None:
-        tools.append(WebSearchTool(search_provider, model=_create_completion_model(fast_profile)))
-    if fetch_provider is not None:
-        tools.append(WebFetchTool(fetch_provider, model=_create_completion_model(fast_profile)))
-    if extra_tools is not None:
-        tools.extend(extra_tools)
+    try:
+        # 2. Resolve models (warns + applies fallback if threshold unknown)
+        main_profile = _resolve_to_profile(model)
+        fast_profile = _resolve_to_profile(fast_model) if fast_model is not None else main_profile
 
-    # 5. Discover skills
-    resolver: SkillResolver | None = None
-    skills: list[Skill] = []
-    if skill_paths:
-        resolver = SkillResolver(computer, list(skill_paths))
-        skills = await resolver.discover()
-        tools.append(SkillTool(catalog=resolver))
+        # 3. Build tools
+        tools: list[BaseAgentTool[Any]] = list(create_cli_tools(computer))
+        if search_provider is not None:
+            tools.append(WebSearchTool(search_provider, model=_create_completion_model(fast_profile)))
+        if fetch_provider is not None:
+            tools.append(WebFetchTool(fetch_provider, model=_create_completion_model(fast_profile)))
+        if extra_tools is not None:
+            tools.extend(extra_tools)
+        mcp_clients: list[McpClient] = []
+        if mcp_servers:
+            from openagent.mcp._connector import McpConnector
 
-    # 6. Detect environment and compose initial system prompt
-    model_name = getattr(main_profile.model, "model_name", type(main_profile.model).__name__)
-    env_resolver = EnvironmentResolver(computer)
-    env = await env_resolver.resolve()
-    ctx = AgentContext(model_name=model_name, tools=tools, skills=skills, mcps=[], environment=env)
-    assembled_prompt = compose(FRESH_SESSION, ctx)
+            connector = McpConnector(mcp_servers)
+            await resources.enter_async_context(connector)
+            mcp_clients = connector.clients
+            tools.extend(connector.tools)
 
-    # 7. Create middleware
-    middleware = AgentMiddleware(
-        model=main_profile,
-        tools=tools,
-        system_prompt=assembled_prompt,
-        permission_gate=PermissionGate(),
-        environment=env,
-        environment_resolver=env_resolver,
-        skills=skills,
-        skill_resolver=resolver,
-        reminders=list(reminders),
-    )
+        # 4. Discover skills
+        resolver: SkillResolver | None = None
+        skills: list[Skill] = []
+        if skill_paths:
+            resolver = SkillResolver(computer, list(skill_paths))
+            skills = await resolver.discover()
+            tools.append(SkillTool(catalog=resolver))
 
-    # 8. Create agent
-    # NOTE: system_prompt=None — we manage the SystemMessage in state["messages"]
-    # via the middleware's first-turn injection and compaction rebuild.
-    # All tools are provided by the middleware (via its .tools property).
-    return _create_langchain_agent(
-        main_profile.model,
-        middleware=[middleware],
-        checkpointer=checkpointer,
-        store=store,
-    ).with_config({"recursion_limit": 10_000})
+        # 5. Detect environment and compose initial system prompt
+        model_name = getattr(main_profile.model, "model_name", type(main_profile.model).__name__)
+        env_resolver = EnvironmentResolver(computer)
+        env = await env_resolver.resolve()
+        ctx = AgentContext(model_name=model_name, tools=tools, skills=skills, mcps=mcp_clients, environment=env)
+        assembled_prompt = compose(FRESH_SESSION, ctx)
+
+        # 6. Create middleware
+        middleware = AgentMiddleware(
+            model=main_profile,
+            tools=tools,
+            system_prompt=assembled_prompt,
+            permission_gate=PermissionGate(),
+            environment=env,
+            environment_resolver=env_resolver,
+            skills=skills,
+            mcps=mcp_clients,
+            skill_resolver=resolver,
+            reminders=list(reminders),
+        )
+
+        # 7. Create graph
+        graph: CompiledStateGraph[Any] = _create_langchain_agent(
+            main_profile.model,
+            middleware=[middleware],
+            checkpointer=checkpointer,
+            store=store,
+        ).with_config({"recursion_limit": 10_000})
+
+        return Agent(
+            graph,
+            resources,
+            model_name=model_name,
+            tools=tools,
+            skills=skills,
+            mcps=mcp_clients,
+            system_prompt=assembled_prompt,
+        )
+
+    except BaseException:
+        await resources.__aexit__(None, None, None)
+        raise
 
 
 def _resolve_to_profile(

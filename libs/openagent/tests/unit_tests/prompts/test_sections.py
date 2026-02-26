@@ -4,8 +4,7 @@
 
 from datetime import UTC, date, datetime
 
-import pytest
-
+from openagent.mcp import McpClient
 from openagent.prompts import FRESH_SESSION, RESUMED_SESSION, compose
 from openagent.prompts.sections import (
     agency,
@@ -18,9 +17,17 @@ from openagent.prompts.sections import (
     tool_instructions,
     using_your_tools,
 )
-from openagent.types import AgentContext, EnvironmentContext, MCPServer
+from openagent.types import AgentContext, EnvironmentContext
 
 from ..conftest import core_tools, make_tool
+
+
+def _make_mcp_client(name: str, instructions: str = "") -> McpClient:
+    """Create an McpClient with pre-set instructions for testing."""
+    client = McpClient(name, {"type": "http", "url": "https://example.com"})
+    client._instructions = instructions
+    return client
+
 
 # ---------------------------------------------------------------------------
 # Section functions
@@ -121,10 +128,11 @@ class TestToolInstructions:
         assert "${GIT_PARALLEL_NOTE}" not in result
         assert "run multiple tool calls in parallel" in result
 
-    def test_raises_for_tool_without_fragment_or_instruction(self) -> None:
+    def test_skips_tool_without_fragment_or_instruction(self) -> None:
         ctx = AgentContext(tools=[make_tool("nonexistent_tool_xyz")])
-        with pytest.raises(KeyError, match="Missing tool instruction"):
-            tool_instructions(ctx)
+        result = tool_instructions(ctx)
+        assert result is not None
+        assert "nonexistent_tool_xyz" not in result
 
     def test_falls_back_to_inline_instruction(self) -> None:
         ctx = AgentContext(tools=[make_tool("custom", instruction="Custom inline docs.")])
@@ -147,7 +155,7 @@ class TestMcps:
         assert mcps(AgentContext()) is None
 
     def test_formats_mcp_entry(self) -> None:
-        ctx = AgentContext(mcps=[MCPServer(name="github", description="GitHub API")])
+        ctx = AgentContext(mcps=[_make_mcp_client("github", "GitHub API")])
         result = mcps(ctx)
         assert result is not None
         assert "# MCP Servers" in result
@@ -194,7 +202,7 @@ class TestCompose:
         assert "Using your tools" not in result
 
     def test_joins_sections_with_double_newline(self) -> None:
-        ctx = AgentContext(mcps=[MCPServer(name="github", description="GitHub API")])
+        ctx = AgentContext(mcps=[_make_mcp_client("github", "GitHub API")])
         result = compose([identity, mcps], ctx)
         parts = result.split("\n\n")
         assert len(parts) >= 2
@@ -208,7 +216,7 @@ class TestCompose:
     def test_section_ordering_matches_profile(self) -> None:
         ctx = AgentContext(
             tools=core_tools(),
-            mcps=[MCPServer(name="github", description="GitHub API")],
+            mcps=[_make_mcp_client("github", "GitHub API")],
         )
         result = compose(FRESH_SESSION, ctx)
         identity_pos = result.index("OpenAgent")
@@ -217,7 +225,7 @@ class TestCompose:
         assert identity_pos < tools_pos < mcps_pos
 
     def test_custom_profile_only_includes_specified_sections(self) -> None:
-        ctx = AgentContext(mcps=[MCPServer(name="github", description="GitHub API")])
+        ctx = AgentContext(mcps=[_make_mcp_client("github", "GitHub API")])
         result = compose([identity, mcps], ctx)
         assert "OpenAgent" in result
         assert "github" in result

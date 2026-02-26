@@ -75,22 +75,21 @@ class TestDeepAgentEndToEnd:
 
         # Create a deep agent with the fake model
         computer = LocalNativeComputer()
-        agent = await create_agent(model, computer)
+        async with await create_agent(model, computer) as agent:
+            # Invoke the agent with a simple message
+            result = await agent.ainvoke({"messages": [HumanMessage(content="Hello, agent!")]})
 
-        # Invoke the agent with a simple message
-        result = await agent.ainvoke({"messages": [HumanMessage(content="Hello, agent!")]})
+            # Verify the agent executed correctly
+            assert "messages" in result
+            assert len(result["messages"]) > 0
 
-        # Verify the agent executed correctly
-        assert "messages" in result
-        assert len(result["messages"]) > 0
+            # Verify we got AI responses
+            ai_messages = [msg for msg in result["messages"] if msg.type == "ai"]
+            assert len(ai_messages) > 0
 
-        # Verify we got AI responses
-        ai_messages = [msg for msg in result["messages"] if msg.type == "ai"]
-        assert len(ai_messages) > 0
-
-        # Verify the final AI message contains our expected content
-        final_ai_message = ai_messages[-1]
-        assert "Task completed successfully!" in final_ai_message.content
+            # Verify the final AI message contains our expected content
+            final_ai_message = ai_messages[-1]
+            assert "Task completed successfully!" in final_ai_message.content
 
     async def test_deep_agent_with_fake_llm_with_tools(self) -> None:
         """Test deepagent with tools using a fake LLM model.
@@ -122,20 +121,19 @@ class TestDeepAgentEndToEnd:
 
         # Create a deep agent with the fake model and sample_tool
         computer = LocalNativeComputer()
-        agent = await create_agent(model, computer, extra_tools=[sample_tool])
+        async with await create_agent(model, computer, extra_tools=[sample_tool]) as agent:
+            # Invoke the agent
+            result = await agent.ainvoke({"messages": [HumanMessage(content="Use the sample tool")]})
 
-        # Invoke the agent
-        result = await agent.ainvoke({"messages": [HumanMessage(content="Use the sample tool")]})
+            # Verify the agent executed correctly
+            assert "messages" in result
 
-        # Verify the agent executed correctly
-        assert "messages" in result
+            # Verify tool was called
+            tool_messages = [msg for msg in result["messages"] if msg.type == "tool"]
+            assert len(tool_messages) > 0
 
-        # Verify tool was called
-        tool_messages = [msg for msg in result["messages"] if msg.type == "tool"]
-        assert len(tool_messages) > 0
-
-        # Verify the tool message contains our expected input
-        assert any("test input" in msg.content for msg in tool_messages)
+            # Verify the tool message contains our expected input
+            assert any("test input" in msg.content for msg in tool_messages)
 
     async def test_deep_agent_with_fake_llm_bash_tool(self) -> None:
         """Test deepagent with bash tool using a fake LLM model.
@@ -167,17 +165,16 @@ class TestDeepAgentEndToEnd:
 
         # Create a deep agent with the fake model
         computer = LocalNativeComputer()
-        agent = await create_agent(model, computer)
+        async with await create_agent(model, computer) as agent:
+            # Invoke the agent
+            result = await agent.ainvoke({"messages": [HumanMessage(content="List files")]})
 
-        # Invoke the agent
-        result = await agent.ainvoke({"messages": [HumanMessage(content="List files")]})
+            # Verify the agent executed correctly
+            assert "messages" in result
 
-        # Verify the agent executed correctly
-        assert "messages" in result
-
-        # Verify bash tool was called
-        tool_messages = [msg for msg in result["messages"] if msg.type == "tool"]
-        assert len(tool_messages) > 0
+            # Verify bash tool was called
+            tool_messages = [msg for msg in result["messages"] if msg.type == "tool"]
+            assert len(tool_messages) > 0
 
     async def test_deep_agent_with_fake_llm_multiple_tool_calls(self) -> None:
         """Test deepagent with multiple tool calls using a fake LLM model.
@@ -220,22 +217,21 @@ class TestDeepAgentEndToEnd:
 
         # Create a deep agent with the fake model and sample_tool
         computer = LocalNativeComputer()
-        agent = await create_agent(model, computer, extra_tools=[sample_tool])
+        async with await create_agent(model, computer, extra_tools=[sample_tool]) as agent:
+            # Invoke the agent
+            result = await agent.ainvoke({"messages": [HumanMessage(content="Use sample tool twice")]})
 
-        # Invoke the agent
-        result = await agent.ainvoke({"messages": [HumanMessage(content="Use sample tool twice")]})
+            # Verify the agent executed correctly
+            assert "messages" in result
 
-        # Verify the agent executed correctly
-        assert "messages" in result
+            # Verify multiple tool calls occurred
+            tool_messages = [msg for msg in result["messages"] if msg.type == "tool"]
+            assert len(tool_messages) >= 2
 
-        # Verify multiple tool calls occurred
-        tool_messages = [msg for msg in result["messages"] if msg.type == "tool"]
-        assert len(tool_messages) >= 2
-
-        # Verify both inputs were used
-        tool_contents = [msg.content for msg in tool_messages]
-        assert any("first call" in content for content in tool_contents)
-        assert any("second call" in content for content in tool_contents)
+            # Verify both inputs were used
+            tool_contents = [msg.content for msg in tool_messages]
+            assert any("first call" in content for content in tool_contents)
+            assert any("second call" in content for content in tool_contents)
 
     async def test_deep_agent_with_string_model_name(self) -> None:
         """Test that create_agent handles string model names correctly.
@@ -258,14 +254,13 @@ class TestDeepAgentEndToEnd:
         with patch("openagent.langchain.agent.init_chat_model", return_value=fake_model):
             # This should not raise AttributeError: 'str' object has no attribute 'profile'
             computer = LocalNativeComputer()
-            agent = await create_agent("claude-sonnet-4-5-20250929", computer, extra_tools=[sample_tool])
+            async with await create_agent("claude-sonnet-4-5-20250929", computer, extra_tools=[sample_tool]) as agent:
+                # Verify agent was created successfully
+                assert agent is not None
 
-            # Verify agent was created successfully
-            assert agent is not None
+                # Invoke the agent to ensure it works
+                result = await agent.ainvoke({"messages": [HumanMessage(content="Test message")]})
 
-            # Invoke the agent to ensure it works
-            result = await agent.ainvoke({"messages": [HumanMessage(content="Test message")]})
-
-            # Verify the agent executed correctly
-            assert "messages" in result
-            assert len(result["messages"]) > 0
+                # Verify the agent executed correctly
+                assert "messages" in result
+                assert len(result["messages"]) > 0

@@ -46,8 +46,9 @@ if TYPE_CHECKING:
     from openagent.harness.environment import EnvironmentResolver
     from openagent.harness.model import ModelProfile
     from openagent.harness.skills import SkillResolver
+    from openagent.mcp import McpClient
     from openagent.tools.base import BaseAgentTool
-    from openagent.types import MCPServer, Skill
+    from openagent.types import Skill
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +196,7 @@ class AgentMiddleware(LangChainAgentMiddleware):
         environment: EnvironmentContext | None = None,
         environment_resolver: EnvironmentResolver | None = None,
         skills: Sequence[Skill] = (),
-        mcps: Sequence[MCPServer] = (),
+        mcps: Sequence[McpClient] = (),
         skill_resolver: SkillResolver | None = None,
         reminders: Sequence[Reminder] = (),
         approval_callback: ApprovalCallback | None = None,
@@ -213,7 +214,7 @@ class AgentMiddleware(LangChainAgentMiddleware):
                 on compaction rebuild.  When provided, ``_rebuild_after_compaction``
                 re-resolves live values (e.g. ``TODAY_DATE``).
             skills: Discovered skills.
-            mcps: MCP server descriptors.
+            mcps: Connected MCP clients.
             skill_resolver: Optional resolver for injecting skill content.
             reminders: Reminder rules for dynamic system-reminder injection.
             approval_callback: Optional callback for human-in-the-loop approval.
