@@ -23,6 +23,15 @@ dependencies = [
     "mcp>=1.25.0,<2.0.0",
 ]
 
+[project.optional-dependencies]
+braintrust = ["braintrust>=0.7.0", "braintrust-langchain>=0.2.1"]
+langsmith = ["langsmith>=0.1.0"]
+observe = [
+    "braintrust>=0.7.0",
+    "braintrust-langchain>=0.2.1",
+    "langsmith>=0.1.0",
+]
+
 [project.urls]
 Repository = "https://github.com/an7tang/openagent"
 Issues = "https://github.com/an7tang/openagent/issues"
