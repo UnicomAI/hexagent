@@ -244,7 +244,6 @@ class CLIResult:
 class BashToolParams(BaseModel):
     """Input schema for bash tool."""
 
-    command: str = Field(description="Shell command to execute.")
     description: str = Field(
         description=(
             "Clear, concise description of what this command does in active voice."
@@ -252,6 +251,7 @@ class BashToolParams(BaseModel):
             " - just describe what it does."
         ),
     )
+    command: str = Field(description="Shell command to execute.")
     run_in_background: bool = Field(
         default=False,
         description="Set to true to run this command in the background. Use TaskOutput to read the output later.",
