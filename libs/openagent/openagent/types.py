@@ -465,6 +465,25 @@ class TaskStopToolParams(BaseModel):
     task_id: str = Field(description="The task ID to cancel")
 
 
+class TodoItem(BaseModel):
+    """A single todo item."""
+
+    content: str = Field(min_length=1, description="The todo item content")
+    status: Literal["pending", "in_progress", "completed"] = Field(
+        description="The status of the todo item",
+    )
+    active_form: str = Field(
+        min_length=1,
+        description="The active form of the todo item",
+    )
+
+
+class TodoWriteToolParams(BaseModel):
+    """Input schema for the TodoWrite tool."""
+
+    todos: list[TodoItem] = Field(description="The updated todo list")
+
+
 # Runtime Types
 
 
