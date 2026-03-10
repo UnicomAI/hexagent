@@ -11,6 +11,21 @@ if TYPE_CHECKING:
 # Safety cap for command execution timeout
 BASH_MAX_TIMEOUT_MS = 600000  # 10 minutes
 
+# Standard session directories (relative to $HOME).
+SESSION_TMP_DIR = "tmp"
+SESSION_MNT_DIR = "mnt"
+SESSION_OUTPUTS_DIR = "mnt/outputs"
+SESSION_UPLOADS_DIR = "mnt/uploads"
+SESSION_SKILLS_DIR = "mnt/.skills"
+
+SESSION_DIRS: tuple[str, ...] = (
+    SESSION_TMP_DIR,
+    SESSION_MNT_DIR,
+    SESSION_OUTPUTS_DIR,
+    SESSION_UPLOADS_DIR,
+    SESSION_SKILLS_DIR,
+)
+
 
 @dataclass(frozen=True)
 class ExecutionMetadata:

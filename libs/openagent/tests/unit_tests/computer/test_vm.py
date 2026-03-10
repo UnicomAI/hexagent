@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 import pytest
 
-from openagent.computer.base import BASH_MAX_TIMEOUT_MS, Computer
+from openagent.computer.base import BASH_MAX_TIMEOUT_MS, SESSION_DIRS, Computer
 from openagent.computer.local._lima import LimaVM, Mount
 from openagent.exceptions import CLIError, LimaError, MissingDependencyError, UnsupportedPlatformError, VMError
 from openagent.types import CLIResult
@@ -113,8 +113,8 @@ class TestStartStop:
         """First start creates a user via shell commands."""
         vm = _mock_vm()
         # id -u check fails (user doesn't exist) → name is unique
-        # useradd succeeds
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok()])
+        # useradd succeeds, mkdir succeeds
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
         computer = _make_computer(vm)
 
         await computer.start()
@@ -126,20 +126,20 @@ class TestStartStop:
     async def test_start_is_idempotent(self) -> None:
         """Calling start() twice doesn't re-initialize."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
         computer = _make_computer(vm)
 
         await computer.start()
         await computer.start()  # no-op
 
-        # VM start called once, shell called twice (id + useradd)
+        # VM start called once, shell called 3x (id + useradd + mkdir)
         vm.start.assert_awaited_once()
-        assert vm.shell.await_count == 2
+        assert vm.shell.await_count == 3
 
     async def test_stop_sets_not_running(self) -> None:
         """Stop marks the computer as not running."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
         computer = _make_computer(vm)
 
         await computer.start()
@@ -160,7 +160,7 @@ class TestStartStop:
     async def test_restart_after_stop_calls_vm_start(self) -> None:
         """Second start() after stop() restarts the VM without re-creating user."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
         computer = _make_computer(vm)
 
         await computer.start()
@@ -205,23 +205,23 @@ class TestRun:
     async def test_run_passes_command_to_vm(self) -> None:
         """Run delegates to vm.shell with the session user."""
         vm = _mock_vm()
-        # start: id -u fails (unique), useradd succeeds
+        # start: id -u fails (unique), useradd succeeds, mkdir succeeds
         # run: shell returns output
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(stdout="hello")])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok(stdout="hello")])
         computer = _make_computer(vm)
         await computer.start()
 
         result = await computer.run("echo hello")
 
         assert result.stdout == "hello"
-        # Third call is the actual run
-        call_kwargs = vm.shell.call_args_list[2].kwargs
+        # Fourth call is the actual run
+        call_kwargs = vm.shell.call_args_list[3].kwargs
         assert call_kwargs["user"] == computer.session_name
 
     async def test_run_auto_starts(self) -> None:
         """Run auto-starts if not started."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(stdout="hi")])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok(stdout="hi")])
         computer = _make_computer(vm)
 
         result = await computer.run("echo hi")
@@ -232,48 +232,76 @@ class TestRun:
     async def test_run_timeout_converted_to_seconds(self) -> None:
         """Timeout is converted from ms to seconds."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
         computer = _make_computer(vm)
         await computer.start()
 
         await computer.run("cmd", timeout=5000.0)
 
-        call_kwargs = vm.shell.call_args_list[2].kwargs
+        call_kwargs = vm.shell.call_args_list[3].kwargs
         assert call_kwargs["timeout"] == 5.0
 
     async def test_run_timeout_capped_at_max(self) -> None:
         """Timeout is capped at BASH_MAX_TIMEOUT_MS."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
         computer = _make_computer(vm)
         await computer.start()
 
         await computer.run("cmd", timeout=BASH_MAX_TIMEOUT_MS + 100000)
 
-        call_kwargs = vm.shell.call_args_list[2].kwargs
+        call_kwargs = vm.shell.call_args_list[3].kwargs
         assert call_kwargs["timeout"] == BASH_MAX_TIMEOUT_MS / 1000
 
     async def test_run_default_timeout(self) -> None:
         """Default timeout is BASH_MAX_TIMEOUT_MS."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
         computer = _make_computer(vm)
         await computer.start()
 
         await computer.run("cmd")
 
-        call_kwargs = vm.shell.call_args_list[2].kwargs
+        call_kwargs = vm.shell.call_args_list[3].kwargs
         assert call_kwargs["timeout"] == BASH_MAX_TIMEOUT_MS / 1000
 
     async def test_run_translates_vm_error_to_cli_error(self) -> None:
         """VMError from shell is translated to CLIError."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), VMError("boom")])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), VMError("boom")])
         computer = _make_computer(vm)
         await computer.start()
 
         with pytest.raises(CLIError, match="boom"):
             await computer.run("bad")
+
+
+class TestCreateUser:
+    """Tests for _create_user directory setup."""
+
+    async def test_creates_session_dirs(self) -> None:
+        """Session directories from SESSION_DIRS are created after user creation."""
+        vm = _mock_vm()
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
+        computer = _make_computer(vm)
+        await computer.start()
+
+        # Third shell call is the mkdir + chown
+        mkdir_call = vm.shell.call_args_list[2].args[0]
+        name = computer.session_name
+        home = f"/sessions/{name}"
+        for d in SESSION_DIRS:
+            assert f"{home}/{d}" in mkdir_call
+
+    async def test_mkdir_failure_raises_vm_error(self) -> None:
+        """VMError raised when mkdir fails."""
+        vm = _mock_vm()
+        # id -u fails (unique), useradd succeeds, mkdir fails
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _fail(stderr="permission denied")])
+        computer = _make_computer(vm)
+
+        with pytest.raises(VMError, match="Failed to create session directories"):
+            await computer.start()
 
 
 class TestNameGeneration:
@@ -322,7 +350,7 @@ class TestDeleteSession:
     async def test_delete_clears_state(self) -> None:
         """Delete resets session state."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
         computer = _make_computer(vm)
         await computer.start()
         assert computer.session_name is not None
@@ -336,7 +364,7 @@ class TestDeleteSession:
     async def test_delete_calls_userdel(self) -> None:
         """Delete runs userdel -r on the VM."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
         computer = _make_computer(vm)
         await computer.start()
         name = computer.session_name
@@ -374,7 +402,8 @@ class TestListSessions:
         vm.shell = AsyncMock(
             side_effect=[
                 _fail(),
-                _ok(),  # start (id + useradd)
+                _ok(),
+                _ok(),  # start (id + useradd + mkdir)
                 _ok(stdout="alpha bravo charlie"),  # ls
             ]
         )
@@ -391,6 +420,7 @@ class TestListSessions:
         vm.shell = AsyncMock(
             side_effect=[
                 _fail(),
+                _ok(),
                 _ok(),  # start
                 _fail(),  # ls fails
             ]
@@ -406,6 +436,7 @@ class TestListSessions:
         vm.shell = AsyncMock(
             side_effect=[
                 _fail(),
+                _ok(),
                 _ok(),  # start
                 _ok(stdout="   "),  # ls returns whitespace only
             ]
@@ -422,7 +453,7 @@ class TestUpload:
     async def test_upload_calls_vm_copy(self, tmp_path: Path) -> None:
         """Upload calls vm.copy with host_to_guest=True."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok(), _ok()])
         vm.copy = AsyncMock()
         computer = _make_computer(vm)
 
@@ -436,7 +467,7 @@ class TestUpload:
     async def test_upload_creates_parent_dir_on_guest(self, tmp_path: Path) -> None:
         """Upload runs mkdir -p on the guest before copying."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok(), _ok()])
         vm.copy = AsyncMock()
         computer = _make_computer(vm)
 
@@ -445,15 +476,15 @@ class TestUpload:
 
         await computer.upload(str(src), "/remote/deep/file.txt")
 
-        # Third shell call (after id + useradd) should be mkdir -p
-        mkdir_call = vm.shell.call_args_list[2]
+        # Fourth shell call (after id + useradd + mkdir) should be mkdir -p
+        mkdir_call = vm.shell.call_args_list[3]
         assert "mkdir -p" in mkdir_call.args[0]
         assert "/remote/deep" in mkdir_call.args[0]
 
     async def test_upload_chowns_to_session_user(self, tmp_path: Path) -> None:
         """Upload chowns the file to the session user after copy."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok(), _ok()])
         vm.copy = AsyncMock()
         computer = _make_computer(vm)
 
@@ -462,15 +493,15 @@ class TestUpload:
 
         await computer.upload(str(src), "/remote/file.txt")
 
-        # Fourth shell call should be chown
-        chown_call = vm.shell.call_args_list[3]
+        # Fifth shell call should be chown
+        chown_call = vm.shell.call_args_list[4]
         assert "chown" in chown_call.args[0]
         assert computer.session_name in chown_call.args[0]
 
     async def test_upload_auto_starts(self, tmp_path: Path) -> None:
         """Upload auto-starts if not running."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok(), _ok()])
         vm.copy = AsyncMock()
         computer = _make_computer(vm)
 
@@ -484,7 +515,7 @@ class TestUpload:
     async def test_upload_missing_src_raises_file_not_found(self, tmp_path: Path) -> None:
         """FileNotFoundError for missing source."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
         computer = _make_computer(vm)
         await computer.start()
 
@@ -494,7 +525,7 @@ class TestUpload:
     async def test_upload_translates_vm_error_to_cli_error(self, tmp_path: Path) -> None:
         """VMError from copy is translated to CLIError."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
         vm.copy = AsyncMock(side_effect=VMError("copy failed"))
         computer = _make_computer(vm)
 
@@ -511,7 +542,7 @@ class TestDownload:
     async def test_download_calls_vm_copy(self, tmp_path: Path) -> None:
         """Download calls vm.copy with host_to_guest=False."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
         vm.copy = AsyncMock()
         computer = _make_computer(vm)
 
@@ -524,7 +555,7 @@ class TestDownload:
     async def test_download_creates_parent_dirs_on_host(self, tmp_path: Path) -> None:
         """Download creates parent directories on host side."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
         vm.copy = AsyncMock()
         computer = _make_computer(vm)
 
@@ -537,7 +568,7 @@ class TestDownload:
     async def test_download_auto_starts(self, tmp_path: Path) -> None:
         """Download auto-starts if not running."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
         vm.copy = AsyncMock()
         computer = _make_computer(vm)
 
@@ -548,7 +579,7 @@ class TestDownload:
     async def test_download_translates_vm_error_to_cli_error(self, tmp_path: Path) -> None:
         """VMError from copy is translated to CLIError."""
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
         vm.copy = AsyncMock(side_effect=VMError("copy failed"))
         computer = _make_computer(vm)
 
@@ -561,7 +592,7 @@ class TestContextManager:
 
     async def test_context_manager_starts_and_stops(self) -> None:
         vm = _mock_vm()
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
         computer = _make_computer(vm)
 
         async with computer:

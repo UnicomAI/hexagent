@@ -20,6 +20,7 @@ import petname
 
 from openagent.computer.base import (
     BASH_MAX_TIMEOUT_MS,
+    SESSION_DIRS,
     AsyncComputerMixin,
     Computer,
 )
@@ -168,10 +169,17 @@ class LocalVMComputer(AsyncComputerMixin):
         raise VMError(msg)
 
     async def _create_user(self, name: str) -> None:
-        """Create the Linux user for this session."""
-        result = await self._vm.shell(f"sudo useradd -m -d /sessions/{name} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {name}")
+        """Create the Linux user and standard session directories."""
+        home = f"/sessions/{name}"
+        result = await self._vm.shell(f"sudo useradd -m -d {home} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {name}")
         if result.exit_code != 0:
             msg = f"Failed to create session user '{name}': {result.stderr}"
+            raise VMError(msg)
+
+        dirs = " ".join(f"{home}/{d}" for d in SESSION_DIRS)
+        result = await self._vm.shell(f"sudo mkdir -p {dirs} && sudo chown -R {name} {dirs}")
+        if result.exit_code != 0:
+            msg = f"Failed to create session directories for '{name}': {result.stderr}"
             raise VMError(msg)
 
     async def upload(self, src: str, dst: str) -> None:
