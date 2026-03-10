@@ -479,7 +479,8 @@ def _create_completion_model(profile: ModelProfile) -> CompletionModel:
             [
                 SystemMessage(content=system),
                 HumanMessage(content=user),
-            ]
+            ],
+            config={"tags": ["openagent:tool"]},
         )
         return str(resp.content)
 
