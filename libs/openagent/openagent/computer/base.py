@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Protocol, Self, runtime_checkable
 
 if TYPE_CHECKING:
@@ -16,15 +17,49 @@ SESSION_TMP_DIR = "tmp"
 SESSION_MNT_DIR = "mnt"
 SESSION_OUTPUTS_DIR = "mnt/outputs"
 SESSION_UPLOADS_DIR = "mnt/uploads"
-SESSION_SKILLS_DIR = "mnt/.skills"
-
 SESSION_DIRS: tuple[str, ...] = (
     SESSION_TMP_DIR,
     SESSION_MNT_DIR,
     SESSION_OUTPUTS_DIR,
     SESSION_UPLOADS_DIR,
-    SESSION_SKILLS_DIR,
 )
+
+
+@dataclass(frozen=True)
+class Mount:
+    """A host directory to mount into a computer session.
+
+    The ``target`` field determines the guest mount path:
+
+    - **Relative** (e.g. ``"project"``, ``".skills/coding"``): sandboxed
+      under the scope's ``mnt/`` directory. Safe by default.
+    - **Absolute** (e.g. ``"/opt/tools"``): exact guest path.
+      Escape hatch for power users.
+
+    Examples::
+
+        Mount(source="/x/skills/coding", target=".skills/coding")
+        Mount(source="/y/project", target="project", writable=True)
+        Mount(source="/x/tools", target="/opt/custom-tools")
+
+    Attributes:
+        source: Absolute path to the host directory.
+        target: Guest mount path — relative to ``mnt/`` or absolute.
+        writable: Allow writes from the guest.
+    """
+
+    source: str
+    target: str
+    writable: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate mount target."""
+        if not self.target:
+            msg = "Mount target must not be empty"
+            raise ValueError(msg)
+        if not self.target.startswith("/") and ".." in PurePosixPath(self.target).parts:
+            msg = f"Mount target must not contain '..': {self.target!r}"
+            raise ValueError(msg)
 
 
 @dataclass(frozen=True)

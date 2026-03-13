@@ -1,18 +1,20 @@
-"""Local VM computer — an isolated session on a platform-specific VM.
+"""Local VM — a shared VM that hands out isolated session computers.
 
-Each ``LocalVMComputer`` is an isolated session backed by a unique Linux user
-on a shared VM. Commands run in the session user's home directory
-at ``/sessions/<petname>/``.
+``LocalVM`` owns:
+- VM lifecycle (start/stop via LimaVM)
+- Mount state (lima.yaml is the single source of truth)
+- Session lifecycle (create/destroy Linux users)
 
-The VM backend is selected automatically based on the host platform:
-- macOS: Lima VM (requires ``limactl``)
-- Windows: (coming soon)
+Users call :meth:`LocalVM.computer` to get a ``Computer`` handle bound
+to an isolated Linux user on the VM.
 """
 
 from __future__ import annotations
 
+import asyncio
 import shlex
 import sys
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,176 +23,102 @@ import petname
 from openagent.computer.base import (
     BASH_MAX_TIMEOUT_MS,
     SESSION_DIRS,
+    SESSION_OUTPUTS_DIR,
+    SESSION_TMP_DIR,
     AsyncComputerMixin,
     Computer,
+    Mount,
 )
-from openagent.exceptions import CLIError, UnsupportedPlatformError, VMError
+from openagent.computer.local._types import ResolvedMount
+from openagent.exceptions import CLIError, UnsupportedPlatformError, VMError, VMMountConflictError
 
 if TYPE_CHECKING:
-    from openagent.computer.local._lima import LimaVM, Mount
+    from openagent.computer.local._lima import LimaVM
     from openagent.types import CLIResult
 
 
-def _create_vm(instance: str) -> LimaVM:
-    """Create the platform-appropriate VM backend."""
-    if sys.platform == "darwin":
-        from openagent.computer.local._lima import LimaVM
-
-        return LimaVM(instance=instance)
-
-    msg = f"LocalVMComputer is currently not supported on {sys.platform}"
-    raise UnsupportedPlatformError(msg)
+# ------------------------------------------------------------------
+# Session handle (internal)
+# ------------------------------------------------------------------
 
 
-class LocalVMComputer(AsyncComputerMixin):
-    """An isolated session on a platform-specific VM.
+class _VMSessionComputer(AsyncComputerMixin):
+    """Session-scoped execution handle on a shared VM.
 
-    The VM backend is selected automatically based on the host OS:
-    - macOS → Lima VM
-    - Windows → (coming soon)
-
-    Each instance gets an isolated Linux user on the VM.
-
-    The session's home directory is ``/sessions/<name>/`` and host mounts
-    appear at ``/sessions/<name>/mnt/<basename>``.
+    Created by :meth:`LocalVM.computer`. Do not instantiate directly.
 
     Parameters:
-        instance: VM instance name (default ``"openagent"``).
-        resume: Name of an existing session to reconnect to.
-            When ``None`` (default), a new session with an
-            auto-generated name is created.
-        mounts: Host paths to mount into the session (new sessions only).
+        vm: The VM backend for shell/copy operations.
+        session_name: Linux username for this session.
     """
 
-    def __init__(
-        self,
-        *,
-        instance: str = "openagent",
-        resume: str | None = None,
-        mounts: list[str] | None = None,
-    ) -> None:
-        """Initialize a LocalVMComputer.
-
-        Args:
-            instance: VM instance name.
-            resume: Name of an existing session to reconnect to.
-            mounts: Host paths to mount into the session (new sessions only).
-        """
-        if resume is not None and mounts:
-            msg = "Cannot specify 'mounts' when resuming a session"
-            raise ValueError(msg)
-
-        for mount in mounts or []:
-            p = Path(mount)
-            if not p.exists():
-                msg = f"Mount path does not exist: {mount}"
-                raise ValueError(msg)
-            if not p.is_dir():
-                msg = f"Mount path is not a directory: {mount}"
-                raise ValueError(msg)
-
-        self._vm = _create_vm(instance)
-        self._resume = resume
-        self._mounts = mounts or []
-        self._session_name: str | None = None
-        self._started = False
-        self._session_initialized = False
+    def __init__(self, *, vm: LimaVM, session_name: str) -> None:
+        """Initialize with a VM backend and session name."""
+        self._vm = vm
+        self._session_name = session_name
+        self._active = True
 
     @property
-    def session_name(self) -> str | None:
-        """Session name, or ``None`` until ``start()`` succeeds."""
+    def session_name(self) -> str:
+        """Session name (Linux username on the VM)."""
         return self._session_name
 
     @property
     def is_running(self) -> bool:
-        """Return True if the session is started."""
-        return self._started
+        """True if this handle is active."""
+        return self._active
 
     async def start(self) -> None:
-        """Start the session. Creates the user on first call, restarts the VM on subsequent calls."""
-        if self._started:
+        """Health check — verify the VM is running and session user exists.
+
+        Does NOT start the VM or create sessions.
+        """
+        if self._active:
             return
+        # Re-activate after stop
+        status = await self._vm.status()
+        if status != "Running":
+            msg = "VM is not running"
+            raise CLIError(msg)
+        result = await self._vm.shell(f"id -u {self._session_name}")
+        if result.exit_code != 0:
+            msg = f"Session '{self._session_name}' does not exist on the VM"
+            raise CLIError(msg)
+        self._active = True
 
-        if not self._session_initialized:
-            await self._initialize_session()
-            self._session_initialized = True
-        else:
-            # Restart after stop — session user persists on disk.
-            # Mounts persist in VM config from first start.
-            await self._vm.start()
+    async def stop(self) -> None:
+        """Mark this handle as inactive. Does NOT stop the VM."""
+        self._active = False
 
-        self._started = True
+    async def run(
+        self,
+        command: str,
+        *,
+        timeout: float | None = None,  # noqa: ASYNC109
+    ) -> CLIResult:
+        """Execute a command as the session user.
 
-    async def _initialize_session(self) -> None:
-        """First-time session setup: create or resume user, configure mounts."""
-        await self._vm.start()
+        Args:
+            command: Shell command to run.
+            timeout: Timeout in milliseconds (Computer protocol).
 
-        if self._resume is not None:
-            # Resume existing session — must exist
-            result = await self._vm.shell(f"id -u {self._resume}")
-            if result.exit_code != 0:
-                msg = f"Session '{self._resume}' does not exist on the VM"
-                raise VMError(msg)
-            self._session_name = self._resume
-        else:
-            # New session with auto-generated name
-            name = await self._generate_unique_name()
-            await self._create_user(name)
-            self._session_name = name
-
-        # Configure mounts if any
-        if self._mounts:
-            mount_objs = [self._make_mount(path) for path in self._mounts]
-            # Stops + restarts VM with mounts
-            await self._vm.start(mounts=mount_objs)
-
-    def _make_mount(self, path: str) -> Mount:
-        """Create a mount object for the current VM backend."""
-        if sys.platform == "darwin":
-            from openagent.computer.local._lima import Mount
-
-            return Mount(
-                location=path,
-                mount_point=f"/sessions/{self._session_name}/mnt/{Path(path).name}",
-                writable=True,
+        Returns:
+            CLIResult with stdout, stderr, exit_code, and metadata.
+        """
+        self._check_active()
+        timeout_ms = min(timeout, BASH_MAX_TIMEOUT_MS) if timeout is not None else BASH_MAX_TIMEOUT_MS
+        try:
+            return await self._vm.shell(
+                command,
+                user=self._session_name,
+                timeout=timeout_ms / 1000,
             )
-
-        msg = f"Mounts not supported on {sys.platform}"
-        raise UnsupportedPlatformError(msg)
-
-    async def _generate_unique_name(self, max_attempts: int = 5) -> str:
-        """Generate a unique petname that doesn't collide with existing users."""
-        for _ in range(max_attempts):
-            name: str = petname.generate(words=3, letters=10)
-            result = await self._vm.shell(f"id -u {name}")
-            if result.exit_code != 0:
-                return name
-        msg = f"Failed to generate a unique session name after {max_attempts} attempts"
-        raise VMError(msg)
-
-    async def _create_user(self, name: str) -> None:
-        """Create the Linux user and standard session directories."""
-        home = f"/sessions/{name}"
-        result = await self._vm.shell(f"sudo useradd -m -d {home} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {name}")
-        if result.exit_code != 0:
-            msg = f"Failed to create session user '{name}': {result.stderr}"
-            raise VMError(msg)
-
-        dirs = " ".join(f"{home}/{d}" for d in SESSION_DIRS)
-        result = await self._vm.shell(f"sudo mkdir -p {dirs} && sudo chown -R {name} {dirs}")
-        if result.exit_code != 0:
-            msg = f"Failed to create session directories for '{name}': {result.stderr}"
-            raise VMError(msg)
+        except VMError as e:
+            raise CLIError(str(e)) from e
 
     async def upload(self, src: str, dst: str) -> None:
-        """Transfer a file from the host to the VM session.
-
-        Creates parent directories on the guest and sets ownership
-        to the session user.
-        """
-        if not self._started:
-            await self.start()
-
+        """Transfer a file from the host to the VM session."""
+        self._check_active()
         src_path = Path(src)
         if not src_path.exists():
             msg = f"Source file not found: {src}"
@@ -202,92 +130,402 @@ class LocalVMComputer(AsyncComputerMixin):
         dst_parent = str(Path(dst).parent)
         try:
             await self._vm.shell(f"sudo mkdir -p {shlex.quote(dst_parent)}")
-            await self._vm.copy(src, dst, host_to_guest=True)
-            await self._vm.shell(f"sudo chown {self._session_name} {shlex.quote(dst)}")
+            # Copy to /tmp first (always writable), then sudo mv into place.
+            # This works regardless of destination directory ownership.
+            tmp = f"/tmp/.upload-{uuid.uuid4().hex}"  # noqa: S108
+            await self._vm.copy(src, tmp, host_to_guest=True)
+            await self._vm.shell(
+                f"sudo mv {tmp} {shlex.quote(dst)} && "
+                f"sudo chown {self._session_name}:{self._session_name} {shlex.quote(dst)} && "
+                f"sudo chmod 644 {shlex.quote(dst)}"
+            )
         except VMError as e:
             raise CLIError(str(e)) from e
 
     async def download(self, src: str, dst: str) -> None:
-        """Transfer a file from the VM session to the host.
-
-        Creates parent directories on the host.
-        """
-        if not self._started:
-            await self.start()
-
+        """Transfer a file from the VM session to the host."""
+        self._check_active()
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
-
         try:
             await self._vm.copy(src, dst, host_to_guest=False)
         except VMError as e:
             raise CLIError(str(e)) from e
 
-    async def run(
-        self,
-        command: str,
-        *,
-        timeout: float | None = None,  # noqa: ASYNC109
-    ) -> CLIResult:
-        """Execute a command as the session user.
+    def _check_active(self) -> None:
+        """Raise if handle is inactive."""
+        if not self._active:
+            msg = "Computer handle is inactive — call start() to reactivate"
+            raise CLIError(msg)
 
-        Auto-starts if needed. Timeout is in milliseconds (Computer protocol),
-        converted to seconds for the VM shell.
-        """
-        if not self._started:
-            await self.start()
 
-        # Normalize timeout (ms) with max cap
-        timeout_ms = min(timeout, BASH_MAX_TIMEOUT_MS) if timeout is not None else BASH_MAX_TIMEOUT_MS
-        effective_timeout_secs = timeout_ms / 1000
+# Protocol compliance assertion
+_: type[Computer] = _VMSessionComputer
 
-        try:
-            return await self._vm.shell(
-                command,
-                user=self._session_name,
-                timeout=effective_timeout_secs,
-            )
-        except VMError as e:
-            raise CLIError(str(e)) from e
 
-    async def stop(self) -> None:
-        """Stop the VM. Session state is preserved for restart."""
-        if not self._started:
+# ------------------------------------------------------------------
+# Mount helpers
+# ------------------------------------------------------------------
+
+
+def _mount_set(mounts: list[ResolvedMount]) -> set[tuple[str, str, bool]]:
+    """Convert a list of resolved mounts to a comparable set."""
+    return {(m.host_path, m.guest_path, m.writable) for m in mounts}
+
+
+# ------------------------------------------------------------------
+# LocalVM
+# ------------------------------------------------------------------
+
+
+class LocalVM:
+    """A shared VM that hands out isolated session computers.
+
+    Mount state lives in ``lima.yaml`` (the single source of truth).
+    All mount/unmount operations read from and write to lima.yaml
+    directly — no in-memory mount tracking.
+
+    Parameters:
+        instance: Lima VM instance name.
+    """
+
+    def __init__(self, *, instance: str = "openagent") -> None:
+        """Initialize with a Lima VM instance name."""
+        if sys.platform == "darwin":
+            from openagent.computer.local._lima import LimaVM as _LimaVM
+
+            self._vm: LimaVM = _LimaVM(instance=instance)
+        else:
+            msg = f"LocalVM is not supported on {sys.platform}"
+            raise UnsupportedPlatformError(msg)
+
+        self._instance = instance
+        self._lock = asyncio.Lock()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    async def start(self) -> None:
+        """Ensure the VM is running. Idempotent."""
+        if await self._vm.status() == "Running":
             return
-
-        await self._vm.stop()
-        self._started = False
-        # _session_initialized and _session_name preserved — start() restarts
-        # without recreating the session
-
-    async def delete_session(self) -> None:
-        """Delete the session user and home directory from the VM."""
-        if self._session_name is None:
-            return
-
-        # Ensure VM is running
         await self._vm.start()
 
-        name = self._session_name
-        await self._vm.shell(f"sudo userdel -r {name}")
+    async def stop(self) -> None:
+        """Stop the VM. Idempotent."""
+        if await self._vm.status() != "Running":
+            return
+        await self._vm.stop()
 
-        self._session_name = None
-        self._session_initialized = False
-        self._started = False
+    async def mount(
+        self,
+        mounts: Mount | list[Mount],
+        *,
+        session: str | None = None,
+        defer: bool = False,
+    ) -> None:
+        """Add one or more mounts to the VM.
 
-    async def list_sessions(self) -> list[str]:
-        """List all session directories on the VM.
+        Idempotent: mounts already present in lima.yaml (same host path,
+        guest path, and writable flag) are silently skipped.
+
+        Args:
+            mounts: A single mount or list of mounts to add.
+            session: Target session name. ``None`` = system scope (``/mnt/``).
+            defer: If ``True``, update lima.yaml but skip the VM restart.
+                Call :meth:`apply` later to apply all deferred changes in
+                a single restart.
 
         Raises:
-            VMError: If the VM is not running.
+            ValueError: Invalid mount source.
+            VMMountConflictError: Guest path conflict with different config.
+            VMError: Session does not exist on the VM.
         """
-        if not self._started:
+        mount_list = [mounts] if isinstance(mounts, Mount) else list(mounts)
+        if not mount_list:
+            return
+
+        self._validate_mounts(mount_list)
+
+        # Validate session user exists on the VM
+        if session is not None:
+            result = await self._vm.shell(f"id -u {shlex.quote(session)}")
+            if result.exit_code != 0:
+                msg = f"Session '{session}' does not exist on the VM"
+                raise VMError(msg)
+
+        scope = "session" if session is not None else "system"
+        resolved_new = [self._resolve_mount(m, scope=scope, session_name=session) for m in mount_list]
+
+        # Within-batch conflict check
+        self._check_conflicts(resolved_new, scope_label=session or "system")
+
+        async with self._lock:
+            # Read existing mounts from lima.yaml (authoritative)
+            existing = self._vm.read_mounts()
+            existing_set = _mount_set(existing)
+
+            # Filter out already-present mounts (idempotent)
+            truly_new = [r for r in resolved_new if (r.host_path, r.guest_path, r.writable) not in existing_set]
+            if not truly_new:
+                return
+
+            # Collision check: same guest path but different config
+            existing_guests = {r.guest_path for r in existing}
+            for r in truly_new:
+                if r.guest_path in existing_guests:
+                    msg = f"Mount conflict: guest path '{r.guest_path}' is already in use"
+                    raise VMMountConflictError(msg)
+
+            # Merge existing + new
+            merged = existing + truly_new
+            if defer:
+                self._vm.write_mounts(merged)
+            else:
+                await self._vm.apply_mounts(merged)
+
+    async def unmount(
+        self,
+        targets: str | list[str],
+        *,
+        session: str | None = None,
+        defer: bool = False,
+    ) -> None:
+        """Remove one or more mounts by target path.
+
+        Idempotent: targets not found in lima.yaml are silently skipped.
+
+        Args:
+            targets: A single target or list of targets to remove.
+            session: Scope. ``None`` = system.
+            defer: If ``True``, update lima.yaml but skip the VM restart.
+                The mount disappears from the config immediately (so
+                conflict checks stay correct) but remains active in the
+                running VM until the next restart.
+        """
+        target_list = [targets] if isinstance(targets, str) else list(targets)
+        if not target_list:
+            return
+
+        # Resolve targets to guest paths
+        scope = "session" if session is not None else "system"
+        guest_paths_to_remove = {self._target_to_guest(t, scope=scope, session_name=session) for t in target_list}
+
+        async with self._lock:
+            # Read existing from lima.yaml
+            existing = self._vm.read_mounts()
+            remaining = [m for m in existing if m.guest_path not in guest_paths_to_remove]
+
+            if len(remaining) == len(existing):
+                return  # Nothing to remove (idempotent)
+
+            if defer:
+                self._vm.write_mounts(remaining)
+            else:
+                await self._vm.apply_mounts(remaining)
+
+    def list_mounts(self, *, session: str | None = None) -> list[ResolvedMount]:
+        """Return mounts from lima.yaml (the source of truth).
+
+        Args:
+            session: If given, filter to that session's mounts only.
+                ``None`` returns all mounts.
+
+        Returns:
+            Resolved mounts currently configured in the VM.
+        """
+        all_mounts = self._vm.read_mounts()
+        if session is not None:
+            prefix = f"/sessions/{session}/"
+            return [m for m in all_mounts if m.guest_path.startswith(prefix)]
+        return all_mounts
+
+    async def apply(self) -> None:
+        """Apply deferred mount/unmount changes by restarting the VM.
+
+        Call this after one or more ``mount(defer=True)`` or
+        ``unmount(defer=True)`` operations to flush all pending config
+        changes in a single VM restart.
+
+        If the VM is not running, starts it (picking up the new config).
+        If it is running, stops then starts it.
+
+        Raises:
+            VMError: If the VM instance does not exist.
+        """
+        async with self._lock:
+            status = await self._vm.status()
+            if status is None:
+                msg = f"VM instance '{self._instance}' does not exist"
+                raise VMError(msg)
+            if status == "Running":
+                await self._vm.stop()
+            await self._vm.start()
+
+    async def computer(
+        self,
+        *,
+        mounts: list[Mount] | None = None,
+        resume: str | None = None,
+    ) -> _VMSessionComputer:
+        """Create a new session computer or resume an existing one.
+
+        Args:
+            mounts: Host directories to mount for this session.
+            resume: Session name to reconnect to.
+
+        Returns:
+            A ``Computer`` handle bound to the session.
+
+        Raises:
+            ValueError: Both mounts and resume specified, or invalid mounts.
+            VMError: Session creation or resume failed.
+        """
+        if resume is not None and mounts:
+            msg = "Cannot specify 'mounts' when resuming a session"
+            raise ValueError(msg)
+
+        if await self._vm.status() != "Running":
+            await self.start()
+
+        if resume is not None:
+            # Validate session exists on VM
+            result = await self._vm.shell(f"id -u {shlex.quote(resume)}")
+            if result.exit_code != 0:
+                msg = f"Session '{resume}' does not exist on the VM"
+                raise VMError(msg)
+            name = resume
+        else:
+            # Create new session
+            name = await self._generate_unique_name()
+            await self._create_user(name)
+
+            if mounts:
+                try:
+                    await self.mount(mounts, session=name)
+                except Exception:
+                    # Rollback: remove orphaned user
+                    await self._vm.shell(f"sudo userdel -r {shlex.quote(name)}")
+                    raise
+
+        return _VMSessionComputer(vm=self._vm, session_name=name)
+
+    async def destroy(self, name: str) -> None:
+        """Delete a session user and its mounts.
+
+        Args:
+            name: Session name to destroy.
+        """
+        if await self._vm.status() != "Running":
+            await self.start()
+
+        await self._vm.shell(f"sudo userdel -r {shlex.quote(name)}")
+
+        # Remove all session mounts from lima.yaml
+        async with self._lock:
+            existing = self._vm.read_mounts()
+            prefix = f"/sessions/{name}/"
+            remaining = [m for m in existing if not m.guest_path.startswith(prefix)]
+
+            if len(remaining) != len(existing):
+                await self._vm.apply_mounts(remaining)
+
+    async def list_sessions(self) -> list[str]:
+        """List active sessions on the VM."""
+        if await self._vm.status() != "Running":
             msg = "VM is not running — call start() first"
             raise VMError(msg)
-
         result = await self._vm.shell("ls /sessions/")
         if result.exit_code != 0 or not result.stdout.strip():
             return []
         return result.stdout.strip().split()
 
+    # ------------------------------------------------------------------
+    # Mount resolution
+    # ------------------------------------------------------------------
 
-_: type[Computer] = LocalVMComputer
+    @staticmethod
+    def _resolve_mount(
+        mount: Mount,
+        scope: str,
+        session_name: str | None = None,
+    ) -> ResolvedMount:
+        """Resolve a Mount to a concrete guest path."""
+        guest = LocalVM._target_to_guest(mount.target, scope, session_name)
+        return ResolvedMount(
+            host_path=mount.source,
+            guest_path=guest,
+            writable=mount.writable,
+        )
+
+    @staticmethod
+    def _target_to_guest(
+        target: str,
+        scope: str,
+        session_name: str | None = None,
+    ) -> str:
+        """Compute the guest path for a mount target."""
+        if target.startswith("/"):
+            return target
+        if scope == "system":
+            return f"/mnt/{target}"
+        return f"/sessions/{session_name}/mnt/{target}"
+
+    # ------------------------------------------------------------------
+    # Validation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_mounts(mounts: list[Mount]) -> None:
+        """Validate mount sources exist and are directories."""
+        for mount in mounts:
+            p = Path(mount.source)
+            if not p.exists():
+                msg = f"Mount source does not exist: {mount.source}"
+                raise ValueError(msg)
+            if not p.is_dir():
+                msg = f"Mount source is not a directory: {mount.source}"
+                raise ValueError(msg)
+
+    @staticmethod
+    def _check_conflicts(resolved: list[ResolvedMount], scope_label: str) -> None:
+        """Reject duplicate guest paths within a batch."""
+        seen: dict[str, str] = {}  # guest_path -> host_path
+        for m in resolved:
+            if m.guest_path in seen:
+                msg = f"Mount conflict in {scope_label}: '{m.host_path}' and '{seen[m.guest_path]}' both target '{m.guest_path}'"
+                raise VMMountConflictError(msg)
+            seen[m.guest_path] = m.host_path
+
+    # ------------------------------------------------------------------
+    # Session management
+    # ------------------------------------------------------------------
+
+    async def _generate_unique_name(self, max_attempts: int = 5) -> str:
+        """Generate a unique petname not colliding with existing VM users."""
+        for _ in range(max_attempts):
+            name: str = petname.generate(words=3, letters=10)
+            result = await self._vm.shell(f"id -u {shlex.quote(name)}")
+            if result.exit_code != 0:
+                return name
+        msg = f"Failed to generate a unique session name after {max_attempts} attempts"
+        raise VMError(msg)
+
+    async def _create_user(self, name: str) -> None:
+        """Create a Linux user with standard session directories."""
+        qname = shlex.quote(name)
+        home = f"/sessions/{name}"
+        qhome = shlex.quote(home)
+        result = await self._vm.shell(f"sudo useradd -m -d {qhome} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {qname}")
+        if result.exit_code != 0:
+            msg = f"Failed to create session user '{name}': {result.stderr}"
+            raise VMError(msg)
+
+        # Create all dirs as root, then chown only the writable ones.
+        # uploads stays root-owned (read-only), outputs is user-writable.
+        all_dirs = " ".join(shlex.quote(f"{home}/{d}") for d in SESSION_DIRS)
+        writable = f"{shlex.quote(f'{home}/{SESSION_TMP_DIR}')} {shlex.quote(f'{home}/{SESSION_OUTPUTS_DIR}')}"
+        result = await self._vm.shell(f"sudo mkdir -p {all_dirs} && sudo chown {qname} {writable}")
+        if result.exit_code != 0:
+            msg = f"Failed to create session directories for '{name}': {result.stderr}"
+            raise VMError(msg)

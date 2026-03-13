@@ -146,6 +146,19 @@ class CLIError(Exception):
     """
 
 
+class VMMountConflictError(ValueError):
+    """Raised when a VM mount's guest path conflicts with an existing mount.
+
+    This is a user-correctable error — the caller should choose a different
+    target path or remove the conflicting mount first.
+
+    Examples:
+        ```python
+        raise VMMountConflictError("Mount conflict: guest path '/mnt/code' is already in use")
+        ```
+    """
+
+
 class VMError(Exception):
     """Base error for VM infrastructure failures.
 
