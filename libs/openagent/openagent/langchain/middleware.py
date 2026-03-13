@@ -88,43 +88,55 @@ def _create_denied_response(
     )
 
 
-def _detect_skill_call(messages: Sequence[BaseMessage]) -> str | None:
-    """Detect if the most recent tool call was 'skill' and return the skill name.
+def _detect_skill_call(openai_msgs: Sequence[dict[str, Any]]) -> str | None:
+    """Detect if the most recent tool call was a Skill invocation.
 
-    Returns None if no recent skill tool call found or if a HumanMessage
-    already follows the skill ToolMessage (already injected).
+    Operates on OpenAI-format messages (dicts with ``role``, ``tool_calls``,
+    ``tool_call_id``, etc.).
+
+    Returns the skill name, or ``None`` if no recent skill tool call found
+    or if a user message already follows (already injected).
     """
-    if not messages:
+    from openagent.tools.skill import SkillTool
+
+    skill_tool_name = SkillTool.name
+
+    if not openai_msgs:
         return None
 
-    # Walk backwards: find the last ToolMessage
-    # If we hit a HumanMessage first, skill was already injected
-    last_tool_msg_idx: int | None = None
-    for i in range(len(messages) - 1, -1, -1):
-        msg = messages[i]
-        if isinstance(msg, HumanMessage):
+    # Walk backwards: find the last tool-role message.
+    # If we hit a user message first, the skill was already injected.
+    last_tool_idx: int | None = None
+    for i in range(len(openai_msgs) - 1, -1, -1):
+        role = openai_msgs[i].get("role")
+        if role == "user":
             return None
-        if isinstance(msg, ToolMessage):
-            last_tool_msg_idx = i
+        if role == "tool":
+            last_tool_idx = i
             break
 
-    if last_tool_msg_idx is None:
+    if last_tool_idx is None:
         return None
 
-    tool_msg = messages[last_tool_msg_idx]
-    if not isinstance(tool_msg, ToolMessage):
-        return None  # unreachable, satisfies mypy
-    tool_call_id = tool_msg.tool_call_id
+    tool_call_id = openai_msgs[last_tool_idx].get("tool_call_id")
 
-    # Find the corresponding AIMessage with tool_calls
-    for i in range(last_tool_msg_idx - 1, -1, -1):
-        msg = messages[i]
-        if isinstance(msg, AIMessage) and msg.tool_calls:
-            for tc in msg.tool_calls:
-                if tc.get("id") == tool_call_id and tc.get("name") == "skill":
-                    args: dict[str, str] = tc.get("args", {})
-                    return args.get("skill")
-            break  # Only check the nearest AIMessage
+    # Find the corresponding assistant message with tool_calls.
+    for i in range(last_tool_idx - 1, -1, -1):
+        msg = openai_msgs[i]
+        if msg.get("role") != "assistant":
+            continue
+        for tc in msg.get("tool_calls", []):
+            fn = tc.get("function", {})
+            if tc.get("id") == tool_call_id and fn.get("name") == skill_tool_name:
+                import json
+
+                try:
+                    args = json.loads(fn.get("arguments", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                result: str | None = args.get("skill")
+                return result
+        break  # Only check the nearest assistant message
 
     return None
 
@@ -316,7 +328,9 @@ class AgentMiddleware(LangChainAgentMiddleware):
 
         # --- GROUP 2: Appenders (skill injection) ---
         if self._skill_resolver is not None:
-            skill_name = _detect_skill_call(messages)
+            openai_msgs = convert_to_openai_messages(messages)
+            skill_name = _detect_skill_call(openai_msgs)
+
             if skill_name is not None:
                 try:
                     content = await self._skill_resolver.load_content(skill_name)

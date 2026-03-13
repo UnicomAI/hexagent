@@ -102,39 +102,55 @@ class TestCreateDeniedResponse:
 
 
 class TestDetectSkillCall:
+    """Tests for _detect_skill_call (operates on OpenAI-format messages)."""
+
+    def _skill_tool_name(self) -> str:
+        from openagent.tools.skill import SkillTool
+
+        return SkillTool.name
+
     def test_detects_recent_skill_call(self) -> None:
-        messages = [
-            HumanMessage(content="run commit"),
-            AIMessage(
-                content="",
-                tool_calls=[{"id": "tc_1", "name": "skill", "args": {"skill": "commit"}}],
-            ),
-            ToolMessage(content="Launching skill: commit", tool_call_id="tc_1"),
+        msgs: list[dict[str, Any]] = [
+            {"role": "user", "content": "run commit"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc_1", "function": {"name": self._skill_tool_name(), "arguments": '{"skill": "commit"}'}},
+                ],
+            },
+            {"role": "tool", "content": "Launching skill: commit", "tool_call_id": "tc_1"},
         ]
-        assert _detect_skill_call(messages) == "commit"
+        assert _detect_skill_call(msgs) == "commit"
 
     def test_returns_none_if_no_skill_call(self) -> None:
-        messages = [
-            HumanMessage(content="echo hi"),
-            AIMessage(
-                content="",
-                tool_calls=[{"id": "tc_1", "name": "bash", "args": {"command": "echo hi"}}],
-            ),
-            ToolMessage(content="hi", tool_call_id="tc_1"),
+        msgs: list[dict[str, Any]] = [
+            {"role": "user", "content": "echo hi"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc_1", "function": {"name": "bash", "arguments": '{"command": "echo hi"}'}},
+                ],
+            },
+            {"role": "tool", "content": "hi", "tool_call_id": "tc_1"},
         ]
-        assert _detect_skill_call(messages) is None
+        assert _detect_skill_call(msgs) is None
 
     def test_returns_none_if_already_injected(self) -> None:
-        """After skill injection, a HumanMessage follows the ToolMessage."""
-        messages = [
-            AIMessage(
-                content="",
-                tool_calls=[{"id": "tc_1", "name": "skill", "args": {"skill": "commit"}}],
-            ),
-            ToolMessage(content="Launching skill: commit", tool_call_id="tc_1"),
-            HumanMessage(content="<skill content>"),
+        """After skill injection, a user message follows the tool message."""
+        msgs: list[dict[str, Any]] = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc_1", "function": {"name": self._skill_tool_name(), "arguments": '{"skill": "commit"}'}},
+                ],
+            },
+            {"role": "tool", "content": "Launching skill: commit", "tool_call_id": "tc_1"},
+            {"role": "user", "content": "<skill content>"},
         ]
-        assert _detect_skill_call(messages) is None
+        assert _detect_skill_call(msgs) is None
 
     def test_returns_none_for_empty_messages(self) -> None:
         assert _detect_skill_call([]) is None
@@ -288,6 +304,8 @@ class TestCompactionTrigger:
 
 
 class TestSkillInjection:
+    _SKILL_NAME = "Skill"  # must match SkillTool.name
+
     async def test_injects_skill_content_after_skill_call(self) -> None:
         resolver = AsyncMock()
         resolver.load_content = AsyncMock(return_value="Skill content for commit")
@@ -299,7 +317,7 @@ class TestSkillInjection:
                 HumanMessage(content="run commit"),
                 AIMessage(
                     content="",
-                    tool_calls=[{"id": "tc_1", "name": "skill", "args": {"skill": "commit"}}],
+                    tool_calls=[{"id": "tc_1", "name": self._SKILL_NAME, "args": {"skill": "commit"}}],
                 ),
                 ToolMessage(content="Launching skill: commit", tool_call_id="tc_1"),
             ]
@@ -336,7 +354,7 @@ class TestSkillInjection:
                 HumanMessage(content="run unknown"),
                 AIMessage(
                     content="",
-                    tool_calls=[{"id": "tc_1", "name": "skill", "args": {"skill": "unknown"}}],
+                    tool_calls=[{"id": "tc_1", "name": self._SKILL_NAME, "args": {"skill": "unknown"}}],
                 ),
                 ToolMessage(content="Launching skill: unknown", tool_call_id="tc_1"),
             ]

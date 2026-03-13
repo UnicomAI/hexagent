@@ -93,7 +93,8 @@ def available_skills_reminder(
     (single user message, no prior model responses) when skills
     are available.
     """
-    if len(messages) != 1 or messages[0].get("role") != "user":
+    _max_initial_messages = 2  # At most: [system?, user]
+    if not messages or len(messages) > _max_initial_messages or messages[-1].get("role") != "user":
         return None
 
     if not ctx.skills:
