@@ -143,13 +143,28 @@ class _VMSessionComputer(AsyncComputerMixin):
             raise CLIError(str(e)) from e
 
     async def download(self, src: str, dst: str) -> None:
-        """Transfer a file from the VM session to the host."""
+        """Transfer a file from the VM session to the host.
+
+        ``limactl copy`` runs as the default Lima SSH user which cannot
+        read files owned by the session user.  Work around this by
+        sudo-copying the file to a world-readable temp location first,
+        then pulling it to the host, mirroring the strategy used by
+        :meth:`upload`.
+        """
         self._check_active()
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
+        tmp = f"/tmp/.download-{uuid.uuid4().hex}"  # noqa: S108
         try:
-            await self._vm.copy(src, dst, host_to_guest=False)
+            result = await self._vm.shell(f"sudo cp {shlex.quote(src)} {tmp} && sudo chmod 644 {tmp}")
+            if result.exit_code != 0:
+                msg = result.stderr or result.stdout or f"Failed to stage {src} for download"
+                raise CLIError(msg)
+            await self._vm.copy(tmp, dst, host_to_guest=False)
         except VMError as e:
             raise CLIError(str(e)) from e
+        finally:
+            # Best-effort cleanup of the temp file inside the guest.
+            await self._vm.shell(f"sudo rm -f {tmp}")
 
     def _check_active(self) -> None:
         """Raise if handle is inactive."""
