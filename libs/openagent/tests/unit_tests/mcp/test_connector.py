@@ -5,8 +5,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from openagent.mcp._client import McpClient
 from openagent.mcp._connector import McpConnector
 from openagent.mcp._tool import McpTool
@@ -123,8 +121,8 @@ class TestMcpConnectorOrchestration:
                 assert len(clients) == 2
                 assert all(isinstance(c, McpClient) for c in clients)
 
-    async def test_failure_propagates(self) -> None:
-        """If one client fails to connect, connector propagates the error."""
+    async def test_failure_skips_bad_server(self) -> None:
+        """If one client fails to connect, connector skips it and continues."""
 
         async def mock_aenter(self: McpClient) -> McpClient:
             if self.name == "bad":
@@ -146,10 +144,10 @@ class TestMcpConnectorOrchestration:
         with (
             patch.object(McpClient, "__aenter__", mock_aenter),
             patch.object(McpClient, "__aexit__", mock_aexit),
-            pytest.raises(ConnectionError, match="connection refused"),
         ):
-            async with McpConnector(servers):
-                pass
+            async with McpConnector(servers) as connector:
+                assert len(connector.clients) == 1
+                assert connector.clients[0].name == "good"
 
     async def test_repr(self) -> None:
         servers = {"s1": _http_config(), "s2": _http_config()}
