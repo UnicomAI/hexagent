@@ -112,6 +112,24 @@ def validate_skill_name(name: str) -> None:
         raise SkillValidationError(msg)
 
 
+def validate_skill_dir_name(skill_name: str, dir_name: str) -> None:
+    """Validate that a skill's directory name matches its declared name.
+
+    The Agent Skills specification requires that the ``name`` field in
+    SKILL.md matches the parent directory name.
+
+    Args:
+        skill_name: The ``name`` from SKILL.md frontmatter.
+        dir_name: The actual directory name on disk.
+
+    Raises:
+        SkillValidationError: If the names do not match.
+    """
+    if skill_name != dir_name:
+        msg = f"Skill name {skill_name!r} does not match directory name {dir_name!r}: the spec requires these to be identical"
+        raise SkillValidationError(msg)
+
+
 # ---------------------------------------------------------------------------
 # Parsing
 # ---------------------------------------------------------------------------

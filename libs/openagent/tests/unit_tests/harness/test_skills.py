@@ -133,6 +133,13 @@ class TestSkillResolverDiscover:
         skills = await resolver.discover()
         assert skills == []
 
+    async def test_discover_skips_name_dir_mismatch(self) -> None:
+        """Skill name in SKILL.md must match the directory name."""
+        output = f"===SKILL_FILE===:/mnt/skills/wrong-dir\n{_VALID_SKILL_MD}\n"
+        resolver = self._make_resolver(output)
+        skills = await resolver.discover()
+        assert len(skills) == 0
+
     async def test_discover_deduplicates_same_directory(self) -> None:
         """If both SKILL.md and skill.md exist, only the first match wins."""
         output = f"===SKILL_FILE===:/mnt/skills/pdf\n{_VALID_SKILL_MD}\n===SKILL_FILE===:/mnt/skills/pdf\n{_VALID_SKILL_MD}\n"

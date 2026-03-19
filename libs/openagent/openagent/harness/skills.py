@@ -11,7 +11,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from openagent.exceptions import SkillError
-from openagent.harness.skill_spec import parse_skill_md
+from openagent.harness.skill_spec import parse_skill_md, validate_skill_dir_name
 from openagent.types import Skill
 
 if TYPE_CHECKING:
@@ -122,6 +122,9 @@ class SkillResolver:
 
                 try:
                     spec = parse_skill_md(raw_content)
+                    # Spec requires name to match the directory name
+                    dir_basename = skill_dir.rsplit("/", 1)[-1]
+                    validate_skill_dir_name(spec.frontmatter.name, dir_basename)
                 except SkillError:
                     logger.warning("Skipping %s: invalid SKILL.md", skill_dir)
                     continue

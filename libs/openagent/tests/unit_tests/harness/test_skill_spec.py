@@ -9,6 +9,7 @@ from openagent.harness.skill_spec import (
     SkillFrontmatter,
     SkillSpec,
     parse_skill_md,
+    validate_skill_dir_name,
     validate_skill_name,
 )
 
@@ -91,6 +92,27 @@ class TestValidateSkillName:
     def test_rejects_spaces(self) -> None:
         with pytest.raises(SkillValidationError, match="invalid"):
             validate_skill_name("pdf tool")
+
+
+# ---------------------------------------------------------------------------
+# validate_skill_dir_name
+# ---------------------------------------------------------------------------
+
+
+class TestValidateSkillDirName:
+    def test_matching_names(self) -> None:
+        validate_skill_dir_name("pdf", "pdf")
+
+    def test_matching_hyphenated_names(self) -> None:
+        validate_skill_dir_name("my-skill", "my-skill")
+
+    def test_mismatch_raises(self) -> None:
+        with pytest.raises(SkillValidationError, match="does not match directory"):
+            validate_skill_dir_name("pdf-tool", "pdf-processing")
+
+    def test_case_mismatch_raises(self) -> None:
+        with pytest.raises(SkillValidationError, match="does not match directory"):
+            validate_skill_dir_name("pdf", "PDF")
 
 
 # ---------------------------------------------------------------------------
