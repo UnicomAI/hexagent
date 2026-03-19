@@ -1,0 +1,214 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Libre+Baskerville:wght@400;700&display=swap');
+
+/* ===== Type Scale ===== */
+:root {
+  --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+  --font-xs: 12px;     /* text-xs  0.75rem */
+  --font-sm: 14px;     /* text-sm  0.875rem */
+  --font-base: 16px;   /* text-base 1rem */
+  --font-lg: 18px;     /* text-lg  1.125rem */
+  --font-xl: 20px;     /* text-xl  1.25rem */
+  --font-2xl: 24px;    /* text-2xl 1.5rem */
+  --font-3xl: 30px;    /* text-3xl 1.875rem */
+  --font-4xl: 36px;    /* text-4xl 2.25rem */
+  --font-5xl: 48px;    /* text-5xl 3rem */
+
+  /* Sidebar layout tokens */
+  --sidebar-w: 280px;
+  --rail-w: 48px;
+  --rail-icon-size: 32px;
+  --rail-pad: 8px; /* (rail-w − rail-icon-size) / 2 */
+}
+
+/* ===== Theme Variables ===== */
+:root,
+[data-theme="dark"] {
+  --bg-primary: #1a1a1e;
+  --bg-secondary: #131316;
+  --bg-tertiary: rgba(255,255,255,0.04);
+  --bg-hover: rgba(255,255,255,0.06);
+  --bg-card: rgba(255,255,255,0.03);
+  --user-bubble: #282830;
+  --text-primary: #ececef;
+  --text-secondary: #a8a8ad;
+  --text-muted: #636369;
+  --text-faint: #3e3e43;
+  --border: rgba(255,255,255,0.07);
+  --border-hover: rgba(255,255,255,0.12);
+  --border-focus: rgba(255,255,255,0.18);
+  --accent: #5b8fb9;
+  --accent-hover: #7ba8cc;
+  --accent-bg: rgba(91, 143, 185, 0.12);
+  --accent-bg-strong: rgba(91, 143, 185, 0.22);
+  --success: #4ade80;
+  --success-bg: rgba(74, 222, 128, 0.1);
+  --danger: #f87171;
+  --shadow: rgba(0, 0, 0, 0.4);
+  --code-bg: #16161a;
+  --thinking-bg: #222220;
+  --thinking-border: rgba(91, 143, 185, 0.14);
+  --input-bg: #2a2a2e;
+  --shortcut-color: rgba(255,255,255,0.45);
+  --dot-color: rgba(255,255,255,0.1);
+  --scrollbar-thumb: rgba(255,255,255,0.2);
+  --scrollbar-hover: rgba(255,255,255,0.35);
+  --tooltip-bg: #3a3a3e;
+  --tooltip-text: #f0f0f0;
+  --tooltip-shortcut: rgba(255,255,255,0.45);
+  --viz-container-bg: var(--code-bg);
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg-primary: #f5f5f5;
+  --bg-secondary: #f0f0f0;
+  --bg-tertiary: rgba(0,0,0,0.03);
+  --bg-hover: rgba(0,0,0,0.04);
+  --bg-card: rgba(0,0,0,0.02);
+  --user-bubble: #e8e8ea;
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
+  --text-muted: #999999;
+  --text-faint: #e0e0e0;
+  --border: rgba(0,0,0,0.08);
+  --border-hover: rgba(0,0,0,0.15);
+  --border-focus: rgba(0,0,0,0.18);
+  --accent: #4a7fa3;
+  --accent-hover: #3a6a8a;
+  --accent-bg: rgba(74, 127, 163, 0.08);
+  --accent-bg-strong: rgba(74, 127, 163, 0.15);
+  --success: #22c55e;
+  --success-bg: rgba(34, 197, 94, 0.1);
+  --danger: #ef4444;
+  --shadow: rgba(0, 0, 0, 0.08);
+  --code-bg: #fafafa;
+  --thinking-bg: rgba(0, 0, 0, 0.02);
+  --thinking-border: rgba(0, 0, 0, 0.08);
+  --input-bg: #ffffff;
+  --shortcut-color: rgba(0,0,0,0.45);
+  --dot-color: rgba(0,0,0,0.1);
+  --scrollbar-thumb: rgba(0,0,0,0.2);
+  --scrollbar-hover: rgba(0,0,0,0.35);
+  --tooltip-bg: #2a2a2e;
+  --tooltip-text: #f0f0f0;
+  --tooltip-shortcut: rgba(255,255,255,0.45);
+  --viz-container-bg: var(--code-bg);
+  color-scheme: light;
+}
+
+/* ===== Reset ===== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 110%;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, 'Segoe UI', sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
+  height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100vh;
+}
+
+/* Global overlay scrollbar: hidden by default, visible on hover */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+*:hover {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+::-webkit-scrollbar { width: 7px; background: transparent; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 10px; }
+*:hover::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); }
+*:hover::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
+::selection {
+  background: var(--accent-bg-strong);
+  color: var(--text-primary);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+textarea:focus-visible,
+input:focus-visible {
+  outline: none;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); }
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+}
+
+textarea {
+  font-family: inherit;
+  color: inherit;
+  resize: none;
+}
+
+code {
+  font-family: var(--font-mono);
+}
+
+/* ===== Custom Tooltip ===== */
+.custom-tooltip-trigger {
+  position: relative;
+}
+
+.custom-tooltip {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--tooltip-bg);
+  color: var(--tooltip-text);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  line-height: 1;
+  padding: 5px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms ease;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.custom-tooltip-trigger:hover .custom-tooltip {
+  opacity: 1;
+}
+
+.custom-tooltip-trigger.tooltip-hidden .custom-tooltip {
+  opacity: 0 !important;
+}
+
+.custom-tooltip-shortcut {
+  color: var(--tooltip-shortcut);
+  font-size: var(--font-xs);
+  letter-spacing: 0.02em;
+}
