@@ -13,15 +13,18 @@ from langchain_core.tools import StructuredTool
 if TYPE_CHECKING:
     from openagent.tools.base import BaseAgentTool
 
+# Return type for content_and_artifact response format:
+# (content, artifact) where content is a list of content blocks.
+_ContentAndArtifact = tuple[list[dict[str, Any]], None]
+
 
 def to_langchain_tool(tool: BaseAgentTool[Any]) -> StructuredTool:
     """Convert a BaseAgentTool to a LangChain StructuredTool.
 
     Creates a thin wrapper that adapts the BaseAgentTool interface to
-    LangChain's StructuredTool interface. Async-only - no sync wrapper.
-
-    The adapter derives all metadata (name, description, schema) from
-    the OpenAgent tool, ensuring single source of truth.
+    LangChain's StructuredTool interface. Uses ``response_format=
+    "content_and_artifact"`` so that multimodal results (images) are
+    preserved as structured content blocks in the ``ToolMessage``.
 
     Args:
         tool: The agent tool to convert.
@@ -45,12 +48,12 @@ def to_langchain_tool(tool: BaseAgentTool[Any]) -> StructuredTool:
         ```
     """
 
-    async def async_invoke(**kwargs: Any) -> str:
+    async def async_invoke(**kwargs: Any) -> _ContentAndArtifact:
         """Async invocation with result conversion."""
         result = await tool(**kwargs)
-        return result.to_text()
+        return result.to_content_blocks("anthropic"), None
 
-    def sync_invoke(**kwargs: Any) -> str:
+    def sync_invoke(**kwargs: Any) -> _ContentAndArtifact:
         """Sync wrapper for async invocation.
 
         Required because LangGraph's tool node may invoke tools synchronously.
@@ -76,4 +79,5 @@ def to_langchain_tool(tool: BaseAgentTool[Any]) -> StructuredTool:
         func=sync_invoke,
         coroutine=async_invoke,
         args_schema=tool.json_schema,
+        response_format="content_and_artifact",
     )

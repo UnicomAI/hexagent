@@ -196,6 +196,23 @@ class LimaError(VMError):
     """
 
 
+class WslError(VMError):
+    """Error raised when WSL VM infrastructure fails.
+
+    Examples:
+        ```python
+        # Distro did not start
+        raise WslError("WSL distro 'openagent' did not start within 60s")
+
+        # WSL not installed
+        raise WslError("wsl.exe not found — WSL2 must be installed")
+
+        # Shell command timed out
+        raise WslError("timed out after 30s")
+        ```
+    """
+
+
 class SkillError(Exception):
     """Base error for skill-related failures.
 

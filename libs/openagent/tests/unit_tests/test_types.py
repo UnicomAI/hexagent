@@ -9,6 +9,7 @@ import pytest
 from openagent.mcp import McpClient
 from openagent.types import (
     AgentContext,
+    Base64Source,
     CLIResult,
     CompactionPhase,
     EnvironmentContext,
@@ -16,6 +17,7 @@ from openagent.types import (
     Skill,
     SkillCatalog,
     ToolResult,
+    UrlSource,
 )
 
 from .conftest import STUB_PROFILE, make_tool
@@ -51,9 +53,14 @@ class TestToolResultBool:
         result = ToolResult(system="restarted")
         assert result
 
-    def test_result_with_base64_image_is_truthy(self) -> None:
-        """ToolResult with base64_image should be truthy."""
-        result = ToolResult(base64_image="abc123")
+    def test_result_with_images_is_truthy(self) -> None:
+        """ToolResult with images should be truthy."""
+        result = ToolResult(images=(Base64Source(data="abc123", media_type="image/png"),))
+        assert result
+
+    def test_result_with_url_image_is_truthy(self) -> None:
+        """ToolResult with URL image should be truthy."""
+        result = ToolResult(images=(UrlSource(url="https://example.com/img.png"),))
         assert result
 
     def test_result_with_empty_strings_is_falsy(self) -> None:
@@ -94,19 +101,22 @@ class TestToolResultAdd:
         assert combined.output == "hello"
         assert combined.error is None
 
-    def test_add_base64_images_raises(self) -> None:
-        """Adding two results with base64_images raises ValueError."""
-        r1 = ToolResult(base64_image="abc")
-        r2 = ToolResult(base64_image="def")
-        with pytest.raises(ValueError, match="Cannot combine"):
-            _ = r1 + r2
+    def test_add_images_concatenates(self) -> None:
+        """Adding two results with images concatenates the tuples."""
+        img1 = Base64Source(data="abc", media_type="image/png")
+        img2 = Base64Source(data="def", media_type="image/jpeg")
+        r1 = ToolResult(images=(img1,))
+        r2 = ToolResult(images=(img2,))
+        combined = r1 + r2
+        assert combined.images == (img1, img2)
 
-    def test_add_base64_image_with_none(self) -> None:
-        """Adding result with base64_image to result without is fine."""
-        r1 = ToolResult(base64_image="abc")
+    def test_add_images_with_empty(self) -> None:
+        """Adding result with images to result without preserves images."""
+        img = Base64Source(data="abc", media_type="image/png")
+        r1 = ToolResult(images=(img,))
         r2 = ToolResult(output="hello")
         combined = r1 + r2
-        assert combined.base64_image == "abc"
+        assert combined.images == (img,)
         assert combined.output == "hello"
 
     def test_add_preserves_all_fields(self) -> None:

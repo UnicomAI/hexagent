@@ -38,12 +38,45 @@ class CompactionPhase(str, Enum):
     APPLYING = "applying"
 
 
+# ---------------------------------------------------------------------------
+# Image content types for multimodal tool results
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Base64Source:
+    """Base64-encoded binary content.
+
+    Attributes:
+        data: Base64-encoded bytes.
+        media_type: MIME type (e.g. ``"image/png"``).
+    """
+
+    data: str
+    media_type: str
+
+
+@dataclass(frozen=True)
+class UrlSource:
+    """Content referenced by URL.
+
+    Attributes:
+        url: HTTP(S) URL pointing to the content.
+    """
+
+    url: str
+
+
+ImageContent = Base64Source | UrlSource
+"""An image in a tool result, sourced as base64 data or a URL."""
+
+
 @dataclass(frozen=True, kw_only=True)
 class ToolResult:
     r"""Base result type for tool execution.
 
     This is a generic result type that can represent output from any tool,
-    including text output, error, image, or system message.
+    including text output, error, images, or system message.
 
     Follows Anthropic's ToolResult pattern with support for combining results
     and boolean truthiness.
@@ -51,7 +84,7 @@ class ToolResult:
     Attributes:
         output: The text output from the tool.
         error: Error message if the tool execution failed.
-        base64_image: Base64-encoded image data if tool produced an image.
+        images: Images produced by the tool (base64 or URL).
         system: System-level message or metadata for the agent.
 
     Examples:
@@ -70,16 +103,18 @@ class ToolResult:
         print(combined.output)  # "line1\nline2"
         ```
 
-        Replacing fields:
+        With images:
         ```python
-        result = ToolResult(output="hello")
-        new_result = result.replace(error="something went wrong")
+        result = ToolResult(
+            output="Screenshot captured",
+            images=(Base64Source(data="iVBOR...", media_type="image/png"),),
+        )
         ```
     """
 
     output: str | None = None
     error: str | None = None
-    base64_image: str | None = None
+    images: tuple[ImageContent, ...] = ()
     system: str | None = None
 
     def __bool__(self) -> bool:
@@ -89,25 +124,21 @@ class ToolResult:
         contains any meaningful data.
 
         Returns:
-            True if any field (output, error, base64_image, system) has a value.
+            True if any field (output, error, images, system) has a value.
         """
-        return any(getattr(self, field.name) for field in fields(self))
+        return any(getattr(self, f.name) for f in fields(self))
 
     def __add__(self, other: ToolResult) -> ToolResult:
-        r"""Combine two ToolResults by concatenating string fields.
+        r"""Combine two ToolResults by concatenating their fields.
 
         For string fields (output, error, system), concatenates values if both
-        are present. For base64_image, raises ValueError if both have values
-        (images cannot be concatenated).
+        are present. For images, concatenates tuples.
 
         Args:
             other: Another ToolResult to combine with this one.
 
         Returns:
             A new ToolResult with combined fields.
-
-        Raises:
-            ValueError: If both results have base64_image values.
 
         Examples:
             ```python
@@ -119,35 +150,26 @@ class ToolResult:
             ```
         """
 
-        def combine_fields(
-            field: str | None,
-            other_field: str | None,
-            *,
-            concatenate: bool = True,
+        def combine_str(
+            val: str | None,
+            other_val: str | None,
         ) -> str | None:
-            if field and other_field:
-                if concatenate:
-                    return field + other_field
-                msg = "Cannot combine tool results"
-                raise ValueError(msg)
-            return field or other_field
+            if val and other_val:
+                return val + other_val
+            return val or other_val
 
         return ToolResult(
-            output=combine_fields(self.output, other.output),
-            error=combine_fields(self.error, other.error),
-            base64_image=combine_fields(
-                self.base64_image,
-                other.base64_image,
-                concatenate=False,
-            ),
-            system=combine_fields(self.system, other.system),
+            output=combine_str(self.output, other.output),
+            error=combine_str(self.error, other.error),
+            images=self.images + other.images,
+            system=combine_str(self.system, other.system),
         )
 
-    def replace(self, **kwargs: str | None) -> ToolResult:
+    def replace(self, **kwargs: Any) -> ToolResult:
         """Create a new ToolResult with specified fields replaced.
 
         Args:
-            **kwargs: Fields to replace (output, error, base64_image, system).
+            **kwargs: Fields to replace (output, error, images, system).
 
         Returns:
             A new ToolResult with the specified fields replaced.
@@ -219,6 +241,100 @@ class ToolResult:
             return f"{content}\n\n<system>{self.system}</system>"
 
         return content
+
+    def to_content_blocks(
+        self,
+        format: Literal["anthropic", "openai"] = "openai",  # noqa: A002
+    ) -> list[dict[str, Any]]:
+        """Convert the result to structured content blocks.
+
+        Always returns a list of typed content block dicts — even for
+        text-only results.  The ``format`` parameter selects the wire
+        format:
+
+        - ``"anthropic"`` — native Anthropic Messages API structure
+          (``text`` and ``image`` blocks with ``source``).
+        - ``"openai"`` — OpenAI Chat Completions structure
+          (``text`` and ``image_url`` blocks with data-URI encoding).
+
+        Args:
+            format: Content block wire format.
+
+        Returns:
+            A list of content block dicts.
+        """
+        if format == "anthropic":
+            return self._to_anthropic_content_blocks()
+        if format == "openai":
+            return self._to_openai_content_blocks()
+        msg = f"Unsupported content block format: {format!r}"
+        raise ValueError(msg)
+
+    def _to_anthropic_content_blocks(self) -> list[dict[str, Any]]:
+        """Format as Anthropic-native content blocks.
+
+        Returns ``{"type": "text", "text": ...}`` for text and
+        ``{"type": "image", "source": {...}}`` for images — matching
+        the Anthropic Messages API structure directly.
+        """
+        blocks: list[dict[str, Any]] = []
+
+        text = self.to_text()
+        if text:
+            blocks.append({"type": "text", "text": text})
+
+        for img in self.images:
+            if isinstance(img, Base64Source):
+                blocks.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": img.media_type,
+                            "data": img.data,
+                        },
+                    }
+                )
+            elif isinstance(img, UrlSource):
+                blocks.append(
+                    {
+                        "type": "image",
+                        "source": {"type": "url", "url": img.url},
+                    }
+                )
+
+        return blocks
+
+    def _to_openai_content_blocks(self) -> list[dict[str, Any]]:
+        """Format as OpenAI-style content blocks.
+
+        Returns ``{"type": "text", ...}`` and optionally
+        ``{"type": "image_url", ...}`` dicts.  The ``image_url`` format
+        uses data-URIs for base64 sources.
+        """
+        blocks: list[dict[str, Any]] = []
+
+        text = self.to_text()
+        if text:
+            blocks.append({"type": "text", "text": text})
+
+        for img in self.images:
+            if isinstance(img, Base64Source):
+                blocks.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{img.media_type};base64,{img.data}"},
+                    }
+                )
+            elif isinstance(img, UrlSource):
+                blocks.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": img.url},
+                    }
+                )
+
+        return blocks
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -10,6 +10,7 @@ import mcp.types as mcp_types
 from pydantic import BaseModel, Field
 
 from openagent.mcp._tool import McpTool, _convert_result
+from openagent.types import Base64Source
 
 
 def _make_text_content(text: str) -> mcp_types.TextContent:
@@ -68,19 +69,22 @@ class TestConvertResult:
 
     def test_image_content(self) -> None:
         result = _convert_result(_make_result([_make_image_content("base64data")]))
-        assert result.base64_image == "base64data"
+        assert result.images == (Base64Source(data="base64data", media_type="image/png"),)
         assert result.output is None
 
-    def test_first_image_wins(self) -> None:
+    def test_multiple_images_kept(self) -> None:
         result = _convert_result(
             _make_result(
                 [
                     _make_image_content("first"),
-                    _make_image_content("second"),
+                    _make_image_content("second", mime_type="image/jpeg"),
                 ]
             )
         )
-        assert result.base64_image == "first"
+        assert result.images == (
+            Base64Source(data="first", media_type="image/png"),
+            Base64Source(data="second", media_type="image/jpeg"),
+        )
 
     def test_text_and_image(self) -> None:
         result = _convert_result(
@@ -92,7 +96,11 @@ class TestConvertResult:
             )
         )
         assert result.output == "description"
-        assert result.base64_image == "imgdata"
+        assert result.images == (Base64Source(data="imgdata", media_type="image/png"),)
+
+    def test_image_media_type_captured(self) -> None:
+        result = _convert_result(_make_result([_make_image_content("data", mime_type="image/webp")]))
+        assert result.images == (Base64Source(data="data", media_type="image/webp"),)
 
     def test_structured_content_fallback(self) -> None:
         result = _convert_result(_make_result(structured_content={"key": "value"}))
@@ -102,7 +110,7 @@ class TestConvertResult:
         result = _convert_result(_make_result())
         assert result.output is None
         assert result.error is None
-        assert result.base64_image is None
+        assert result.images == ()
 
 
 class TestMcpToolExecution:

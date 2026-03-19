@@ -15,13 +15,26 @@ from typing import TYPE_CHECKING, Literal
 
 from openagent.exceptions import CLI_INFRA_ERROR_SYSTEM_REMINDER, CLIError
 from openagent.tools.base import BaseAgentTool
-from openagent.types import CLIResult, ReadToolParams, ToolResult
+from openagent.types import Base64Source, CLIResult, ReadToolParams, ToolResult
 
 if TYPE_CHECKING:
     from openagent.computer import Computer
 
 _MAX_LINE_LENGTH = 2000
 _LINE_SEPARATOR = "→"
+
+# Image extensions the LLM can interpret visually.
+# Maps extension → MIME type (must match what the model API accepts).
+_IMAGE_MEDIA_TYPES: dict[str, str] = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+_MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20 MB
+_KB = 1024
+_MB = 1024 * 1024
 
 
 async def read_file(
@@ -206,7 +219,11 @@ class ReadTool(BaseAgentTool[ReadToolParams]):
         self._computer = computer
 
     async def execute(self, params: ReadToolParams) -> ToolResult:
-        """Read a file's contents with line numbers.
+        """Read a file's contents with line numbers, or as an image.
+
+        Image files (.png, .jpg, .jpeg, .gif, .webp) are returned as visual
+        content via ``ToolResult.images`` so the LLM can see them directly.
+        All other files are read as text with numbered lines.
 
         Args:
             params: Validated parameters containing file_path, offset, and limit.
@@ -216,6 +233,13 @@ class ReadTool(BaseAgentTool[ReadToolParams]):
             or error message on failure. Output and error are mutually exclusive.
         """
         try:
+            # Detect image by extension — take the visual path if matched.
+            dot = params.file_path.rfind(".")
+            ext = params.file_path[dot:].lower() if dot >= 0 else ""
+            media_type = _IMAGE_MEDIA_TYPES.get(ext)
+            if media_type is not None:
+                return await self._read_image(params.file_path, media_type)
+
             result: CLIResult = await read_file(
                 self._computer,
                 params.file_path,
@@ -229,3 +253,76 @@ class ReadTool(BaseAgentTool[ReadToolParams]):
             return ToolResult(error=result.stderr or f"Failed to read {params.file_path}")
 
         return ToolResult(output=result.stdout)
+
+    async def _read_image(self, file_path: str, media_type: str) -> ToolResult:
+        """Read an image file and return it as a visual content block.
+
+        Validates the file, checks size limits, then base64-encodes it
+        so the LLM can interpret the image visually.
+
+        Args:
+            file_path: Path to the image file.
+            media_type: MIME type (e.g. ``"image/png"``).
+
+        Returns:
+            ToolResult with the image in ``images`` and a text summary
+            in ``output``.
+
+        Raises:
+            CLIError: On infrastructure failures (propagated to caller).
+        """
+        quoted = shlex.quote(file_path)
+
+        # Validate existence/readability and get file size in one round-trip.
+        # wc -c is POSIX-portable (works on Linux and macOS).
+        check = await self._computer.run(
+            f"if [ ! -e {quoted} ]; then echo ENOENT; exit 1; "
+            f"elif [ -d {quoted} ]; then echo EISDIR; exit 1; "
+            f"elif [ ! -f {quoted} ]; then echo ENOTFILE; exit 1; "
+            f"elif [ ! -r {quoted} ]; then echo EACCES; exit 1; "
+            f"else wc -c < {quoted}; fi"
+        )
+
+        if check.exit_code != 0:
+            code = check.stdout.strip()
+            errors: dict[str, str] = {
+                "ENOENT": "File does not exist.",
+                "EISDIR": "Illegal operation: path is a directory.",
+                "ENOTFILE": "Illegal operation: path is not a file.",
+                "EACCES": "Permission denied.",
+            }
+            return ToolResult(error=errors.get(code, f"Cannot read file: {check.stderr}"))
+
+        size_str = check.stdout.strip()
+        try:
+            size = int(size_str)
+        except ValueError:
+            return ToolResult(error=f"Cannot determine file size: {size_str}")
+
+        if size == 0:
+            return ToolResult(error="Image file is empty (0 bytes).")
+
+        if size > _MAX_IMAGE_BYTES:
+            mb = size / (1024 * 1024)
+            limit_mb = _MAX_IMAGE_BYTES // (1024 * 1024)
+            return ToolResult(error=f"Image too large ({mb:.1f} MB). Maximum is {limit_mb} MB.")
+
+        # Base64-encode on the computer; strip line wraps (Linux wraps at 76 chars).
+        result = await self._computer.run(f"base64 < {quoted}")
+        if result.exit_code != 0:
+            return ToolResult(error=result.stderr or "Failed to read image file.")
+
+        data = result.stdout.strip().replace("\n", "")
+
+        # Text summary for text-only contexts (compaction, logging, etc.)
+        if size < _KB:
+            human_size = f"{size} B"
+        elif size < _MB:
+            human_size = f"{size / _KB:.1f} KB"
+        else:
+            human_size = f"{size / _MB:.1f} MB"
+
+        return ToolResult(
+            output=f"[Image: {file_path} ({human_size})]",
+            images=(Base64Source(data=data, media_type=media_type),),
+        )

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from openagent.tools.base import BaseAgentTool
-from openagent.types import ToolResult
+from openagent.types import Base64Source, ImageContent, ToolResult
 
 if TYPE_CHECKING:
     import asyncio
@@ -81,17 +81,22 @@ def _convert_result(result: CallToolResult) -> ToolResult:
         result: The CallToolResult from ``session.call_tool()``.
 
     Returns:
-        A ToolResult with appropriate output/error/base64_image fields.
+        A ToolResult with appropriate output/error/images fields.
     """
     text_parts: list[str] = []
-    base64_image: str | None = None
+    images: list[ImageContent] = []
 
     for block in result.content:
         block_type: Any = getattr(block, "type", None)
         if block_type == "text":
             text_parts.append(block.text)  # type: ignore[union-attr]
-        elif block_type == "image" and base64_image is None:
-            base64_image = block.data  # type: ignore[union-attr]
+        elif block_type == "image":
+            images.append(
+                Base64Source(
+                    data=block.data,  # type: ignore[union-attr]
+                    media_type=getattr(block, "mimeType", "image/png"),
+                )
+            )
 
     if result.isError:
         error_msg = "\n".join(text_parts) if text_parts else "MCP tool returned an error"
@@ -102,4 +107,4 @@ def _convert_result(result: CallToolResult) -> ToolResult:
     if output is None and result.structuredContent:
         output = json.dumps(result.structuredContent)
 
-    return ToolResult(output=output, base64_image=base64_image)
+    return ToolResult(output=output, images=tuple(images))

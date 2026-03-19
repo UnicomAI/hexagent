@@ -9,8 +9,8 @@ import pytest
 from openagent.computer import LocalNativeComputer
 from openagent.exceptions import CLIError
 from openagent.tools import ReadTool
-from openagent.tools.cli.read import _LINE_SEPARATOR, _truncate_long_lines, read_file
-from openagent.types import CLIResult
+from openagent.tools.cli.read import _LINE_SEPARATOR, _MAX_IMAGE_BYTES, _truncate_long_lines, read_file
+from openagent.types import Base64Source, CLIResult
 
 
 @pytest.fixture
@@ -300,3 +300,115 @@ class TestReadToolLongLines:
         from openagent.tools.cli.read import _MAX_LINE_LENGTH
 
         assert len(body) == _MAX_LINE_LENGTH
+
+
+# ---------------------------------------------------------------------------
+# TestReadToolImage — image file reading
+# ---------------------------------------------------------------------------
+
+# Minimal valid 1x1 red PNG (67 bytes)
+_TINY_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+    b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00"
+    b"\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00"
+    b"\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+@pytest.fixture
+def png_file(tmp_path: pytest.TempPathFactory) -> str:
+    f = tmp_path / "screenshot.png"  # type: ignore[operator]
+    f.write_bytes(_TINY_PNG)
+    return str(f)
+
+
+@pytest.fixture
+def jpg_file(tmp_path: pytest.TempPathFactory) -> str:
+    f = tmp_path / "photo.jpg"  # type: ignore[operator]
+    f.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 20)  # JPEG header + padding
+    return str(f)
+
+
+class TestReadToolImage:
+    """Tests for image file reading via ReadTool."""
+
+    async def test_png_returns_image(self, tool: ReadTool, png_file: str) -> None:
+        """PNG file is returned as a visual image, not text."""
+        result = await tool(description="test", file_path=png_file)
+        assert result.error is None
+        assert len(result.images) == 1
+        assert isinstance(result.images[0], Base64Source)
+        assert result.images[0].media_type == "image/png"
+        assert result.images[0].data  # non-empty base64
+
+    async def test_png_has_text_summary(self, tool: ReadTool, png_file: str) -> None:
+        """Image result includes a text summary with path and size."""
+        result = await tool(description="test", file_path=png_file)
+        assert result.output is not None
+        assert "screenshot.png" in result.output
+        assert "B" in result.output  # size unit
+
+    async def test_jpg_returns_image(self, tool: ReadTool, jpg_file: str) -> None:
+        """JPEG file is returned as an image with correct media type."""
+        result = await tool(description="test", file_path=jpg_file)
+        assert result.error is None
+        assert len(result.images) == 1
+        img = result.images[0]
+        assert isinstance(img, Base64Source)
+        assert img.media_type == "image/jpeg"
+
+    async def test_nonexistent_image_returns_error(self, tool: ReadTool, tmp_path: pytest.TempPathFactory) -> None:
+        """Non-existent .png returns a clear error."""
+        path = str(tmp_path) + "/missing.png"
+        result = await tool(description="test", file_path=path)
+        assert result.error is not None
+        assert "does not exist" in result.error
+        assert result.images == ()
+
+    async def test_empty_image_returns_error(self, tool: ReadTool, tmp_path: pytest.TempPathFactory) -> None:
+        """Empty .png file returns error."""
+        f = tmp_path / "empty.png"  # type: ignore[operator]
+        f.write_bytes(b"")
+        result = await tool(description="test", file_path=str(f))
+        assert result.error is not None
+        assert "empty" in result.error.lower()
+
+    async def test_non_image_binary_still_rejected(self, tool: ReadTool, binary_file: str) -> None:
+        """Binary files with non-image extensions are still rejected."""
+        result = await tool(description="test", file_path=binary_file)
+        assert result.error is not None
+        assert result.images == ()
+
+    async def test_image_too_large(self, tool: ReadTool, tmp_path: pytest.TempPathFactory) -> None:
+        """Image exceeding size limit returns error."""
+        from unittest.mock import AsyncMock
+
+        # Mock computer.run to simulate a large file
+        mock_computer = AsyncMock()
+        large_size = _MAX_IMAGE_BYTES + 1
+        mock_computer.run = AsyncMock(return_value=CLIResult(stdout=str(large_size), exit_code=0))
+        large_tool = ReadTool(mock_computer)
+        result = await large_tool(description="test", file_path="/fake/huge.png")
+        assert result.error is not None
+        assert "too large" in result.error.lower()
+
+    async def test_webp_extension_supported(self, tool: ReadTool, tmp_path: pytest.TempPathFactory) -> None:
+        """.webp files are recognized as images."""
+        f = tmp_path / "anim.webp"  # type: ignore[operator]
+        f.write_bytes(b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 10)
+        result = await tool(description="test", file_path=str(f))
+        assert result.error is None
+        assert len(result.images) == 1
+        img = result.images[0]
+        assert isinstance(img, Base64Source)
+        assert img.media_type == "image/webp"
+
+    async def test_cli_error_during_image_read(self) -> None:
+        """CLIError during image read is handled like text read."""
+        computer = AsyncMock()
+        computer.run = AsyncMock(side_effect=CLIError("sandbox died"))
+        tool = ReadTool(computer)
+        result = await tool(description="test", file_path="/any/image.png")
+        assert result.error is not None
+        assert "sandbox died" in result.error
+        assert result.system is not None
