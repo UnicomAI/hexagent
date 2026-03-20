@@ -5,12 +5,11 @@ $ElectronDir = Resolve-Path "$ScriptDir\.."
 $BackendDir = Resolve-Path "$ElectronDir\..\backend"
 
 Write-Host "==> Installing PyInstaller..."
-pip install pyinstaller
+Set-Location $BackendDir
+uv pip install pyinstaller
 
 Write-Host "==> Building backend with PyInstaller..."
-Set-Location $BackendDir
-
-pyinstaller `
+uv run pyinstaller `
     --name openagent_api_server `
     --onedir `
     --noconfirm `
@@ -31,6 +30,8 @@ pyinstaller `
     --hidden-import uvicorn.lifespan.on `
     --hidden-import uvicorn.lifespan.off `
     --collect-submodules openagent_api `
+    --collect-submodules openagent `
+    --collect-data openagent `
     --add-data "skills;skills" `
     openagent_api/server.py
 
