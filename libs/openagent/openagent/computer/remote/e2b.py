@@ -277,7 +277,7 @@ class RemoteE2BComputer(AsyncComputerMixin):
         dst_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            data = await self._sandbox.files.read(src)
+            data = await self._sandbox.files.read(src, format="bytes")
             dst_path.write_bytes(data)
         except Exception as e:
             msg = f"Failed to download {src} from sandbox: {e}"
