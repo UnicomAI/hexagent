@@ -107,7 +107,9 @@ class WslVM:
     @property
     def _config_dir(self) -> Path:
         """Config directory for this instance."""
-        return Path.home() / ".openagent" / "wsl" / self._instance
+        data_dir = os.environ.get("OPENAGENT_DATA_DIR")
+        base = Path(data_dir) if data_dir else Path.home() / ".openagent"
+        return base / "wsl" / self._instance
 
     @property
     def _config_path(self) -> Path:
