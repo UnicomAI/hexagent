@@ -30,6 +30,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Default timeout for each phase of the MCP connection handshake.
+# Generous enough for cold-start servers behind proxies, tight enough
+# to avoid blocking agent creation on a dead endpoint.
+_DEFAULT_TRANSPORT_TIMEOUT_S: float = 30.0
+_DEFAULT_SESSION_INIT_TIMEOUT_S: float = 15.0
+_DEFAULT_LIST_TOOLS_TIMEOUT_S: float = 15.0
+
 
 def _to_pascal_case(s: str) -> str:
     """Convert a snake_case or separator-delimited string to PascalCase."""
@@ -57,6 +64,11 @@ class McpClient:
     def name(self) -> str:
         """Human-readable server identifier (the dict key)."""
         return self._name
+
+    @property
+    def config(self) -> McpServerConfig:
+        """The server configuration used to create this client."""
+        return self._config
 
     @property
     def instructions(self) -> str:
@@ -109,10 +121,17 @@ class McpClient:
     # --- Connection logic ---
 
     async def _connect(self) -> None:
-        """Open transport, create session, discover tools."""
+        """Open transport, create session, discover tools.
+
+        Each phase has an independent timeout so a slow server cannot
+        block agent creation indefinitely.
+        """
         assert self._exit_stack is not None  # noqa: S101
         session = await self._open_session()
-        mcp_tools = await _list_all_tools(session)
+
+        async with asyncio.timeout(_DEFAULT_LIST_TOOLS_TIMEOUT_S):
+            mcp_tools = await _list_all_tools(session)
+
         lock = asyncio.Lock()
         self._tools = [_create_mcp_tool(self._name, t, session, lock) for t in mcp_tools]
         logger.info(
@@ -124,11 +143,17 @@ class McpClient:
     async def _open_session(self) -> ClientSession:
         """Open transport and create an initialized MCP ClientSession."""
         assert self._exit_stack is not None  # noqa: S101
-        read_stream, write_stream = await self._open_transport()
+
+        async with asyncio.timeout(_DEFAULT_TRANSPORT_TIMEOUT_S):
+            read_stream, write_stream = await self._open_transport()
+
         session: ClientSession = await self._exit_stack.enter_async_context(
             ClientSession(read_stream, write_stream),
         )
-        result = await session.initialize()
+
+        async with asyncio.timeout(_DEFAULT_SESSION_INIT_TIMEOUT_S):
+            result = await session.initialize()
+
         self._instructions = result.instructions or ""
         return session
 
