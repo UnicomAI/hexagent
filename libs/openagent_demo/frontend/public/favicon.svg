@@ -1,19 +1,26 @@
-<svg width="32" height="32" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="gt" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#c8daf4"/>
-      <stop offset="100%" stop-color="#a4c0ee"/>
-    </linearGradient>
-    <linearGradient id="gl" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#6a9fe0"/>
-      <stop offset="100%" stop-color="#5580c0"/>
-    </linearGradient>
-    <linearGradient id="gr" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#8db4e8"/>
-      <stop offset="100%" stop-color="#7098d4"/>
-    </linearGradient>
-  </defs>
-  <path d="M50 8L85 27L50 46L15 27Z" fill="url(#gt)"/>
-  <path d="M12 31L47 50V88L12 69Z" fill="url(#gl)"/>
-  <path d="M88 31L53 50V88L88 69Z" fill="url(#gr)"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="65.8 45 268.4 310">
+<style>
+  @media (prefers-color-scheme: light) {
+    .s1 { fill: #82A4CC; }
+    .s2 { fill: #8EAED4; }
+    .s3 { fill: #82A4CC; }
+    .s4 { fill: #6A8CBC; }
+    .s5 { fill: #5476AC; }
+    .s6 { fill: #6A8CBC; }
+  }
+  @media (prefers-color-scheme: dark) {
+    .s1 { fill: #789CC6; }
+    .s2 { fill: #84A6CE; }
+    .s3 { fill: #789CC6; }
+    .s4 { fill: #6084B6; }
+    .s5 { fill: #4C6EA6; }
+    .s6 { fill: #6084B6; }
+  }
+</style>
+<polygon class="s1" points="200,45 334.2,122.5 250.2,229 250.2,171"/>
+<polygon class="s2" points="334.2,122.5 334.2,277.5 200,258 250.2,229"/>
+<polygon class="s3" points="334.2,277.5 200,355 149.8,229 200,258"/>
+<polygon class="s4" points="200,355 65.8,277.5 149.8,171 149.8,229"/>
+<polygon class="s5" points="65.8,277.5 65.8,122.5 200,142 149.8,171"/>
+<polygon class="s6" points="65.8,122.5 200,45 250.2,171 200,142"/>
 </svg>

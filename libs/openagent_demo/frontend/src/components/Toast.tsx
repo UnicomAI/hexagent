@@ -29,7 +29,7 @@ function ToastItem({
 }) {
   const [exiting, setExiting] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const duration = notification.type === "error" ? 10000 : 5000;
+  const duration = notification.type === "error" ? 8000 : 4000;
 
   // Stable refs so the timer callback never goes stale
   const onDismissRef = useRef(onDismiss);

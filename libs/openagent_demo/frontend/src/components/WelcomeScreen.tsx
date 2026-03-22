@@ -28,6 +28,8 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
   const isCowork = mode === "cowork";
   const noModels = !state.serverConfig?.models?.length;
   const missingE2bKey = !isCowork && !state.serverConfig?.sandbox?.e2b_api_key;
+  const vmNotReady = isCowork && !state.vmStatus?.vm_ready;
+  const sandboxBlocked = missingE2bKey || vmNotReady;
   const [e2bHintFlash, setE2bHintFlash] = useState(false);
   const e2bHintTimer = useRef<ReturnType<typeof setTimeout>>(null);
 
@@ -111,7 +113,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
   const anyUploading = pendingFiles.some((f) => f.status === "uploading");
 
   const handleSubmit = useCallback(() => {
-    if (missingE2bKey) { flashE2bHint(); return; }
+    if (sandboxBlocked) { flashE2bHint(); return; }
     const trimmed = value.trim();
     const hasContent = trimmed || doneFiles.length > 0;
     if (!hasContent || anyUploading) return;
@@ -123,7 +125,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     onSubmit(trimmed, Object.keys(opts).length > 0 ? opts : undefined);
     setValue("");
     setPendingFiles([]);
-  }, [value, onSubmit, selectedFolder, doneFiles, anyUploading, missingE2bKey, flashE2bHint]);
+  }, [value, onSubmit, selectedFolder, doneFiles, anyUploading, sandboxBlocked, flashE2bHint]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -147,6 +149,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
   pendingFilesRef.current = pendingFiles;
 
   const startUpload = useCallback((file: File) => {
+    if (sandboxBlocked) { flashE2bHint(); return; }
     if (!warmSessionId) return;
     const id = crypto.randomUUID();
 
@@ -177,7 +180,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
           payload: { message: `Failed to upload ${file.name}: ${message}`, type: "error" },
         });
       });
-  }, [warmSessionId, dispatch]);
+  }, [warmSessionId, dispatch, sandboxBlocked, flashE2bHint]);
 
   const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -189,6 +192,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
   }, [startUpload]);
 
   const handleFolderChange = useCallback((folder: string) => {
+    if (vmNotReady) { flashE2bHint(); return; }
     setSelectedFolder(folder);
     if (warmSessionId && folder) {
       // Mount the folder in the warm session
@@ -197,7 +201,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
       });
     }
     // If warmSessionId isn't ready yet, the effect below will flush when it arrives
-  }, [warmSessionId, dispatch]);
+  }, [warmSessionId, dispatch, vmNotReady, flashE2bHint]);
 
   // Flush pending folder mount when warm session becomes available
   useEffect(() => {
@@ -235,10 +239,15 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     });
   }, [startUpload]);
 
-  const { dragOver, dragProps } = useFileDrop(useCallback((files: File[]) => {
-    files.forEach(startUpload);
-    textareaRef.current?.focus();
-  }, [startUpload]));
+  const { dragOver, dragProps } = useFileDrop(
+    useCallback((files: File[]) => {
+      files.forEach(startUpload);
+      textareaRef.current?.focus();
+    }, [startUpload]),
+    useCallback((reason: string) => {
+      dispatch({ type: "SHOW_NOTIFICATION", payload: { message: reason, type: "error" } });
+    }, [dispatch]),
+  );
 
   const chatHeading = "OpenAgent, ready when you are.";
   const coworkHeading = "OpenAgent, here to get things done.";
@@ -325,14 +334,18 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
               <button
                 className="input-tool-btn"
                 title="Attach file"
-                onClick={() => { if (missingE2bKey) { flashE2bHint(); return; } fileRef.current?.click(); }}
-                disabled={!warmSessionId}
+                onClick={() => { if (sandboxBlocked || !warmSessionId) { flashE2bHint(); return; } fileRef.current?.click(); }}
               >
                 <Paperclip />
               </button>
               <InputSettingsMenu onOpenSettings={onOpenSettings} />
               {isCowork && (
-                <FolderPicker value={selectedFolder} onChange={handleFolderChange} />
+                <FolderPicker
+                  value={selectedFolder}
+                  onChange={handleFolderChange}
+                  disabled={vmNotReady}
+                  onDisabledClick={flashE2bHint}
+                />
               )}
             </div>
             <div className="input-toolbar-right">
@@ -341,16 +354,16 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
                 <button
                   className="input-send"
                   onClick={handleSubmit}
-                  disabled={(!value.trim() && doneFiles.length === 0) || anyUploading || noModels || missingE2bKey}
-                  title={noModels ? "Configure a model in Settings first" : "Send message"}
+                  disabled={(!value.trim() && doneFiles.length === 0) || anyUploading || noModels || sandboxBlocked}
+                  title={noModels ? "Configure a model in Settings first" : sandboxBlocked ? "Sandbox setup required" : "Send message"}
                 >
                   <ArrowUp />
                 </button>
-                {missingE2bKey && (
+                {sandboxBlocked && (
                   <div className={`e2b-hint${value.trim() || e2bHintFlash ? " e2b-hint-visible" : ""}`}>
-                    E2B API key required —{" "}
+                    {missingE2bKey ? "E2B API key required" : "VM setup required"} —{" "}
                     <button className="e2b-hint-link" onClick={() => onOpenSettings("sandbox")}>
-                      Set in Settings
+                      Set up in Settings
                     </button>
                   </div>
                 )}

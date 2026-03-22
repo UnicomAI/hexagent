@@ -6,7 +6,7 @@ import { useState, useCallback, useRef } from "react";
  * Returns `dragOver` state and four event handlers to spread onto the
  * drop target. When files are dropped, `onDrop` is called with them.
  */
-export function useFileDrop(onDrop: (files: File[]) => void) {
+export function useFileDrop(onDrop: (files: File[]) => void, onReject?: (reason: string) => void) {
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
 
@@ -38,11 +38,23 @@ export function useFileDrop(onDrop: (files: File[]) => void) {
     e.stopPropagation();
     dragCounter.current = 0;
     setDragOver(false);
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      onDrop(Array.from(files));
+    // Filter out directories — only accept actual files
+    const items = Array.from(e.dataTransfer.items);
+    const files: File[] = [];
+    let folderCount = 0;
+    for (const item of items) {
+      const entry = item.webkitGetAsEntry?.();
+      if (entry && entry.isDirectory) { folderCount++; continue; }
+      const file = item.getAsFile();
+      if (file) files.push(file);
     }
-  }, [onDrop]);
+    if (folderCount > 0) {
+      onReject?.("Folder upload is not supported. Please select individual files instead.");
+    }
+    if (files.length > 0) {
+      onDrop(files);
+    }
+  }, [onDrop, onReject]);
 
   return {
     dragOver,

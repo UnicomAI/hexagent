@@ -404,3 +404,212 @@ export async function toggleSkill(name: string, enabled: boolean): Promise<void>
   });
   if (!res.ok) throw new Error(`Failed to toggle skill: ${res.statusText}`);
 }
+
+// ── Setup / VM backend ──
+
+export interface VMStatus {
+  supported: boolean;
+  backend: "lima" | "wsl" | null;
+  installed: boolean;
+  path?: string | null;
+  managed?: boolean;
+  reason?: string;
+  instance_status?: string | null;
+  vm_ready?: boolean;
+}
+
+export async function getVMStatus(): Promise<VMStatus> {
+  const res = await fetch(`${API_BASE}/api/setup/vm`);
+  if (!res.ok) throw new Error("Failed to check VM status");
+  return res.json();
+}
+
+export async function installVMBackend(
+  onProgress: (step: string, message: string) => void,
+  onDone: (message: string) => void,
+  onError: (message: string) => void,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/setup/vm/install`, { method: "POST" });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    onError(detail?.detail || `Install failed: ${res.statusText}`);
+    return;
+  }
+  const reader = res.body?.getReader();
+  if (!reader) { onError("No response stream"); return; }
+
+  const decoder = new TextDecoder();
+  let buf = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() || "";
+    let event = "";
+    for (const line of lines) {
+      if (line.startsWith("event: ")) event = line.slice(7).trim();
+      else if (line.startsWith("data: ") && event) {
+        const data = JSON.parse(line.slice(6));
+        if (event === "progress") onProgress(data.step, data.message);
+        else if (event === "done") onDone(data.message);
+        else if (event === "error") onError(data.message);
+        event = "";
+      }
+    }
+  }
+}
+
+// ── VM Build ──
+
+export interface VMBuildStatus {
+  status: "idle" | "running" | "done" | "error";
+  error?: string | null;
+  vm_state?: string | null; // "Running" | "Stopped" | null
+}
+
+export async function getVMBuildStatus(): Promise<VMBuildStatus> {
+  const res = await fetch(`${API_BASE}/api/setup/vm/build/status`);
+  if (!res.ok) throw new Error("Failed to check build status");
+  return res.json();
+}
+
+/**
+ * SSE helper: reads a streaming response and dispatches events.
+ * Returns an AbortController so the caller can cancel the fetch.
+ */
+function _consumeSSE(
+  url: string,
+  method: string,
+  callbacks: {
+    onEvent: (event: string, data: Record<string, unknown>) => void;
+    onError: (message: string) => void;
+  },
+): AbortController {
+  const controller = new AbortController();
+  (async () => {
+    try {
+      const res = await fetch(url, { method, signal: controller.signal });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        callbacks.onError(detail?.detail || `Request failed: ${res.statusText}`);
+        return;
+      }
+      const reader = res.body?.getReader();
+      if (!reader) { callbacks.onError("No response stream"); return; }
+
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() || "";
+        let event = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) event = line.slice(7).trim();
+          else if (line.startsWith("data: ") && event) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              callbacks.onEvent(event, data);
+            } catch { /* ignore malformed JSON */ }
+            event = "";
+          }
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      callbacks.onError(err instanceof Error ? err.message : String(err));
+    }
+  })();
+  return controller;
+}
+
+export function buildVM(
+  onProgress: (step: string, message: string) => void,
+  onDone: (message: string) => void,
+  onError: (message: string) => void,
+): AbortController {
+  return _consumeSSE(`${API_BASE}/api/setup/vm/build`, "POST", {
+    onEvent(event, data) {
+      if (event === "progress") onProgress(data.step as string, data.message as string);
+      else if (event === "done") onDone(data.message as string);
+      else if (event === "error") onError(data.message as string);
+    },
+    onError,
+  });
+}
+
+// ── VM Provision ──
+
+export interface ProvisionStepDef {
+  id: string;
+  label: string;
+}
+
+export interface ProvisionMarkers {
+  provisioned: boolean;
+  steps_done: string[];
+  total_steps: number;
+}
+
+export interface ProvisionStatus {
+  status: "idle" | "running" | "done" | "error";
+  error?: string | null;
+  markers?: ProvisionMarkers | null;
+  steps: ProvisionStepDef[];
+}
+
+export async function getVMProvisionStatus(): Promise<ProvisionStatus> {
+  const res = await fetch(`${API_BASE}/api/setup/vm/provision/status`);
+  if (!res.ok) throw new Error("Failed to check provision status");
+  return res.json();
+}
+
+export function provisionVM(
+  callbacks: {
+    onStepStart?: (step: string, message: string) => void;
+    onStepProgress?: (step: string, message: string) => void;
+    onStepDone?: (step: string, message: string) => void;
+    onStepSkip?: (step: string, message: string) => void;
+    onStepError?: (step: string, message: string) => void;
+    onHeartbeat?: (step: string) => void;
+    onDone: (message: string) => void;
+    onError: (message: string) => void;
+  },
+  options?: { force?: boolean },
+): AbortController {
+  const qs = options?.force ? "?force=true" : "";
+  return _consumeSSE(`${API_BASE}/api/setup/vm/provision${qs}`, "POST", {
+    onEvent(event, data) {
+      const step = data.step as string;
+      const message = (data.message as string) || "";
+      switch (event) {
+        case "step_start": callbacks.onStepStart?.(step, message); break;
+        case "step_progress": callbacks.onStepProgress?.(step, message); break;
+        case "step_done": callbacks.onStepDone?.(step, message); break;
+        case "step_skip": callbacks.onStepSkip?.(step, message); break;
+        case "step_error": callbacks.onStepError?.(step, message); break;
+        case "heartbeat": callbacks.onHeartbeat?.(step); break;
+        case "done": callbacks.onDone(message); break;
+        case "error": callbacks.onError(message); break;
+      }
+    },
+    onError: callbacks.onError,
+  });
+}
+
+export async function cancelProvision(): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/setup/vm/provision/cancel`, { method: "POST" });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error(detail?.detail || "Cancel failed");
+  }
+}
+
+export async function getProvisionLog(): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/setup/vm/provision/log`);
+  return res.text();
+}

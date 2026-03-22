@@ -5,6 +5,7 @@
  * as clickable cards with icons, filenames, and download buttons.
  */
 
+import { useMemo, useCallback, memo } from "react";
 import { FileText, FileCode, Image, FileSpreadsheet, Music, Video, File, Download, AlertCircle } from "lucide-react";
 import { useAppContext } from "../../store";
 import ScrollableText from "../../components/ScrollableText";
@@ -56,7 +57,7 @@ const UNSUPPORTED_EXTS = new Set([
   ".doc", ".ppt", ".xls",
 ]);
 
-function FileIcon({ mimeType, path }: { mimeType: string; path: string }) {
+const FileIcon = memo(function FileIcon({ mimeType, path }: { mimeType: string; path: string }) {
   const ext = (path.split("/").pop() || "").toLowerCase();
   const dotIdx = ext.lastIndexOf(".");
   const fileExt = dotIdx > 0 ? ext.slice(dotIdx) : "";
@@ -90,7 +91,7 @@ function FileIcon({ mimeType, path }: { mimeType: string; path: string }) {
 
   // Not previewable
   return <File size={20} />;
-}
+});
 
 /** Human-readable label for a MIME type, with extension fallback. */
 function mimeLabel(mimeType: string, path: string): string {
@@ -174,11 +175,29 @@ function mimeLabel(mimeType: string, path: string): string {
   return ext ? ext.toUpperCase() : "File";
 }
 
-export default function PresentFilesResult({ output }: ResultRendererProps) {
+export default memo(function PresentFilesResult({ output }: ResultRendererProps) {
   const { state, dispatch } = useAppContext();
   const conversationId = state.activeConversationId;
 
-  const { files, error } = parseOutput(output);
+  const { files, error } = useMemo(() => parseOutput(output), [output]);
+
+  const handleDownload = useCallback((e: React.MouseEvent, file: PresentedFile) => {
+    e.stopPropagation();
+    if (!conversationId) return;
+    const url = `/api/files/${conversationId}?path=${encodeURIComponent(file.path)}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = basename(file.path);
+    a.click();
+  }, [conversationId]);
+
+  const handleCardClick = useCallback((file: PresentedFile) => {
+    if (!conversationId) return;
+    dispatch({
+      type: "SET_FILE_PREVIEW",
+      payload: { path: file.path, mimeType: file.mimeType, conversationId },
+    });
+  }, [conversationId, dispatch]);
 
   if (error) {
     return (
@@ -191,29 +210,11 @@ export default function PresentFilesResult({ output }: ResultRendererProps) {
 
   if (files.length === 0) return null;
 
-  const handleDownload = (e: React.MouseEvent, file: PresentedFile) => {
-    e.stopPropagation();
-    if (!conversationId) return;
-    const url = `/api/files/${conversationId}?path=${encodeURIComponent(file.path)}`;
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = basename(file.path);
-    a.click();
-  };
-
-  const handleCardClick = (file: PresentedFile) => {
-    if (!conversationId) return;
-    dispatch({
-      type: "SET_FILE_PREVIEW",
-      payload: { path: file.path, mimeType: file.mimeType, conversationId },
-    });
-  };
-
   return (
     <div className="present-files-list">
-      {files.map((file, i) => (
+      {files.map((file) => (
         <div
-          key={i}
+          key={file.path}
           className="present-file-card"
           onClick={() => handleCardClick(file)}
         >
@@ -235,4 +236,4 @@ export default function PresentFilesResult({ output }: ResultRendererProps) {
       ))}
     </div>
   );
-}
+});

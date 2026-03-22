@@ -15,10 +15,13 @@
  * height follows automatically via the viewBox aspect ratio.
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { loadPresentation, renderSlideToElement } from "pptx-viewer";
 import type { LoadedPresentation } from "pptx-viewer";
 import { Loader2 } from "lucide-react";
+
+/** How many slides to render initially before deferring the rest. */
+const INITIAL_BATCH = 3;
 
 interface Props {
   url: string;
@@ -29,6 +32,8 @@ function PptxViewer({ url, visible }: Props) {
   const [presentation, setPresentation] = useState<LoadedPresentation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  /** How many slides are currently rendered (progressive loading). */
+  const [renderedCount, setRenderedCount] = useState(INITIAL_BATCH);
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasVisible = useRef(visible);
 
@@ -43,6 +48,7 @@ function PptxViewer({ url, visible }: Props) {
     let cancelled = false;
     setLoading(true);
     setError(false);
+    setRenderedCount(INITIAL_BATCH);
 
     fetch(url)
       .then((res) => {
@@ -71,6 +77,29 @@ function PptxViewer({ url, visible }: Props) {
     };
   }, [url]);
 
+  // Progressively render remaining slides in idle callbacks so the first
+  // few slides appear immediately without blocking the main thread.
+  useEffect(() => {
+    if (!presentation) return;
+    const total = presentation.slides.length;
+    if (renderedCount >= total) return;
+
+    // Use requestIdleCallback where available, fall back to rAF + setTimeout
+    const schedule =
+      typeof requestIdleCallback === "function"
+        ? requestIdleCallback
+        : (cb: () => void) => setTimeout(cb, 32);
+    const cancel =
+      typeof cancelIdleCallback === "function"
+        ? cancelIdleCallback
+        : clearTimeout;
+
+    const id = schedule(() => {
+      setRenderedCount((n) => Math.min(n + INITIAL_BATCH, total));
+    });
+    return () => cancel(id);
+  }, [presentation, renderedCount]);
+
   // Cleanup blob URLs when presentation changes or unmounts
   useEffect(() => {
     return () => {
@@ -86,6 +115,9 @@ function PptxViewer({ url, visible }: Props) {
     );
   }
 
+  const total = presentation?.slides.length ?? 0;
+  const visibleCount = Math.min(renderedCount, total);
+
   return (
     <div className="pptx-viewer" ref={scrollRef}>
       {loading && (
@@ -95,14 +127,19 @@ function PptxViewer({ url, visible }: Props) {
       )}
       {presentation && (
         <div className="document-pages pptx-viewer-pages">
-          {presentation.slides.map((_, i) => (
+          {presentation.slides.slice(0, visibleCount).map((_, i) => (
             <PptxSlide
               key={i}
               presentation={presentation}
               slideIndex={i}
-              totalSlides={presentation.slides.length}
+              totalSlides={total}
             />
           ))}
+          {visibleCount < total && (
+            <div className="file-preview-loading" style={{ padding: "1rem" }}>
+              <Loader2 size={20} className="file-preview-spinner" />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -113,7 +150,7 @@ function PptxViewer({ url, visible }: Props) {
 // PptxSlide — renders a single slide SVG into a card
 // ---------------------------------------------------------------------------
 
-function PptxSlide({
+const PptxSlide = memo(function PptxSlide({
   presentation,
   slideIndex,
   totalSlides,
@@ -157,6 +194,6 @@ function PptxSlide({
       </span>
     </div>
   );
-}
+});
 
 export default PptxViewer;

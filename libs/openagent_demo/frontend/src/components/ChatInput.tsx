@@ -203,10 +203,15 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
     });
   }, [startUpload]);
 
-  const { dragOver, dragProps } = useFileDrop(useCallback((files: File[]) => {
-    files.forEach(startUpload);
-    textareaRef.current?.focus();
-  }, [startUpload]));
+  const { dragOver, dragProps } = useFileDrop(
+    useCallback((files: File[]) => {
+      files.forEach(startUpload);
+      textareaRef.current?.focus();
+    }, [startUpload]),
+    useCallback((reason: string) => {
+      dispatch({ type: "SHOW_NOTIFICATION", payload: { message: reason, type: "error" } });
+    }, [dispatch]),
+  );
 
   const removePendingFile = useCallback((id: string) => {
     setPendingFiles((prev) => {

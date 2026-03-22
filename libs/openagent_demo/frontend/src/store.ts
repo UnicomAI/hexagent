@@ -7,7 +7,7 @@ import type {
   ToolCall,
   SubagentContentBlock,
 } from "./types";
-import type { ServerConfig } from "./api";
+import type { ServerConfig, VMStatus } from "./api";
 
 export interface Notification {
   id: string;
@@ -23,9 +23,15 @@ export interface AppState {
   isStreaming: boolean;
   streamingBlocks: ContentBlock[];
   streamingMessageId: string | null;
+  /** The conversation that owns the current stream (set at STREAM_START). */
+  streamingConversationId: string | null;
   sidebarCollapsed: boolean;
-  rightPanelVisible: boolean;
+  /** Per-conversation right-panel visibility. */
+  rightPanelByConversation: Record<string, boolean>;
+  /** Tracks which conversations have already auto-showed the right panel. */
+  rightPanelAutoShowed: Record<string, boolean>;
   serverConfig: ServerConfig | null;
+  vmStatus: VMStatus | null;
   selectedModelId: string;
   selectedMode: ConversationMode;
   /** Remembers the last active conversation (or null=welcome) per mode. */
@@ -44,9 +50,12 @@ export const initialState: AppState = {
   isStreaming: false,
   streamingBlocks: [],
   streamingMessageId: null,
+  streamingConversationId: null,
   sidebarCollapsed: true,
-  rightPanelVisible: false,
+  rightPanelByConversation: {},
+  rightPanelAutoShowed: {},
   serverConfig: null,
+  vmStatus: null,
   selectedModelId: "",
   selectedMode: (() => {
     const m = window.location.pathname.match(/^\/(chat|cowork)/);
@@ -82,8 +91,10 @@ export type Action =
   | { type: "TOGGLE_SIDEBAR" }
   | { type: "SET_SIDEBAR_COLLAPSED"; payload: boolean }
   | { type: "SET_RIGHT_PANEL"; payload: boolean }
+  | { type: "AUTO_SHOW_RIGHT_PANEL"; payload: string }
   | { type: "UPDATE_CONVERSATION_TITLE"; payload: { id: string; title: string } }
   | { type: "SET_SERVER_CONFIG"; payload: ServerConfig }
+  | { type: "SET_VM_STATUS"; payload: VMStatus }
   | { type: "SET_SELECTED_MODEL"; payload: string }
   | { type: "SET_SELECTED_MODE"; payload: ConversationMode }
   | { type: "SHOW_NOTIFICATION"; payload: { message: string; type: "error" | "info" } }
@@ -454,6 +465,8 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case "DELETE_CONVERSATION": {
       const filtered = state.conversations.filter((c) => c.id !== action.payload);
+      const { [action.payload]: _rpDel, ...restPanel } = state.rightPanelByConversation;
+      const { [action.payload]: _asDel, ...restAutoShowed } = state.rightPanelAutoShowed;
       return {
         ...state,
         conversations: filtered,
@@ -461,20 +474,32 @@ export function reducer(state: AppState, action: Action): AppState {
           state.activeConversationId === action.payload
             ? (filtered[0]?.id ?? null)
             : state.activeConversationId,
+        rightPanelByConversation: restPanel,
+        rightPanelAutoShowed: restAutoShowed,
       };
     }
 
     case "SET_ACTIVE_CONVERSATION": {
-      // Clear file preview when switching conversations
-      const clearPreview =
-        action.payload !== state.activeConversationId &&
-        state.filePreview &&
-        state.filePreview.conversationId !== action.payload;
+      const switching = action.payload !== state.activeConversationId && action.payload !== null;
+      // When navigating to a different conversation, reset its panel state
+      // so auto-show can re-evaluate based on content. Mode switches (SET_SELECTED_MODE)
+      // set activeConversationId directly and don't go through here, preserving state.
+      const newAutoShowed = switching
+        ? (({ [action.payload!]: _, ...rest }) => rest)(state.rightPanelAutoShowed)
+        : state.rightPanelAutoShowed;
+      const newPanelMap = switching
+        ? (({ [action.payload!]: _, ...rest }) => rest)(state.rightPanelByConversation)
+        : state.rightPanelByConversation;
       return {
         ...state,
         activeConversationId: action.payload,
         lastActiveByMode: { ...state.lastActiveByMode, [state.selectedMode]: action.payload },
-        ...(clearPreview ? { filePreview: null, filePreviewVisible: false } : {}),
+        rightPanelAutoShowed: newAutoShowed,
+        rightPanelByConversation: newPanelMap,
+        // Clear file preview if it belongs to a different conversation
+        ...(switching && state.filePreview && state.filePreview.conversationId !== action.payload
+          ? { filePreview: null, filePreviewVisible: false, rightPanelBeforePreview: null }
+          : {}),
       };
     }
 
@@ -503,6 +528,7 @@ export function reducer(state: AppState, action: Action): AppState {
         isStreaming: true,
         streamingBlocks: [],
         streamingMessageId: action.payload.messageId,
+        streamingConversationId: state.activeConversationId,
         conversations: state.conversations.map((c) =>
           c.id === state.activeConversationId
             ? { ...c, messages: [...(c.messages ?? []), placeholder] }
@@ -603,13 +629,15 @@ export function reducer(state: AppState, action: Action): AppState {
     case "STREAM_END": {
       const finalBlocks = finalizeThinking(state.streamingBlocks);
       const finalContent = blocksToContent(finalBlocks);
+      const streamConvId = state.streamingConversationId;
       return {
         ...state,
         isStreaming: false,
         streamingBlocks: [],
         streamingMessageId: null,
+        streamingConversationId: null,
         conversations: state.conversations.map((c) =>
-          c.id === state.activeConversationId
+          c.id === streamConvId
             ? {
                 ...c,
                 messages: (c.messages ?? []).map((m) =>
@@ -628,6 +656,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         isStreaming: false,
+        streamingConversationId: null,
         streamingBlocks: appendTextDelta(
           state.streamingBlocks,
           `\n\n**Error:** ${action.payload}`,
@@ -640,8 +669,24 @@ export function reducer(state: AppState, action: Action): AppState {
     case "SET_SIDEBAR_COLLAPSED":
       return { ...state, sidebarCollapsed: action.payload };
 
-    case "SET_RIGHT_PANEL":
-      return { ...state, rightPanelVisible: action.payload };
+    case "SET_RIGHT_PANEL": {
+      const convId = state.activeConversationId;
+      if (!convId) return state;
+      return {
+        ...state,
+        rightPanelByConversation: { ...state.rightPanelByConversation, [convId]: action.payload },
+      };
+    }
+
+    case "AUTO_SHOW_RIGHT_PANEL": {
+      const convId = action.payload;
+      if (state.rightPanelAutoShowed[convId]) return state;
+      return {
+        ...state,
+        rightPanelByConversation: { ...state.rightPanelByConversation, [convId]: true },
+        rightPanelAutoShowed: { ...state.rightPanelAutoShowed, [convId]: true },
+      };
+    }
 
     case "UPDATE_CONVERSATION_TITLE":
       return {
@@ -660,6 +705,9 @@ export function reducer(state: AppState, action: Action): AppState {
         selectedModelId: state.selectedModelId || defaultModelId,
       };
     }
+
+    case "SET_VM_STATUS":
+      return { ...state, vmStatus: action.payload };
 
     case "SET_SELECTED_MODEL": {
       const nextState = { ...state, selectedModelId: action.payload };
@@ -684,8 +732,15 @@ export function reducer(state: AppState, action: Action): AppState {
       // Validate it still exists (conversation may have been deleted)
       const stillExists = remembered === null || state.conversations.some((c) => c.id === remembered);
       const newActiveId = stillExists ? remembered : null;
-      // Clear warm session when switching modes (different session type needed)
-      return { ...state, selectedMode: newMode, activeConversationId: newActiveId, lastActiveByMode: savedLast, warmSessionId: null };
+      // Clear warm session when switching modes (different session type needed).
+      // Preserve file preview & right panel state — UI gates rendering by conversationId.
+      return {
+        ...state,
+        selectedMode: newMode,
+        activeConversationId: newActiveId,
+        lastActiveByMode: savedLast,
+        warmSessionId: null,
+      };
     }
 
     case "SHOW_NOTIFICATION": {
@@ -703,39 +758,53 @@ export function reducer(state: AppState, action: Action): AppState {
         notifications: state.notifications.filter((n) => n.id !== action.payload),
       };
 
-    case "SET_FILE_PREVIEW":
+    case "SET_FILE_PREVIEW": {
+      const rpConvId = state.activeConversationId;
+      const currentPanelVisible = rpConvId ? (state.rightPanelByConversation[rpConvId] ?? false) : false;
       if (action.payload) {
         return {
           ...state,
           filePreview: action.payload,
           filePreviewVisible: true,
-          rightPanelBeforePreview: state.rightPanelBeforePreview ?? state.rightPanelVisible,
-          rightPanelVisible: false,
+          rightPanelBeforePreview: state.rightPanelBeforePreview ?? currentPanelVisible,
+          rightPanelByConversation: rpConvId
+            ? { ...state.rightPanelByConversation, [rpConvId]: false }
+            : state.rightPanelByConversation,
         };
       }
       return {
         ...state,
         filePreview: null,
         filePreviewVisible: false,
-        rightPanelVisible: state.rightPanelBeforePreview === true ? true : state.rightPanelVisible,
+        rightPanelByConversation: rpConvId && state.rightPanelBeforePreview === true
+          ? { ...state.rightPanelByConversation, [rpConvId]: true }
+          : state.rightPanelByConversation,
         rightPanelBeforePreview: null,
       };
+    }
 
-    case "SET_FILE_PREVIEW_VISIBLE":
+    case "SET_FILE_PREVIEW_VISIBLE": {
+      const fpvConvId = state.activeConversationId;
+      const fpvCurrentPanel = fpvConvId ? (state.rightPanelByConversation[fpvConvId] ?? false) : false;
       if (action.payload) {
         return {
           ...state,
           filePreviewVisible: true,
-          rightPanelBeforePreview: state.rightPanelBeforePreview ?? state.rightPanelVisible,
-          rightPanelVisible: false,
+          rightPanelBeforePreview: state.rightPanelBeforePreview ?? fpvCurrentPanel,
+          rightPanelByConversation: fpvConvId
+            ? { ...state.rightPanelByConversation, [fpvConvId]: false }
+            : state.rightPanelByConversation,
         };
       }
       return {
         ...state,
         filePreviewVisible: false,
-        rightPanelVisible: state.rightPanelBeforePreview === true ? true : state.rightPanelVisible,
+        rightPanelByConversation: fpvConvId && state.rightPanelBeforePreview === true
+          ? { ...state.rightPanelByConversation, [fpvConvId]: true }
+          : state.rightPanelByConversation,
         rightPanelBeforePreview: null,
       };
+    }
 
     default:
       return state;

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from "react";
 import { ChevronRight, Check, X, ExternalLink } from "lucide-react";
 import {
   getToolIcon,
@@ -11,6 +11,7 @@ import {
   hasNoFoldBody,
   getIconDomain,
   getInputContent,
+  isBuiltinTool,
 } from "../tools";
 import { useFavicon } from "../tools/useFavicon";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -58,7 +59,7 @@ export default function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
   const inputContent = getInputContent(toolCall.name, toolCall.input, toolCall.argsText);
   const argsContent = inputContent
     ? undefined
-    : (isStreaming ? (toolCall.argsText || "") : formatInput(toolCall));
+    : (isStreaming ? stripBuiltinDescription(toolCall.name, toolCall.argsText || "") : formatInput(toolCall));
 
   // Auto-expand when streaming or running (skip for sidebar, no-body, and custom-inline tools)
   useEffect(() => {
@@ -105,11 +106,22 @@ export default function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
     }
   }, []);
 
-  // Auto-scroll streaming args box
-  useEffect(() => {
-    if (isStreaming && argsBoxRef.current) {
-      argsBoxRef.current.scrollTop = argsBoxRef.current.scrollHeight;
+  // Persist scroll position across SyntaxHighlighter re-renders (which recreate the <pre>)
+  const lastScrollLeft = useRef(0);
+
+  // useLayoutEffect runs before paint, so the new <pre> gets scrolled before the user sees it
+  useLayoutEffect(() => {
+    if (!isStreaming || !argsBoxRef.current) {
+      lastScrollLeft.current = 0;
+      return;
     }
+    const pre = argsBoxRef.current.querySelector<HTMLPreElement>(".tool-pre");
+    if (!pre) return;
+    const maxScroll = pre.scrollWidth - pre.clientWidth;
+    const target = Math.max(lastScrollLeft.current, maxScroll);
+    pre.scrollTop = pre.scrollHeight;
+    pre.scrollLeft = target;
+    lastScrollLeft.current = target;
   }, [isStreaming, toolCall.argsText]);
 
   const handleToggle = () => {
@@ -161,8 +173,8 @@ export default function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
           {showExternalLink && <ExternalLink size={12} className="fold-external-link" />}
         </span>
         <span className="fold-meta">
-          {isStreaming && <span className="tool-status is-running">Streaming...</span>}
-          {isRunning && <span className="tool-status is-running">Running...</span>}
+          {isStreaming && <span className="tool-status is-streaming">Streaming<AnimatedDots /></span>}
+          {isRunning && <span className="tool-status is-running">Running<AnimatedDots /></span>}
           {isDone && (
             customStatus ? (
               <span className={`tool-status ${customStatus.className}`}>
@@ -196,7 +208,7 @@ export default function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
                 ) : (
                   <>
                     {inputContent ? (
-                      <div className="tool-box" ref={argsBoxRef}>
+                      <div className={`tool-box${isStreaming ? " is-streaming" : ""}`} ref={argsBoxRef}>
                         <div className="tool-box-label">Request</div>
                         <SyntaxHighlighter
                           language={inputContent.language}
@@ -209,15 +221,21 @@ export default function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
                         >
                           {inputContent.text}
                         </SyntaxHighlighter>
-                        {isStreaming && <span className="streaming-cursor" />}
                       </div>
                     ) : argsContent ? (
-                      <div className="tool-box" ref={argsBoxRef}>
+                      <div className={`tool-box${isStreaming ? " is-streaming" : ""}`} ref={argsBoxRef}>
                         <div className="tool-box-label">Request</div>
-                        <pre className="tool-pre">
-                          <code>{argsContent}</code>
-                          {isStreaming && <span className="streaming-cursor" />}
-                        </pre>
+                        <SyntaxHighlighter
+                          language="json"
+                          style={isDarkTheme() ? oneDark : oneLight}
+                          PreTag={({ children, ...rest }: React.HTMLAttributes<HTMLPreElement>) => (
+                            <pre {...rest} className="tool-pre">{children}</pre>
+                          )}
+                          customStyle={{ background: "transparent", margin: 0, padding: 0 }}
+                          codeTagProps={{ style: { fontFamily: "inherit", fontSize: "inherit" } }}
+                        >
+                          {argsContent}
+                        </SyntaxHighlighter>
                       </div>
                     ) : null}
                     {revealOutput && isDone && (
@@ -242,6 +260,17 @@ export default function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
   );
 }
 
+/** Animated ellipsis that cycles through ., .., ... */
+function AnimatedDots() {
+  const [count, setCount] = useState(1);
+  useEffect(() => {
+    const id = setInterval(() => setCount((c) => (c % 3) + 1), 400);
+    return () => clearInterval(id);
+  }, []);
+  // Use a fixed-width wrapper so the text doesn't shift
+  return <span style={{ display: "inline-block", width: "1.2em", textAlign: "left" }}>{".".repeat(count)}</span>;
+}
+
 /** Strip internal system tags from tool output for display. */
 function stripSystemTags(text: string): string {
   return text
@@ -254,8 +283,71 @@ function isDarkTheme(): boolean {
   return document.documentElement.getAttribute("data-theme") !== "light";
 }
 
+/** Strip the "description" field from raw JSON text for built-in tools.
+ *  Handles partial streaming: if description value is still being streamed,
+ *  hide everything from the field start onward until it completes. */
+function stripBuiltinDescription(name: string, text: string): string {
+  if (!isBuiltinTool(name) || !text) return text;
+
+  // Match the start of a "description" field (as first key or later key)
+  // Handles both: `{ "description": ...` and `..., "description": ...`
+  const patterns = [
+    /^\s*\{\s*"description"\s*:\s*/, // first key
+    /,\s*"description"\s*:\s*/,      // non-first key
+  ];
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (!match) continue;
+    const valueStart = match.index + match[0].length;
+
+    // Check if the value is a string starting with "
+    if (text[valueStart] !== '"') continue;
+
+    // Find end of string value (handling escapes)
+    let i = valueStart + 1;
+    let closed = false;
+    while (i < text.length) {
+      if (text[i] === '\\') { i += 2; continue; }
+      if (text[i] === '"') { closed = true; i++; break; }
+      i++;
+    }
+
+    if (!closed) {
+      // Description value is still being streamed — hide from field start onward
+      const before = text.slice(0, match.index);
+      // If it was the first key, keep just "{"
+      if (pattern === patterns[0]) return before + "{";
+      return before;
+    }
+
+    // Value is complete — skip optional trailing comma/whitespace
+    if (i < text.length && /[\s,]/.test(text[i])) {
+      while (i < text.length && /[\s,]/.test(text[i])) i++;
+    }
+
+    // Reconstruct without the description field
+    const before = text.slice(0, match.index);
+    const after = text.slice(i);
+    // If it was the first key, rejoin as `{ <after>`
+    if (pattern === patterns[0]) {
+      text = before + "{" + after;
+    } else {
+      text = before + (after ? ", " + after : after);
+    }
+    // Don't break — re-check in case there's another occurrence (unlikely but safe)
+  }
+
+  return text;
+}
+
 function formatInput(toolCall: ToolCall): string {
-  if (toolCall.argsText) return toolCall.argsText;
-  const str = JSON.stringify(toolCall.input, null, 2);
+  if (toolCall.argsText) return stripBuiltinDescription(toolCall.name, toolCall.argsText);
+  let input = toolCall.input;
+  if (isBuiltinTool(toolCall.name) && "description" in input) {
+    const { description: _, ...rest } = input;
+    input = rest;
+  }
+  const str = JSON.stringify(input, null, 2);
   return str === "{}" ? "" : str;
 }

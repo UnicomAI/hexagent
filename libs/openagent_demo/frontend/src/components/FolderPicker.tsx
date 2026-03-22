@@ -8,9 +8,11 @@ import type { RecentFolder } from "../recentFolders";
 interface FolderPickerProps {
   value: string;
   onChange: (folder: string) => void;
+  disabled?: boolean;
+  onDisabledClick?: () => void;
 }
 
-export default function FolderPicker({ value, onChange }: FolderPickerProps) {
+export default function FolderPicker({ value, onChange, disabled, onDisabledClick }: FolderPickerProps) {
   const [open, setOpen] = useState(false);
   const [recentFolders, setRecentFolders] = useState<RecentFolder[]>(loadRecentFolders);
   const [pendingFolder, setPendingFolder] = useState<string | null>(null);
@@ -72,13 +74,14 @@ export default function FolderPicker({ value, onChange }: FolderPickerProps) {
   }, [requestAccess]);
 
   const handleButtonClick = useCallback(() => {
+    if (disabled) { onDisabledClick?.(); return; }
     if (!value && recentFolders.length === 0) {
       // No selection and no recents — go straight to native picker
       handleBrowse();
     } else {
       setOpen(!open);
     }
-  }, [value, open, handleBrowse, recentFolders.length]);
+  }, [value, open, handleBrowse, recentFolders.length, disabled, onDisabledClick]);
 
   const selectRecent = useCallback(
     (folder: RecentFolder) => {
