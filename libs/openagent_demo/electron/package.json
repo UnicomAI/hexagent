@@ -24,6 +24,7 @@
     "appId": "com.openagent.app",
     "productName": "OpenAgent",
     "directories": {
+      "buildResources": "resources",
       "output": "dist"
     },
     "files": [
@@ -53,7 +54,7 @@
           "arch": ["arm64", "x64"]
         }
       ],
-      "icon": "build/icon.icns",
+      "icon": "resources/icon.icns",
       "category": "public.app-category.developer-tools",
       "identity": null,
       "signIgnore": []
@@ -66,7 +67,7 @@
           "arch": ["x64"]
         }
       ],
-      "icon": "build/icon.ico"
+      "icon": "resources/icon.ico"
     },
     "nsis": {
       "oneClick": false,

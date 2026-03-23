@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "react";
 import { ChevronRight, Check, X, ExternalLink } from "lucide-react";
 import {
   getToolIcon,

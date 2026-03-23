@@ -161,6 +161,7 @@ function App() {
       return;
     }
     if (!initialLoadDone) return;
+    if (setupNeeded) return; // onboarding not complete yet
     if (warmingRef.current) return;
     if (state.warmSessionId) return; // already have one
 
@@ -187,7 +188,7 @@ function App() {
       })
       .finally(() => { warmingRef.current = false; });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.activeConversationId, state.warmSessionId, state.selectedMode, state.vmStatus, initialLoadDone]);
+  }, [state.activeConversationId, state.warmSessionId, state.selectedMode, state.vmStatus, initialLoadDone, setupNeeded]);
 
   // Tear down backend warm session when it's cleared by mode switch
   useEffect(() => {
