@@ -380,7 +380,7 @@ async def send_message(conversation_id: str, body: MessageRequest) -> StreamingR
                     if is_subagent:
                         yield (
                             f"event: subagent_tool_result\n"
-                            f"data: {json.dumps({'task_id': task_id, 'id': run_id, 'output': output_text[:2000]})}\n\n"
+                            f"data: {json.dumps({'task_id': task_id, 'id': run_id, 'output': output_text})}\n\n"
                         )
                     else:
                         # Update the tool block with output
@@ -389,11 +389,11 @@ async def send_message(conversation_id: str, body: MessageRequest) -> StreamingR
                         if idx is not None and idx < len(blocks):
                             tool_data = blocks[idx].get("tool")
                             if isinstance(tool_data, dict):
-                                tool_data["output"] = output_text[:2000]
+                                tool_data["output"] = output_text
                                 resolved_tool_name = tool_data.get("name", "")
                         yield (
                             f"event: tool_result\n"
-                            f"data: {json.dumps({'id': run_id, 'output': output_text[:2000]})}\n\n"
+                            f"data: {json.dumps({'id': run_id, 'output': output_text})}\n\n"
                         )
 
                         # Eager pre-conversion: when PresentToUser emits
