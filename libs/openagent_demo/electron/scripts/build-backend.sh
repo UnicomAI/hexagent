@@ -39,6 +39,7 @@ PYINSTALLER_ARGS=(
     --collect-submodules openagent
     --collect-data openagent
     --add-data "skills:skills"
+    --add-data "../../openagent/sandbox/vm:sandbox/vm"
     openagent_api/server.py
 )
 
