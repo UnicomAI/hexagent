@@ -96,6 +96,26 @@ class TestOpenAIContentBlocks:
         assert image_blocks[0]["image_url"]["url"] == "https://example.com/img.png"
 
 
+class TestContentFormatParam:
+    """Tests for to_langchain_tool content_format parameter."""
+
+    def test_anthropic_format_produces_image_blocks(self) -> None:
+        img = Base64Source(data="iVBOR", media_type="image/png")
+        result = ToolResult(output="Screenshot", images=(img,))
+        blocks = result.to_content_blocks("anthropic")
+        image_blocks = [b for b in blocks if b["type"] == "image"]
+        assert len(image_blocks) == 1
+        assert image_blocks[0]["source"]["type"] == "base64"
+
+    def test_openai_format_produces_image_url_blocks(self) -> None:
+        img = Base64Source(data="iVBOR", media_type="image/png")
+        result = ToolResult(output="Screenshot", images=(img,))
+        blocks = result.to_content_blocks("openai")
+        image_blocks = [b for b in blocks if b["type"] == "image_url"]
+        assert len(image_blocks) == 1
+        assert image_blocks[0]["image_url"]["url"] == "data:image/png;base64,iVBOR"
+
+
 class TestContentBlocksGeneral:
     """Format-agnostic tests."""
 

@@ -5,6 +5,7 @@ skill injection, reminder annotation) and tool call permission gating.
 """
 
 # ruff: noqa: PLR2004, ANN401, ARG001
+# mypy: disable-error-code="arg-type"
 
 from __future__ import annotations
 
@@ -23,11 +24,13 @@ from openagent.harness.model import ModelProfile
 from openagent.harness.permission import PermissionDecision, PermissionGate, PermissionResult, SafetyRule
 from openagent.harness.reminders import Reminder
 from openagent.langchain.middleware import (
+    _IMAGE_EXTRACTED,
     AgentMiddleware,
     OpenAgentState,
     _create_denied_response,
     _detect_skill_call,
     _extract_text_content,
+    _extract_tool_images,
 )
 from openagent.prompts.content import load
 from openagent.types import AgentContext, CompactionPhase, Skill
@@ -521,3 +524,171 @@ class TestToolsProperty:
         first = mw.tools
         second = mw.tools
         assert first is second
+
+
+# ---------------------------------------------------------------------------
+# Image extraction — _extract_tool_images helper
+# ---------------------------------------------------------------------------
+
+
+class TestExtractToolImages:
+    """Tests for _extract_tool_images (pure function)."""
+
+    def test_extracts_images_from_tool_message(self) -> None:
+        messages: list[HumanMessage | AIMessage | ToolMessage] = [
+            HumanMessage(content="read img.png"),
+            AIMessage(content="", tool_calls=[{"id": "tc_1", "name": "read", "args": {}}]),
+            ToolMessage(
+                content=[
+                    {"type": "text", "text": "[Image: img.png]"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                ],
+                tool_call_id="tc_1",
+            ),
+        ]
+        result = _extract_tool_images(messages)
+        assert result is not None
+        assert len(result) == 4  # original 3 + injected HumanMessage
+
+        # ToolMessage should have text only
+        tool_msg = result[2]
+        assert isinstance(tool_msg, ToolMessage)
+        assert isinstance(tool_msg.content, list)
+        assert all(b.get("type") != "image_url" for b in tool_msg.content if isinstance(b, dict))
+        assert tool_msg.additional_kwargs[_IMAGE_EXTRACTED] is True
+
+        # Injected HumanMessage should have the image
+        human_msg = result[3]
+        assert isinstance(human_msg, HumanMessage)
+        assert isinstance(human_msg.content, list)
+        image_blocks = [b for b in human_msg.content if isinstance(b, dict) and b.get("type") == "image_url"]
+        assert len(image_blocks) == 1
+
+    def test_handles_anthropic_image_format(self) -> None:
+        messages: list[ToolMessage] = [
+            ToolMessage(
+                content=[
+                    {"type": "text", "text": "screenshot"},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "abc"}},
+                ],
+                tool_call_id="tc_1",
+            ),
+        ]
+        result = _extract_tool_images(messages)
+        assert result is not None
+        assert len(result) == 2
+        human_msg = result[1]
+        assert isinstance(human_msg, HumanMessage)
+        image_blocks = [b for b in human_msg.content if isinstance(b, dict) and b.get("type") == "image"]
+        assert len(image_blocks) == 1
+
+    def test_no_extraction_when_no_images(self) -> None:
+        messages: list[ToolMessage] = [
+            ToolMessage(
+                content=[{"type": "text", "text": "just text"}],
+                tool_call_id="tc_1",
+            ),
+        ]
+        assert _extract_tool_images(messages) is None
+
+    def test_no_extraction_for_string_content(self) -> None:
+        messages: list[ToolMessage] = [
+            ToolMessage(content="plain string", tool_call_id="tc_1"),
+        ]
+        assert _extract_tool_images(messages) is None
+
+    def test_idempotent_skips_already_extracted(self) -> None:
+        messages: list[ToolMessage | HumanMessage] = [
+            ToolMessage(
+                content=[{"type": "text", "text": "[see image below]"}],
+                tool_call_id="tc_1",
+                additional_kwargs={_IMAGE_EXTRACTED: True},
+            ),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": "[Image from tool result]"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                ]
+            ),
+        ]
+        assert _extract_tool_images(messages) is None
+
+    def test_uses_placeholder_when_only_images(self) -> None:
+        """When ToolMessage has no text blocks, use a string placeholder."""
+        messages: list[ToolMessage] = [
+            ToolMessage(
+                content=[
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                ],
+                tool_call_id="tc_1",
+            ),
+        ]
+        result = _extract_tool_images(messages)
+        assert result is not None
+        tool_msg = result[0]
+        assert isinstance(tool_msg, ToolMessage)
+        assert tool_msg.content == "[see image below]"
+
+    def test_preserves_tool_call_id(self) -> None:
+        messages: list[ToolMessage] = [
+            ToolMessage(
+                content=[
+                    {"type": "text", "text": "img"},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "x"}},
+                ],
+                tool_call_id="tc_42",
+                id="msg_7",
+            ),
+        ]
+        result = _extract_tool_images(messages)
+        assert result is not None
+        tool_msg = result[0]
+        assert isinstance(tool_msg, ToolMessage)
+        assert tool_msg.tool_call_id == "tc_42"
+        assert tool_msg.id == "msg_7"
+
+
+# ---------------------------------------------------------------------------
+# abefore_model — image extraction integration
+# ---------------------------------------------------------------------------
+
+
+class TestImageExtractionPipeline:
+    """Tests for image extraction in the abefore_model pipeline."""
+
+    async def test_extracts_images_for_non_anthropic_model(self) -> None:
+        """Non-Anthropic model (MagicMock) triggers image extraction."""
+        mw = _make_middleware()
+        state = _state(
+            [
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content="read img.png"),
+                AIMessage(content="", tool_calls=[{"id": "tc_1", "name": "read", "args": {}}]),
+                ToolMessage(
+                    content=[
+                        {"type": "text", "text": "[Image: img.png]"},
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                    ],
+                    tool_call_id="tc_1",
+                ),
+            ]
+        )
+        result = await mw.abefore_model(state)
+        assert result is not None
+        messages = result["messages"].value
+        # Should have 5 messages: sys + human + ai + tool (text only) + human (image)
+        assert len(messages) == 5
+        assert isinstance(messages[4], HumanMessage)
+        image_blocks = [b for b in messages[4].content if isinstance(b, dict) and b.get("type") == "image_url"]
+        assert len(image_blocks) == 1
+
+    async def test_no_extraction_when_no_images(self) -> None:
+        mw = _make_middleware()
+        state = _state(
+            [
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content="hello"),
+            ]
+        )
+        result = await mw.abefore_model(state)
+        assert result is None

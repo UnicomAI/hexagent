@@ -1,17 +1,18 @@
 """Agent middleware — the actual runtime for OpenAgent.
 
 This middleware coordinates compaction, permission gating, skill injection,
-and system reminder rules within LangChain's agent infrastructure.
+image extraction, and system reminder rules within LangChain's agent
+infrastructure.
 
 Compaction logic is inlined (no separate controller class). The pre-model
-pipeline runs: intercepts -> appenders -> annotators.
+pipeline runs: intercepts -> appenders -> image extraction -> annotators.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, NotRequired
+from typing import TYPE_CHECKING, Any, Literal, NotRequired
 
 from langchain.agents.middleware.types import (
     AgentMiddleware as LangChainAgentMiddleware,
@@ -41,6 +42,7 @@ from openagent.types import AgentContext, CompactionPhase
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
 
+    from langchain_core.language_models import BaseChatModel
     from langchain_core.tools import BaseTool
     from langgraph.runtime import Runtime
 
@@ -86,6 +88,84 @@ def _create_denied_response(
         content=error_message,
         tool_call_id=request.tool_call.get("id", ""),
     )
+
+
+def _supports_tool_images(model: BaseChatModel) -> bool:
+    """Check if the model's provider supports images in tool result messages.
+
+    ``ChatAnthropic`` (and Anthropic-compatible providers using the same
+    class) natively supports image content blocks inside ``tool_result``
+    messages.  Other providers (OpenAI, DeepSeek, etc.) reject them.
+    """
+    try:
+        from langchain_anthropic import ChatAnthropic
+    except ImportError:
+        return False
+    return isinstance(model, ChatAnthropic)
+
+
+# Marker key in ``additional_kwargs`` to prevent double extraction.
+_IMAGE_EXTRACTED = "openagent:images_extracted"
+
+
+def _extract_tool_images(messages: Sequence[BaseMessage]) -> list[BaseMessage] | None:
+    """Move images from ToolMessages into follow-up HumanMessages.
+
+    For providers that reject images in tool-role messages (OpenAI),
+    this extracts image content blocks and injects them as user messages
+    immediately after the originating ToolMessage.
+
+    Already-processed messages (marked via ``additional_kwargs``) are
+    skipped so the function is safe to call repeatedly.
+
+    Returns a new list if any extraction happened, ``None`` otherwise.
+    """
+    result: list[BaseMessage] = []
+    changed = False
+
+    for msg in messages:
+        result.append(msg)
+
+        if not isinstance(msg, ToolMessage):
+            continue
+        if not isinstance(msg.content, list):
+            continue
+        if msg.additional_kwargs.get(_IMAGE_EXTRACTED):
+            continue
+
+        text_blocks: list[str | dict[str, Any]] = []
+        image_blocks: list[dict[str, Any]] = []
+        for block in msg.content:
+            if isinstance(block, dict) and block.get("type") in ("image", "image_url"):
+                image_blocks.append(block)
+            else:
+                text_blocks.append(block)
+
+        if not image_blocks:
+            continue
+
+        changed = True
+
+        # Replace ToolMessage content: text blocks only, or a placeholder string.
+        tool_content: str | list[str | dict[str, Any]] = text_blocks if text_blocks else "[see image below]"
+        result[-1] = ToolMessage(
+            content=tool_content,
+            tool_call_id=msg.tool_call_id,
+            id=msg.id,
+            additional_kwargs={**msg.additional_kwargs, _IMAGE_EXTRACTED: True},
+        )
+
+        # Inject HumanMessage with extracted images
+        result.append(
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": "[Image from tool result]"},
+                    *image_blocks,
+                ]
+            )
+        )
+
+    return result if changed else None
 
 
 def _detect_skill_call(openai_msgs: Sequence[dict[str, Any]]) -> str | None:
@@ -211,7 +291,8 @@ class AgentMiddleware(LangChainAgentMiddleware):
     def tools(self) -> Sequence[BaseTool]:  # type: ignore[override]
         """Get tools as LangChain tools (cached)."""
         if self._tools_cache is None:
-            self._tools_cache = [to_langchain_tool(tool) for tool in self._context.tools]
+            fmt: Literal["anthropic", "openai"] = "anthropic" if _supports_tool_images(self._context.model.model) else "openai"
+            self._tools_cache = [to_langchain_tool(tool, content_format=fmt) for tool in self._context.tools]
         return self._tools_cache
 
     @staticmethod
@@ -296,9 +377,10 @@ class AgentMiddleware(LangChainAgentMiddleware):
 
         Group 1: Intercepts (compaction phases, early exit).
         Group 2: Appenders (skill injection).
+        Group 2.5: Image extraction (non-Anthropic providers).
         Group 3: Annotators (system reminders).
         """
-        messages = list(state["messages"])
+        messages: list[BaseMessage] = list(state["messages"])
 
         # --- GROUP 1: Intercepts (compaction phases) ---
         phase = CompactionPhase(state.get("compaction_phase", CompactionPhase.NONE))
@@ -344,6 +426,15 @@ class AgentMiddleware(LangChainAgentMiddleware):
                     "messages": appended,
                 }
 
+        # --- GROUP 2.5: Image extraction (non-Anthropic only) ---
+        images_extracted = False
+        if not _supports_tool_images(self._context.model.model):
+            extracted = _extract_tool_images(messages)
+            if extracted is not None:
+                logger.info("Extracted images from %d ToolMessage(s) into HumanMessage(s)", len(extracted) - len(messages))
+                messages = extracted
+                images_extracted = True
+
         # --- GROUP 3: Annotators (system reminders) ---
         if self._reminders:
             openai_msgs = convert_to_openai_messages(messages)
@@ -364,6 +455,9 @@ class AgentMiddleware(LangChainAgentMiddleware):
                 return {
                     "messages": LangGraphOverwrite(patched),
                 }
+
+        if images_extracted:
+            return {"messages": LangGraphOverwrite(messages)}
 
         return None
 

@@ -314,7 +314,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
         {step === "welcome" && (
           <div className="setup-step setup-welcome">
             <div className="setup-welcome-brand">
-              <img className="setup-welcome-logo" width="40" height="40" src="/favicon.svg" alt="" />
+              <img className="setup-welcome-logo" width="40" height="40" src="./favicon.svg" alt="" />
               <h2 className="setup-welcome-title">OpenAgent</h2>
             </div>
             <p className="setup-welcome-tagline">Powered by OpenAgent harness</p>

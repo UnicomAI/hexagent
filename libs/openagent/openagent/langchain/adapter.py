@@ -6,7 +6,7 @@ BaseAgentTool and LangChain's StructuredTool interface.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from langchain_core.tools import StructuredTool
 
@@ -18,7 +18,11 @@ if TYPE_CHECKING:
 _ContentAndArtifact = tuple[list[dict[str, Any]], None]
 
 
-def to_langchain_tool(tool: BaseAgentTool[Any]) -> StructuredTool:
+def to_langchain_tool(
+    tool: BaseAgentTool[Any],
+    *,
+    content_format: Literal["anthropic", "openai"] = "anthropic",
+) -> StructuredTool:
     """Convert a BaseAgentTool to a LangChain StructuredTool.
 
     Creates a thin wrapper that adapts the BaseAgentTool interface to
@@ -28,6 +32,9 @@ def to_langchain_tool(tool: BaseAgentTool[Any]) -> StructuredTool:
 
     Args:
         tool: The agent tool to convert.
+        content_format: Content block format for tool results.
+            ``"anthropic"`` for Anthropic-compatible providers,
+            ``"openai"`` for OpenAI-compatible providers.
 
     Returns:
         A LangChain StructuredTool wrapping the agent tool.
@@ -51,7 +58,7 @@ def to_langchain_tool(tool: BaseAgentTool[Any]) -> StructuredTool:
     async def async_invoke(**kwargs: Any) -> _ContentAndArtifact:
         """Async invocation with result conversion."""
         result = await tool(**kwargs)
-        return result.to_content_blocks("anthropic"), None
+        return result.to_content_blocks(content_format), None
 
     def sync_invoke(**kwargs: Any) -> _ContentAndArtifact:
         """Sync wrapper for async invocation.
