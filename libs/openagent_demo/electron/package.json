@@ -59,6 +59,17 @@
       "identity": null,
       "signIgnore": []
     },
+    "dmg": {
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "iconSize": 80,
+      "contents": [
+        { "x": 150, "y": 190 },
+        { "x": 390, "y": 190, "type": "link", "path": "/Applications" }
+      ]
+    },
     "afterPack": "./scripts/afterPack.js",
     "win": {
       "target": [

@@ -63,24 +63,25 @@ function App() {
     const m = window.location.pathname.match(/^\/(chat|cowork)(?:\/(.+))?/);
     const urlConvId = m?.[2] ?? null;
 
-    listConversations()
+    // Wait for both conversations and config to load before marking
+    // initialLoadDone.  This prevents the warm-session effect from
+    // firing before we know whether onboarding is still needed.
+    const convP = listConversations()
       .then((conversations) => {
         dispatch({ type: "SET_CONVERSATIONS", payload: conversations });
         // Restore active conversation from URL
         if (urlConvId && conversations.some((c) => c.id === urlConvId)) {
           dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: urlConvId });
         }
-        setInitialLoadDone(true);
       })
-      .catch(() => {
-        setInitialLoadDone(true);
-      });
-    getServerConfig()
+      .catch(() => {});
+    const cfgP = getServerConfig()
       .then((cfg) => {
         dispatch({ type: "SET_SERVER_CONFIG", payload: cfg });
         if (cfg.models.length === 0) setSetupNeeded(true);
       })
       .catch(() => {});
+    Promise.all([convP, cfgP]).then(() => setInitialLoadDone(true));
     getVMStatus()
       .then((vs) => dispatch({ type: "SET_VM_STATUS", payload: vs }))
       .catch(() => {});

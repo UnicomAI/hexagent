@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="65.8 45 268.4 310">
+<style>
+  @media (prefers-color-scheme: light) {
+    .s1 { fill: #82A4CC; }
+    .s2 { fill: #8EAED4; }
+    .s3 { fill: #82A4CC; }
+    .s4 { fill: #6A8CBC; }
+    .s5 { fill: #5476AC; }
+    .s6 { fill: #6A8CBC; }
+  }
+  @media (prefers-color-scheme: dark) {
+    .s1 { fill: #789CC6; }
+    .s2 { fill: #84A6CE; }
+    .s3 { fill: #789CC6; }
+    .s4 { fill: #6084B6; }
+    .s5 { fill: #4C6EA6; }
+    .s6 { fill: #6084B6; }
+  }
+</style>
+<polygon class="s1" points="200,45 334.2,122.5 250.2,229 250.2,171"/>
+<polygon class="s2" points="334.2,122.5 334.2,277.5 200,258 250.2,229"/>
+<polygon class="s3" points="334.2,277.5 200,355 149.8,229 200,258"/>
+<polygon class="s4" points="200,355 65.8,277.5 149.8,171 149.8,229"/>
+<polygon class="s5" points="65.8,277.5 65.8,122.5 200,142 149.8,171"/>
+<polygon class="s6" points="65.8,122.5 200,45 250.2,171 200,142"/>
+</svg>
