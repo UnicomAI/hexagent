@@ -1,9 +1,10 @@
-import { useState, useCallback, useEffect, useRef, createContext, useContext } from "react";
-import { X, Plus, Trash2, Monitor, Moon, Sun, Unplug, SlidersHorizontal, Cpu, ChevronDown, ChevronRight, Check, Loader2, Eye, EyeOff, GripVertical, Bot, Wrench, Globe, ScrollText, Zap, FolderOpen, FolderPlus, Server, CircleCheck, CircleAlert, Upload, Package, Download, TriangleAlert } from "lucide-react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { X, Plus, Trash2, Monitor, Moon, Sun, Unplug, SlidersHorizontal, Cpu, ChevronDown, ChevronRight, Check, Loader2, Eye, EyeOff, GripVertical, Bot, Wrench, Globe, ScrollText, Zap, FolderOpen, FolderPlus, Server, CircleCheck, CircleAlert, Upload, Package, Download, AppWindow, TriangleAlert } from "lucide-react";
 import type { Settings } from "../hooks/useSettings";
-import { getServerConfig, updateServerConfig, testMcpConnection, browseFolder, listSkills, uploadSkill, deleteSkill, toggleSkill, installSkill } from "../api";
+import { getServerConfig, updateServerConfig, testMcpConnection, browseFolder, listSkills, uploadSkill, deleteSkill, toggleSkill, installSkill, getVMStatus, installVMBackend, getVMBuildStatus, buildVM, getVMProvisionStatus, provisionVM, cancelProvision, getProvisionLog } from "../api";
+import type { VMStatus, ProvisionStepDef } from "../api";
 import { useAppContext } from "../store";
-import type { ServerConfig, ModelConfig, AgentConfig } from "../api";
+import type { ServerConfig, ModelConfig, AgentConfig, McpServerEntry } from "../api";
 import { loadRecentFolders, saveRecentFolders } from "../recentFolders";
 import type { RecentFolder } from "../recentFolders";
 
@@ -19,69 +20,93 @@ export type Tab = "general" | "model" | "mcps" | "tools" | "agents" | "sandbox" 
 
 const isMac = navigator.platform.toUpperCase().includes("MAC");
 
-/** Tabs call this to report dirty state and expose their save function. */
-const SettingsDirtyContext = createContext<{
-  reportDirty: (dirty: boolean) => void;
-  registerSave: (fn: (() => Promise<void>) | null) => void;
-}>({ reportDirty: () => {}, registerSave: () => {} });
-
-function useSettingsDirty(isDirty: boolean, saveFn: () => Promise<void>) {
-  const { reportDirty, registerSave } = useContext(SettingsDirtyContext);
-  useEffect(() => { reportDirty(isDirty); }, [isDirty, reportDirty]);
-  useEffect(() => { registerSave(saveFn); return () => registerSave(null); }, [saveFn, registerSave]);
+/** Props shared by all tabs that edit ServerConfig. */
+interface ConfigTabProps {
+  config: ServerConfig;
+  onConfigChange: (updater: (prev: ServerConfig) => ServerConfig) => void;
 }
 
 export default function SettingsModal({ open, onClose, settings, onSettingsChange, initialTab }: SettingsModalProps) {
+  const { dispatch } = useAppContext();
   const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? "general");
+
+  // ── Shared ServerConfig draft ──
+  const [config, setConfig] = useState<ServerConfig | null>(null);
+  const originalRef = useRef("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [configError, setConfigError] = useState("");
 
   // Sync activeTab when initialTab changes while opening
   useEffect(() => {
     if (open && initialTab) setActiveTab(initialTab);
   }, [open, initialTab]);
-  const [dirty, setDirty] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const saveRef = useRef<(() => Promise<void>) | null>(null);
 
-  const reportDirty = useCallback((d: boolean) => setDirty(d), []);
-  const registerSave = useCallback((fn: (() => Promise<void>) | null) => { saveRef.current = fn; }, []);
-
-  // Reset dirty state when switching tabs
-  useEffect(() => { setDirty(false); saveRef.current = null; }, [activeTab]);
-
-  // Exit animation state: "open" | "closing"
-  const [animState, setAnimState] = useState<"open" | "closing">("open");
-
-  // Reset animation state when opened
+  // Load config on open, reset on close
   useEffect(() => {
-    if (open) setAnimState("open");
+    if (!open) {
+      setConfig(null);
+      originalRef.current = "";
+      setSaved(false);
+      setSaving(false);
+      setConfigError("");
+      return;
+    }
+    getServerConfig()
+      .then((cfg) => {
+        setConfig(cfg);
+        originalRef.current = JSON.stringify(cfg);
+      })
+      .catch((e: Error) => setConfigError(e.message));
   }, [open]);
 
-  const triggerClose = useCallback(() => {
-    if (dirty) {
-      setShowConfirm(true);
-    } else {
-      setAnimState("closing");
+  const configDirty = config ? JSON.stringify(config) !== originalRef.current : false;
+
+  const handleConfigChange = useCallback((updater: (prev: ServerConfig) => ServerConfig) => {
+    setConfig((prev) => (prev ? updater(prev) : prev));
+    setSaved(false);
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!config) return;
+    setSaving(true);
+    setConfigError("");
+    try {
+      const updated = await updateServerConfig(config);
+      setConfig(updated);
+      originalRef.current = JSON.stringify(updated);
+      dispatch({ type: "SET_SERVER_CONFIG", payload: updated });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e: unknown) {
+      setConfigError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
     }
-  }, [dirty]);
+  }, [config, dispatch]);
 
-  // Override handleClose to use animated close
-  const animatedClose = triggerClose;
+  // ── Close animation ──
+  const [animState, setAnimState] = useState<"open" | "closing">("open");
+  const [showConfirm, setShowConfirm] = useState(false);
 
-  // When discard/save-and-close, also animate
+  useEffect(() => { if (open) setAnimState("open"); }, [open]);
+
+  const triggerClose = useCallback(() => {
+    if (configDirty) setShowConfirm(true);
+    else setAnimState("closing");
+  }, [configDirty]);
+
   const animatedDiscard = useCallback(() => {
     setShowConfirm(false);
-    setDirty(false);
+    if (originalRef.current) setConfig(JSON.parse(originalRef.current));
     setAnimState("closing");
   }, []);
 
   const animatedSaveAndClose = useCallback(async () => {
-    if (saveRef.current) {
-      await saveRef.current();
-    }
+    await handleSave();
     setShowConfirm(false);
-    setDirty(false);
     setAnimState("closing");
-  }, []);
+  }, [handleSave]);
 
   const handleExitDone = useCallback(() => {
     setAnimState("open");
@@ -95,32 +120,32 @@ export default function SettingsModal({ open, onClose, settings, onSettingsChang
       const mod = isMac ? e.metaKey : e.ctrlKey;
       if (mod && e.shiftKey && (e.key === "," || e.key === "<" || e.code === "Comma")) {
         e.preventDefault();
-        animatedClose();
+        triggerClose();
       }
       if (e.key === "Escape") {
         e.preventDefault();
-        animatedClose();
+        triggerClose();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, animatedClose]);
+  }, [open, triggerClose]);
 
   if (!open) return null;
 
   const isClosing = animState === "closing";
+  const needsConfig = activeTab !== "general" && activeTab !== "skills";
 
   return (
-    <SettingsDirtyContext.Provider value={{ reportDirty, registerSave }}>
     <div
       className={`settings-overlay ${isClosing ? "settings-overlay-exit" : ""}`}
-      onClick={animatedClose}
+      onClick={triggerClose}
       onAnimationEnd={isClosing ? handleExitDone : undefined}
     >
       <div className={`settings-modal ${isClosing ? "settings-modal-exit" : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="settings-sidebar">
           <div className="settings-sidebar-header">
-            <button className="settings-close" onClick={animatedClose}>
+            <button className="settings-close" onClick={triggerClose}>
               <X />
             </button>
           </div>
@@ -184,12 +209,40 @@ export default function SettingsModal({ open, onClose, settings, onSettingsChang
             {activeTab === "general" && (
               <GeneralTab settings={settings} onChange={onSettingsChange} />
             )}
-            {activeTab === "model" && <ModelTab />}
-            {activeTab === "mcps" && <McpTab />}
-            {activeTab === "tools" && <ToolsTab />}
-            {activeTab === "agents" && <SubagentTab />}
-            {activeTab === "sandbox" && <SandboxTab />}
+            {activeTab === "model" && config && <ModelTab config={config} onConfigChange={handleConfigChange} />}
+            {activeTab === "mcps" && config && <McpTab config={config} onConfigChange={handleConfigChange} />}
+            {activeTab === "tools" && config && <ToolsTab config={config} onConfigChange={handleConfigChange} />}
+            {activeTab === "agents" && config && <SubagentTab config={config} onConfigChange={handleConfigChange} />}
+            {activeTab === "sandbox" && config && <SandboxTab config={config} onConfigChange={handleConfigChange} />}
             {activeTab === "skills" && <SkillsTab />}
+
+            {needsConfig && !config && !configError && (
+              <div className="settings-section"><p className="settings-hint">Loading configuration...</p></div>
+            )}
+
+            {configError && <div className="model-error">{configError}</div>}
+
+            {/* Global save bar for all config tabs */}
+            {needsConfig && config && (
+              <div className="model-save-bar">
+                {configDirty && !saved && <span className="model-unsaved-hint">Unsaved changes</span>}
+                <button
+                  className={`model-save-btn ${saved ? "saved" : ""}`}
+                  onClick={handleSave}
+                  disabled={saving || (!configDirty && !saved)}
+                >
+                  {saving ? (
+                    <><Loader2 size={14} className="model-save-spinner" /> Applying...</>
+                  ) : saved ? (
+                    <><Check size={14} /> Saved</>
+                  ) : configDirty ? (
+                    "Save & Apply"
+                  ) : (
+                    "No Changes"
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -216,7 +269,6 @@ export default function SettingsModal({ open, onClose, settings, onSettingsChang
         )}
       </div>
     </div>
-    </SettingsDirtyContext.Provider>
   );
 }
 
@@ -306,13 +358,7 @@ function presetIdFromProvider(provider: string): string {
 
 // ── Model Tab (compact accordion) ──
 
-function ModelTab() {
-  const { dispatch } = useAppContext();
-  const [config, setConfig] = useState<ServerConfig | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [error, setError] = useState("");
+function ModelTab({ config, onConfigChange }: ConfigTabProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAddPicker, setShowAddPicker] = useState(false);
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
@@ -322,23 +368,14 @@ function ModelTab() {
   const rowRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const dragFromHandle = useRef(false);
 
-  useEffect(() => {
-    getServerConfig().then(setConfig).catch((e: Error) => setError(e.message));
-  }, []);
-
-  const markDirty = () => { setDirty(true); setSaved(false); };
-
   const updateModel = (id: string, updates: Partial<ModelConfig>) => {
-    if (!config) return;
-    setConfig({
-      ...config,
-      models: config.models.map((m) => (m.id === id ? { ...m, ...updates } : m)),
-    });
-    markDirty();
+    onConfigChange((prev) => ({
+      ...prev,
+      models: prev.models.map((m) => (m.id === id ? { ...m, ...updates } : m)),
+    }));
   };
 
   const addModelWithPreset = (presetId: string) => {
-    if (!config) return;
     const preset = PROVIDER_PRESETS.find((p) => p.id === presetId) || PROVIDER_PRESETS[0];
     const newModel: ModelConfig = {
       id: crypto.randomUUID(),
@@ -350,25 +387,27 @@ function ModelTab() {
       context_window: 200000,
       supported_modalities: ["text"],
     };
-    const nextConfig = { ...config, models: [...config.models, newModel] };
-    if (!nextConfig.main_model_id) {
-      nextConfig.main_model_id = newModel.id;
-    }
-    setConfig(nextConfig);
+    onConfigChange((prev) => ({
+      ...prev,
+      models: [...prev.models, newModel],
+      main_model_id: prev.main_model_id || newModel.id,
+    }));
     setShowAddPicker(false);
     setExpandedId(newModel.id);
-    markDirty();
   };
 
   const deleteModel = (id: string) => {
-    if (!config) return;
-    const next = { ...config, models: config.models.filter((m) => m.id !== id) };
-    if (next.main_model_id === id) next.main_model_id = next.models[0]?.id ?? "";
-    if (next.fast_model_id === id) next.fast_model_id = "";
-    setConfig(next);
+    onConfigChange((prev) => {
+      const models = prev.models.filter((m) => m.id !== id);
+      return {
+        ...prev,
+        models,
+        main_model_id: prev.main_model_id === id ? (models[0]?.id ?? "") : prev.main_model_id,
+        fast_model_id: prev.fast_model_id === id ? "" : prev.fast_model_id,
+      };
+    });
     setDeleteConfirm(null);
     if (expandedId === id) setExpandedId(null);
-    markDirty();
   };
 
   const handleDragOver = (e: React.DragEvent, idx: number) => {
@@ -379,58 +418,33 @@ function ModelTab() {
   };
 
   const handleDragEnd = () => {
-    if (!config || dragIdx === null || !dropTarget) {
+    if (dragIdx === null || !dropTarget) {
       setDragIdx(null);
       setDropTarget(null);
       return;
     }
     let toIdx = dropTarget.half === "bottom" ? dropTarget.idx + 1 : dropTarget.idx;
-    // Adjust for removal offset
     if (dragIdx < toIdx) toIdx--;
     if (dragIdx === toIdx) {
       setDragIdx(null);
       setDropTarget(null);
       return;
     }
-    const models = [...config.models];
-    const [moved] = models.splice(dragIdx, 1);
-    models.splice(toIdx, 0, moved);
-    setConfig({ ...config, models });
+    onConfigChange((prev) => {
+      const models = [...prev.models];
+      const [moved] = models.splice(dragIdx, 1);
+      models.splice(toIdx, 0, moved);
+      return { ...prev, models };
+    });
     setDragIdx(null);
     setDropTarget(null);
-    markDirty();
   };
-
-  const handleSave = useCallback(async () => {
-    if (!config) return;
-    const toSave = { ...config, main_model_id: config.models[0]?.id ?? "" };
-    setSaving(true);
-    setError("");
-    try {
-      const updated = await updateServerConfig(toSave);
-      setConfig(updated);
-      dispatch({ type: "SET_SERVER_CONFIG", payload: updated });
-      setSaved(true);
-      setDirty(false);
-      setTimeout(() => setSaved(false), 3000);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unknown error");
-    } finally {
-      setSaving(false);
-    }
-  }, [config, dispatch]);
-
-  useSettingsDirty(dirty, handleSave);
-
-  if (!config) return <div className="settings-section"><p className="settings-hint">Loading configuration...</p></div>;
 
   return (
     <div className="settings-section">
       <p className="settings-hint">
         Add your AI models below. The first model is the default. Drag to reorder.
       </p>
-
-      {error && <div className="model-error">{error}</div>}
 
       {/* ── Compact Model List ── */}
       <div className="ml-list">
@@ -553,7 +567,7 @@ function ModelTab() {
                         title={isKeyVisible ? "Hide" : "Show"}
                         type="button"
                       >
-                        {isKeyVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                        {isKeyVisible ? <Eye size={14} /> : <EyeOff size={14} />}
                       </button>
                     </div>
                   </div>
@@ -651,31 +665,11 @@ function ModelTab() {
                 { value: "", label: "Default" },
                 ...config.models.map((m) => ({ value: m.id, label: m.display_name })),
               ]}
-              onChange={(v) => { setConfig({ ...config, fast_model_id: v }); markDirty(); }}
+              onChange={(v) => onConfigChange((prev) => ({ ...prev, fast_model_id: v }))}
             />
           </div>
         </div>
       )}
-
-      {/* ── Save ── */}
-      <div className="model-save-bar">
-        {dirty && !saved && <span className="model-unsaved-hint">Unsaved changes</span>}
-        <button
-          className={`model-save-btn ${saved ? "saved" : ""}`}
-          onClick={handleSave}
-          disabled={saving || (!dirty && !saved)}
-        >
-          {saving ? (
-            <><Loader2 size={14} className="model-save-spinner" /> Applying...</>
-          ) : saved ? (
-            <><Check size={14} /> Saved</>
-          ) : dirty ? (
-            "Save & Apply"
-          ) : (
-            "No Changes"
-          )}
-        </button>
-      </div>
 
       {/* Delete confirmation dialog */}
       {deleteConfirm && (
@@ -835,63 +829,24 @@ function KeyValueEditor({
   );
 }
 
-interface McpServer {
-  id: string;
-  name: string;
-  type: "http" | "stdio";
-  url?: string;
-  command?: string;
-  args?: string;
-  env?: string;
-  headers?: string;
-  enabled: boolean;
-}
+// ── MCP Tab ──
 
-function McpTab() {
-  const { dispatch } = useAppContext();
-  const [servers, setServers] = useState<McpServer[]>([]);
+function McpTab({ config, onConfigChange }: ConfigTabProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
   const [showAddPicker, setShowAddPicker] = useState(false);
-  const [dirty, setDirty] = useState(false);
   const [testStatus, setTestStatus] = useState<Record<string, { loading?: boolean; ok?: boolean; tools?: number; error?: string }>>({});
   const [validatingIds, setValidatingIds] = useState<Set<string>>(new Set());
   const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
-  const configRef = useRef<ServerConfig | null>(null);
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  // Load MCP servers from backend (single source of truth)
-  useEffect(() => {
-    getServerConfig().then((cfg) => {
-      configRef.current = cfg;
-      setServers(
-        (cfg.mcp_servers ?? []).map((s) => ({
-          id: s.id || crypto.randomUUID(),
-          name: s.name,
-          type: s.type as "http" | "stdio",
-          url: s.url,
-          command: s.command,
-          args: s.args,
-          env: s.env,
-          headers: s.headers,
-          enabled: s.enabled,
-        })),
-      );
-    });
-  }, []);
-
-  const markDirty = useCallback(() => { setDirty(true); }, []);
+  const servers = config.mcp_servers;
 
   // Test a single server connection
-  const testServer = useCallback(async (server: McpServer) => {
+  const testServer = useCallback(async (server: McpServerEntry) => {
     setTestStatus((prev) => ({ ...prev, [server.id]: { loading: true } }));
     try {
-      const result = await testMcpConnection({
-        id: server.id, name: server.name, type: server.type,
-        url: server.url ?? "", command: server.command ?? "",
-        args: server.args ?? "", env: server.env ?? "",
-        headers: server.headers ?? "", enabled: server.enabled,
-      });
+      const result = await testMcpConnection(server);
       setTestStatus((prev) => ({ ...prev, [server.id]: result }));
       return result;
     } catch {
@@ -902,18 +857,15 @@ function McpTab() {
   }, []);
 
   // Compute a config fingerprint for change detection
-  const fingerprint = useCallback((s: McpServer) =>
+  const fingerprint = useCallback((s: McpServerEntry) =>
     `${s.enabled}|${s.type}|${s.url}|${s.command}|${s.args}|${s.env}|${s.headers}`, []);
 
   // Auto-test: on mount test all enabled servers, on config change debounce re-test
-  // Skip servers currently being validated by handleToggle to avoid double-testing
   const prevFingerprints = useRef<Record<string, string>>({});
   useEffect(() => {
     for (const server of servers) {
       const fp = fingerprint(server);
 
-      // Keep fingerprint current for servers being validated or showing failure
-      // so the auto-test won't re-trigger or clear their status
       if (validatingIds.has(server.id) || failedIds.has(server.id)) {
         prevFingerprints.current[server.id] = fp;
         continue;
@@ -921,7 +873,6 @@ function McpTab() {
       const prev = prevFingerprints.current[server.id];
 
       if (!server.enabled) {
-        // Clear status for disabled servers
         if (prev !== undefined) {
           setTestStatus((s) => { const next = { ...s }; delete next[server.id]; return next; });
           if (debounceTimers.current[server.id]) clearTimeout(debounceTimers.current[server.id]);
@@ -930,19 +881,16 @@ function McpTab() {
         continue;
       }
 
-      if (prev === fp) continue; // No change
+      if (prev === fp) continue;
 
       const wasDisabled = prev !== undefined && prev.startsWith("false|");
       prevFingerprints.current[server.id] = fp;
 
-      // Clear any pending debounce
       if (debounceTimers.current[server.id]) clearTimeout(debounceTimers.current[server.id]);
 
       if (prev === undefined || wasDisabled) {
-        // First mount or just enabled — test immediately
         testServer(server);
       } else {
-        // Config changed while enabled — debounce 1.5s
         setTestStatus((s) => ({ ...s, [server.id]: { loading: true } }));
         debounceTimers.current[server.id] = setTimeout(() => testServer(server), 1500);
       }
@@ -964,7 +912,7 @@ function McpTab() {
   }, []);
 
   const addServer = useCallback((type: "http" | "stdio") => {
-    const newServer: McpServer = {
+    const newServer: McpServerEntry = {
       id: crypto.randomUUID(),
       name: "",
       type,
@@ -975,24 +923,24 @@ function McpTab() {
       headers: "",
       enabled: false,
     };
-    setServers((prev) => [...prev, newServer]);
+    onConfigChange((prev) => ({ ...prev, mcp_servers: [...prev.mcp_servers, newServer] }));
     setExpandedId(newServer.id);
     setShowAddPicker(false);
-    markDirty();
-  }, [markDirty]);
+  }, [onConfigChange]);
 
   const updateServer = useCallback(
-    (id: string, updates: Partial<McpServer>) => {
+    (id: string, updates: Partial<McpServerEntry>) => {
       const isToggle = "enabled" in updates;
-      setServers((prev) =>
-        prev.map((s) => {
+      onConfigChange((prev) => ({
+        ...prev,
+        mcp_servers: prev.mcp_servers.map((s) => {
           if (s.id !== id) return s;
-          // Config change (not toggle) → auto-disable so user must re-validate
           const merged = { ...s, ...updates };
+          // Config change (not toggle) → auto-disable so user must re-validate
           if (!isToggle && s.enabled) merged.enabled = false;
           return merged;
         }),
-      );
+      }));
       // Clear failed state and test status on any change
       setFailedIds((prev) => {
         if (!prev.has(id)) return prev;
@@ -1008,16 +956,14 @@ function McpTab() {
           return next;
         });
       }
-      markDirty();
     },
-    [markDirty]
+    [onConfigChange]
   );
 
   // Toggle handler: validates connection before enabling
   const handleToggle = useCallback(
-    async (server: McpServer, wantEnabled: boolean) => {
+    async (server: McpServerEntry, wantEnabled: boolean) => {
       if (!wantEnabled) {
-        // Toggling OFF — immediate, no validation
         updateServer(server.id, { enabled: false });
         return;
       }
@@ -1029,11 +975,8 @@ function McpTab() {
       const result = await testServer({ ...server, enabled: true });
 
       if (result.ok) {
-        // Connection succeeded — commit the toggle but keep validatingIds
-        // so the spinner ring persists until the auto-test confirms tools count
         updateServer(server.id, { enabled: true });
       } else {
-        // Connection failed — show error until user changes this server's config
         setValidatingIds((prev) => { const next = new Set(prev); next.delete(server.id); return next; });
         setFailedIds((prev) => new Set(prev).add(server.id));
       }
@@ -1041,7 +984,7 @@ function McpTab() {
     [testServer, updateServer]
   );
 
-  // Clear validatingIds once the server is enabled and testStatus confirms tools
+  // Clear validatingIds once the server is enabled and testStatus confirms
   useEffect(() => {
     if (validatingIds.size === 0) return;
     setValidatingIds((prev) => {
@@ -1061,38 +1004,12 @@ function McpTab() {
 
   const deleteServer = useCallback(
     (id: string) => {
-      setServers((prev) => prev.filter((s) => s.id !== id));
+      onConfigChange((prev) => ({ ...prev, mcp_servers: prev.mcp_servers.filter((s) => s.id !== id) }));
       setDeleteConfirm(null);
       if (expandedId === id) setExpandedId(null);
-      markDirty();
     },
-    [expandedId, markDirty]
+    [expandedId, onConfigChange]
   );
-
-  const handleSave = useCallback(async () => {
-    const base = configRef.current;
-    if (!base) return;
-    const toSave = {
-      ...base,
-      mcp_servers: servers.map((s) => ({
-        id: s.id,
-        name: s.name,
-        type: s.type,
-        url: s.url ?? "",
-        command: s.command ?? "",
-        args: s.args ?? "",
-        env: s.env ?? "",
-        headers: s.headers ?? "",
-        enabled: s.enabled,
-      })),
-    };
-    const updated = await updateServerConfig(toSave);
-    configRef.current = updated;
-    dispatch({ type: "SET_SERVER_CONFIG", payload: updated });
-    setDirty(false);
-  }, [servers, dispatch]);
-
-  useSettingsDirty(dirty, handleSave);
 
   return (
     <div className="settings-section">
@@ -1203,14 +1120,14 @@ function McpTab() {
                           <label className="mc-label">URL</label>
                           <input
                             className="mc-input"
-                            value={server.url ?? ""}
+                            value={server.url}
                             onChange={(e) => updateServer(server.id, { url: e.target.value })}
                             placeholder="https://example.com/mcp"
                           />
                         </div>
                         <KeyValueEditor
                           label="Headers"
-                          value={server.headers ?? ""}
+                          value={server.headers}
                           onChange={(val) => updateServer(server.id, { headers: val })}
                           keyPlaceholder="Header-Name"
                           valuePlaceholder="value"
@@ -1225,7 +1142,7 @@ function McpTab() {
                             <label className="mc-label">Command</label>
                             <input
                               className="mc-input"
-                              value={server.command ?? ""}
+                              value={server.command}
                               onChange={(e) => updateServer(server.id, { command: e.target.value })}
                               placeholder="uvx"
                             />
@@ -1234,7 +1151,7 @@ function McpTab() {
                             <label className="mc-label">Arguments (space-separated)</label>
                             <input
                               className="mc-input"
-                              value={server.args ?? ""}
+                              value={server.args}
                               onChange={(e) => updateServer(server.id, { args: e.target.value })}
                               placeholder="minimax-mcp --flag"
                             />
@@ -1242,7 +1159,7 @@ function McpTab() {
                         </div>
                         <KeyValueEditor
                           label="Environment Variables"
-                          value={server.env ?? ""}
+                          value={server.env}
                           onChange={(val) => updateServer(server.id, { env: val })}
                           keyPlaceholder="VARIABLE_NAME"
                           valuePlaceholder="value"
@@ -1321,63 +1238,40 @@ const FETCH_PROVIDERS = [
   { id: "firecrawl", label: "Firecrawl" },
 ];
 
-function ToolsTab() {
-  const { dispatch } = useAppContext();
-  const [config, setConfig] = useState<ServerConfig | null>(null);
-  const [originalTools, setOriginalTools] = useState<ServerConfig["tools"] | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState("");
-  const [showSearchKey, setShowSearchKey] = useState(true);
-  const [showFetchKey, setShowFetchKey] = useState(true);
+function ToolsTab({ config, onConfigChange }: ConfigTabProps) {
+  const [showSearchKey, setShowSearchKey] = useState(!config.tools.search_api_key);
+  const [showFetchKey, setShowFetchKey] = useState(!config.tools.fetch_api_key);
   // Per-provider key cache: { tavily: "key1", brave: "key2", jina: "key3", ... }
-  const [searchKeys, setSearchKeys] = useState<Record<string, string>>({});
-  const [fetchKeys, setFetchKeys] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    getServerConfig().then((cfg) => {
-      setConfig(cfg);
-      setOriginalTools(cfg.tools);
-      setShowSearchKey(!cfg.tools.search_api_key);
-      setShowFetchKey(!cfg.tools.fetch_api_key);
-      if (cfg.tools.search_provider && cfg.tools.search_api_key) {
-        setSearchKeys((prev) => ({ ...prev, [cfg.tools.search_provider]: cfg.tools.search_api_key }));
-      }
-      if (cfg.tools.fetch_provider && cfg.tools.fetch_api_key) {
-        setFetchKeys((prev) => ({ ...prev, [cfg.tools.fetch_provider]: cfg.tools.fetch_api_key }));
-      }
-    }).catch((e: Error) => setError(e.message));
-  }, []);
-
-  const isDirty = (() => {
-    if (!config || !originalTools) return false;
-    const t = config.tools;
-    return t.search_provider !== originalTools.search_provider
-      || t.search_api_key !== originalTools.search_api_key
-      || t.fetch_provider !== originalTools.fetch_provider
-      || t.fetch_api_key !== originalTools.fetch_api_key;
-  })();
+  const [searchKeys, setSearchKeys] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    if (config.tools.search_provider && config.tools.search_api_key) {
+      initial[config.tools.search_provider] = config.tools.search_api_key;
+    }
+    return initial;
+  });
+  const [fetchKeys, setFetchKeys] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    if (config.tools.fetch_provider && config.tools.fetch_api_key) {
+      initial[config.tools.fetch_provider] = config.tools.fetch_api_key;
+    }
+    return initial;
+  });
 
   const updateTools = (updates: Partial<ServerConfig["tools"]>) => {
-    if (!config) return;
-    setConfig({ ...config, tools: { ...config.tools, ...updates } });
-    setSaved(false);
+    onConfigChange((prev) => ({ ...prev, tools: { ...prev.tools, ...updates } }));
   };
 
   const switchSearchProvider = (provider: string) => {
-    if (!config) return;
     // Save current key before switching
     if (config.tools.search_provider && config.tools.search_api_key) {
       setSearchKeys((prev) => ({ ...prev, [config.tools.search_provider]: config.tools.search_api_key }));
     }
-    // Restore key for new provider
     const restoredKey = searchKeys[provider] || "";
     updateTools({ search_provider: provider, search_api_key: restoredKey });
     setShowSearchKey(!restoredKey);
   };
 
   const switchFetchProvider = (provider: string) => {
-    if (!config) return;
     if (config.tools.fetch_provider && config.tools.fetch_api_key) {
       setFetchKeys((prev) => ({ ...prev, [config.tools.fetch_provider]: config.tools.fetch_api_key }));
     }
@@ -1386,28 +1280,6 @@ function ToolsTab() {
     setShowFetchKey(!restoredKey);
   };
 
-  const handleSave = useCallback(async () => {
-    if (!config) return;
-    setSaving(true);
-    setError("");
-    try {
-      const updated = await updateServerConfig(config);
-      setConfig(updated);
-      setOriginalTools(updated.tools);
-      dispatch({ type: "SET_SERVER_CONFIG", payload: updated });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unknown error");
-    } finally {
-      setSaving(false);
-    }
-  }, [config, dispatch]);
-
-  useSettingsDirty(isDirty, handleSave);
-
-  if (!config) return <div className="settings-section"><p className="settings-hint">Loading configuration...</p></div>;
-
   const tools = config.tools;
 
   return (
@@ -1415,8 +1287,6 @@ function ToolsTab() {
       <p className="settings-hint">
         Configure web search and page fetching providers for the agent.
       </p>
-
-      {error && <div className="model-error">{error}</div>}
 
       {/* Web Search */}
       <div className="tools-group">
@@ -1473,7 +1343,7 @@ function ToolsTab() {
       {/* Web Fetch */}
       <div className="tools-group">
         <div className="tools-group-header">
-          <ScrollText size={14} className="tools-group-icon" />
+          <AppWindow size={14} className="tools-group-icon" />
           <span className="tools-group-title">Web Fetch</span>
           <span className="tools-group-desc">Fetch and extract web page content</span>
         </div>
@@ -1527,26 +1397,6 @@ function ToolsTab() {
           )}
           <p className="tools-fetch-note">* Requires a summarizer model — configure in Model settings</p>
         </div>
-      </div>
-
-      {/* Save */}
-      <div className="model-save-bar">
-        {isDirty && !saved && <span className="model-unsaved-hint">Unsaved changes</span>}
-        <button
-          className={`model-save-btn ${saved ? "saved" : ""}`}
-          onClick={handleSave}
-          disabled={saving || (!isDirty && !saved)}
-        >
-          {saving ? (
-            <><Loader2 size={14} className="model-save-spinner" /> Applying...</>
-          ) : saved ? (
-            <><Check size={14} /> Saved</>
-          ) : isDirty ? (
-            "Save & Apply"
-          ) : (
-            "No Changes"
-          )}
-        </button>
       </div>
     </div>
   );
@@ -1610,43 +1460,26 @@ function CustomSelect({
 
 // ── Subagent Tab ──
 
-function SubagentTab() {
-  const { dispatch } = useAppContext();
-  const [config, setConfig] = useState<ServerConfig | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [error, setError] = useState("");
+function SubagentTab({ config, onConfigChange }: ConfigTabProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
   // Local string state for each agent's tools input to avoid comma-eating on keystroke
-  const [toolsText, setToolsText] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    getServerConfig().then((cfg) => {
-      setConfig(cfg);
-      // Initialize toolsText from loaded config
-      const initial: Record<string, string> = {};
-      for (const a of cfg.agents ?? []) {
-        initial[a.id] = a.tools.join(", ");
-      }
-      setToolsText(initial);
-    }).catch((e: Error) => setError(e.message));
-  }, []);
-
-  const markDirty = () => { setDirty(true); setSaved(false); };
+  const [toolsText, setToolsText] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    for (const a of config.agents ?? []) {
+      initial[a.id] = a.tools.join(", ");
+    }
+    return initial;
+  });
 
   const updateAgent = (id: string, updates: Partial<AgentConfig>) => {
-    if (!config) return;
-    setConfig({
-      ...config,
-      agents: (config.agents ?? []).map((a) => (a.id === id ? { ...a, ...updates } : a)),
-    });
-    markDirty();
+    onConfigChange((prev) => ({
+      ...prev,
+      agents: (prev.agents ?? []).map((a) => (a.id === id ? { ...a, ...updates } : a)),
+    }));
   };
 
   const addAgent = () => {
-    if (!config) return;
     const newAgent: AgentConfig = {
       id: crypto.randomUUID(),
       name: "",
@@ -1656,56 +1489,20 @@ function SubagentTab() {
       model_id: "",
       enabled: false,
     };
-    setConfig({ ...config, agents: [...(config.agents ?? []), newAgent] });
+    onConfigChange((prev) => ({ ...prev, agents: [...(prev.agents ?? []), newAgent] }));
     setToolsText((prev) => ({ ...prev, [newAgent.id]: "" }));
     setExpandedId(newAgent.id);
-    markDirty();
   };
 
   const deleteAgent = (id: string) => {
-    if (!config) return;
-    setConfig({ ...config, agents: (config.agents ?? []).filter((a) => a.id !== id) });
+    onConfigChange((prev) => ({
+      ...prev,
+      agents: (prev.agents ?? []).filter((a) => a.id !== id),
+    }));
     setToolsText((prev) => { const next = { ...prev }; delete next[id]; return next; });
     setDeleteConfirm(null);
     if (expandedId === id) setExpandedId(null);
-    markDirty();
   };
-
-  const handleSave = useCallback(async () => {
-    if (!config) return;
-    // Flush any pending toolsText into the config before saving
-    const flushed = {
-      ...config,
-      agents: (config.agents ?? []).map((a) => {
-        const raw = toolsText[a.id];
-        if (raw === undefined) return a;
-        return { ...a, tools: raw.split(/[,\n]/).map((t) => t.trim()).filter(Boolean) };
-      }),
-    };
-    setSaving(true);
-    setError("");
-    try {
-      const updated = await updateServerConfig(flushed);
-      setConfig(updated);
-      dispatch({ type: "SET_SERVER_CONFIG", payload: updated });
-      const refreshed: Record<string, string> = {};
-      for (const a of updated.agents ?? []) {
-        refreshed[a.id] = a.tools.join(", ");
-      }
-      setToolsText(refreshed);
-      setSaved(true);
-      setDirty(false);
-      setTimeout(() => setSaved(false), 3000);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unknown error");
-    } finally {
-      setSaving(false);
-    }
-  }, [config, toolsText, dispatch]);
-
-  useSettingsDirty(dirty, handleSave);
-
-  if (!config) return <div className="settings-section"><p className="settings-hint">Loading configuration...</p></div>;
 
   const agents = config.agents ?? [];
   const models = config.models ?? [];
@@ -1715,8 +1512,6 @@ function SubagentTab() {
       <p className="settings-hint">
         Define specialized subagents that the main agent can delegate tasks to.
       </p>
-
-      {error && <div className="model-error">{error}</div>}
 
       <div className="ml-list">
         {agents.map((agent) => {
@@ -1801,8 +1596,11 @@ function SubagentTab() {
                         className="mc-input"
                         value={toolsText[agent.id] ?? agent.tools.join(", ")}
                         onChange={(e) => {
-                          setToolsText((prev) => ({ ...prev, [agent.id]: e.target.value }));
-                          markDirty();
+                          const raw = e.target.value;
+                          setToolsText((prev) => ({ ...prev, [agent.id]: raw }));
+                          // Commit parsed tools to config on each keystroke
+                          const parsed = raw.split(/[,\n]/).map((t) => t.trim()).filter(Boolean);
+                          updateAgent(agent.id, { tools: parsed });
                         }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && !e.shiftKey) {
@@ -1811,9 +1609,9 @@ function SubagentTab() {
                           }
                         }}
                         onBlur={() => {
+                          // Normalize display text on blur
                           const raw = toolsText[agent.id] ?? "";
                           const parsed = raw.split(/[,\n]/).map((t) => t.trim()).filter(Boolean);
-                          updateAgent(agent.id, { tools: parsed });
                           setToolsText((prev) => ({ ...prev, [agent.id]: parsed.join(", ") }));
                         }}
                         placeholder="e.g. Read, Grep, Glob (empty = all tools)"
@@ -1847,25 +1645,6 @@ function SubagentTab() {
         </button>
       </div>
 
-      <div className="model-save-bar">
-        {dirty && !saved && <span className="model-unsaved-hint">Unsaved changes</span>}
-        <button
-          className={`model-save-btn ${saved ? "saved" : ""}`}
-          onClick={handleSave}
-          disabled={saving || (!dirty && !saved)}
-        >
-          {saving ? (
-            <><Loader2 size={14} className="model-save-spinner" /> Applying...</>
-          ) : saved ? (
-            <><Check size={14} /> Saved</>
-          ) : dirty ? (
-            "Save & Apply"
-          ) : (
-            "No Changes"
-          )}
-        </button>
-      </div>
-
       {/* Delete confirmation dialog */}
       {deleteConfirm && (
         <div className="settings-confirm-overlay" onClick={() => setDeleteConfirm(null)}>
@@ -1889,45 +1668,267 @@ function SubagentTab() {
   );
 }
 
-function SandboxTab() {
+// ── Sandbox Tab ──
+
+type PhaseStatus = "checking" | "pending" | "running" | "done" | "error";
+
+function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
   const { dispatch } = useAppContext();
-  const [config, setConfig] = useState<ServerConfig | null>(null);
-  const [originalKey, setOriginalKey] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState("");
-  const [showKey, setShowKey] = useState(true);
+  const [showKey, setShowKey] = useState(!config.sandbox.e2b_api_key);
   const [folders, setFolders] = useState<RecentFolder[]>(() => loadRecentFolders());
 
-  useEffect(() => {
-    getServerConfig().then((cfg) => {
-      setConfig(cfg);
-      setOriginalKey(cfg.sandbox.e2b_api_key);
-      setShowKey(!cfg.sandbox.e2b_api_key);
-    }).catch((e: Error) => setError(e.message));
+  /** Refresh the app-level vmStatus so cowork mode unblocks. */
+  const refreshAppVmStatus = useCallback(() => {
+    getVMStatus()
+      .then((vs) => dispatch({ type: "SET_VM_STATUS", payload: vs }))
+      .catch(() => {});
+  }, [dispatch]);
+
+  // Phase 1: Lima
+  const [vmStatus, setVmStatus] = useState<VMStatus | null>(null);
+  const [phase1, setPhase1] = useState<PhaseStatus>("checking");
+  const [phase1Msg, setPhase1Msg] = useState("");
+  const [phase1Error, setPhase1Error] = useState("");
+
+  // Phase 2: VM Build
+  const [phase2, setPhase2] = useState<PhaseStatus>("pending");
+  const [phase2Msg, setPhase2Msg] = useState("");
+  const [phase2Error, setPhase2Error] = useState("");
+
+  // Phase 3: Provision
+  const [phase3, setPhase3] = useState<PhaseStatus>("pending");
+  const [phase3Error, setPhase3Error] = useState("");
+  const [provSteps, setProvSteps] = useState<ProvisionStepDef[]>([]);
+  const [provStepStatus, setProvStepStatus] = useState<Record<string, PhaseStatus>>({});
+  const [provStepMsg, setProvStepMsg] = useState<Record<string, string>>({});
+  const [provLog, setProvLog] = useState<string | null>(null);
+
+  // Abort controllers for SSE streams
+  const buildCtrl = useRef<AbortController | null>(null);
+  const provCtrl = useRef<AbortController | null>(null);
+
+  // Cleanup on unmount
+  useEffect(() => () => {
+    buildCtrl.current?.abort();
+    provCtrl.current?.abort();
   }, []);
 
-  const isDirty = config ? config.sandbox.e2b_api_key !== originalKey : false;
+  // ── Initial status check ──
+  useEffect(() => {
+    let cancelled = false;
 
-  const handleSave = useCallback(async () => {
-    if (!config) return;
-    setSaving(true);
-    setError("");
+    (async () => {
+      // Always try to load provision step definitions for the big picture
+      try {
+        const ps = await getVMProvisionStatus();
+        if (cancelled) return;
+        setProvSteps(ps.steps);
+        // We'll update statuses below if we get to phase 3 checks
+        if (ps.markers?.provisioned) {
+          const statuses: Record<string, PhaseStatus> = {};
+          for (const s of ps.steps) statuses[s.id] = "done";
+          setProvStepStatus(statuses);
+        } else if (ps.markers && ps.markers.steps_done.length > 0) {
+          const statuses: Record<string, PhaseStatus> = {};
+          for (const s of ps.steps) {
+            statuses[s.id] = ps.markers.steps_done.includes(s.id) ? "done" : "pending";
+          }
+          setProvStepStatus(statuses);
+        }
+      } catch { /* best effort — step defs come from backend constants */ }
+
+      // Phase 1
+      let limaInstalled = false;
+      try {
+        const vs = await getVMStatus();
+        if (cancelled) return;
+        setVmStatus(vs);
+        if (!vs.supported) { setPhase1("error"); setPhase1Error("Not supported on this platform"); return; }
+        if (vs.installed) {
+          setPhase1("done");
+          limaInstalled = true;
+        } else {
+          setPhase1("pending");
+        }
+      } catch {
+        if (cancelled) return;
+        setPhase1("error");
+        setPhase1Error("Could not check VM status");
+        return;
+      }
+
+      if (!limaInstalled) return;
+
+      // Phase 2
+      let vmReady = false;
+      try {
+        const bs = await getVMBuildStatus();
+        if (cancelled) return;
+        if (bs.status === "running") {
+          setPhase2("running");
+          attachBuild();
+        } else if (bs.vm_state === "Running") {
+          setPhase2("done");
+          vmReady = true;
+        } else if (bs.vm_state === "Stopped") {
+          setPhase2("pending");
+          setPhase2Msg("VM exists but is stopped");
+        } else {
+          setPhase2("pending");
+        }
+      } catch {
+        if (cancelled) return;
+        setPhase2("pending");
+      }
+
+      if (!vmReady) return;
+
+      // Phase 3 — re-check status for running state
+      try {
+        const ps = await getVMProvisionStatus();
+        if (cancelled) return;
+        setProvSteps(ps.steps);
+        if (ps.status === "running") {
+          setPhase3("running");
+          attachProvision();
+        } else if (ps.markers?.provisioned) {
+          setPhase3("done");
+          const statuses: Record<string, PhaseStatus> = {};
+          for (const s of ps.steps) statuses[s.id] = "done";
+          setProvStepStatus(statuses);
+        } else if (ps.markers && ps.markers.steps_done.length > 0) {
+          setPhase3("pending");
+          const statuses: Record<string, PhaseStatus> = {};
+          for (const s of ps.steps) {
+            statuses[s.id] = ps.markers.steps_done.includes(s.id) ? "done" : "pending";
+          }
+          setProvStepStatus(statuses);
+        } else {
+          setPhase3("pending");
+        }
+      } catch {
+        if (cancelled) return;
+        setPhase3("pending");
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Phase 1: Install Lima ──
+  const handleInstallLima = async () => {
+    setPhase1("running");
+    setPhase1Error("");
+    setPhase1Msg("Starting installation...");
+    await installVMBackend(
+      (_step, message) => setPhase1Msg(message),
+      () => {
+        setPhase1("done");
+        setPhase1Msg("");
+        refreshAppVmStatus();
+        // Auto-advance to phase 2
+        setPhase2("pending");
+      },
+      (message) => {
+        setPhase1("error");
+        setPhase1Msg("");
+        setPhase1Error(message);
+      },
+    );
+  };
+
+  // ── Phase 2: Build VM ──
+  const attachBuild = () => {
+    setPhase2("running");
+    setPhase2Error("");
+    buildCtrl.current?.abort();
+    buildCtrl.current = buildVM(
+      (_step, message) => setPhase2Msg(message),
+      () => {
+        setPhase2("done");
+        setPhase2Msg("");
+        refreshAppVmStatus(); // Unblocks cowork mode in the app
+      },
+      (message) => {
+        setPhase2("error");
+        setPhase2Msg("");
+        setPhase2Error(message);
+      },
+    );
+  };
+
+  const handleBuildVM = () => {
+    attachBuild();
+  };
+
+  // ── Phase 3: Provision ──
+  const attachProvision = (force = false) => {
+    setPhase3("running");
+    setPhase3Error("");
+    setProvLog(null);
+    provCtrl.current?.abort();
+    provCtrl.current = provisionVM(
+      {
+        onStepStart(step, message) {
+          setProvStepStatus((prev) => ({ ...prev, [step]: "running" }));
+          setProvStepMsg((prev) => ({ ...prev, [step]: message }));
+
+        },
+        onStepProgress(step, message) {
+          setProvStepMsg((prev) => ({ ...prev, [step]: message }));
+
+        },
+        onStepDone(step, message) {
+          setProvStepStatus((prev) => ({ ...prev, [step]: "done" }));
+          setProvStepMsg((prev) => ({ ...prev, [step]: message }));
+        },
+        onStepSkip(step) {
+          setProvStepStatus((prev) => ({ ...prev, [step]: "done" }));
+        },
+        onStepError(step, message) {
+          setProvStepStatus((prev) => ({ ...prev, [step]: "error" }));
+          setProvStepMsg((prev) => ({ ...prev, [step]: message }));
+        },
+        onDone() {
+          setPhase3("done");
+        },
+        onError(message) {
+          setPhase3("error");
+          setPhase3Error(message);
+        },
+      },
+      { force },
+    );
+  };
+
+  const startProvision = (force = false) => {
+    // Initialize step statuses to pending
+    getVMProvisionStatus()
+      .then((ps) => {
+        setProvSteps(ps.steps);
+        const statuses: Record<string, PhaseStatus> = {};
+        for (const s of ps.steps) statuses[s.id] = "pending";
+        setProvStepStatus(statuses);
+        attachProvision(force);
+      })
+      .catch(() => attachProvision(force));
+  };
+
+  const handleViewLog = async () => {
     try {
-      const updated = await updateServerConfig(config);
-      setConfig(updated);
-      setOriginalKey(updated.sandbox.e2b_api_key);
-      dispatch({ type: "SET_SERVER_CONFIG", payload: updated });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unknown error");
-    } finally {
-      setSaving(false);
+      const log = await getProvisionLog();
+      setProvLog(log);
+    } catch {
+      setProvLog("(Could not fetch log)");
     }
-  }, [config, dispatch]);
+  };
 
-  useSettingsDirty(isDirty, handleSave);
+  const handleStopProvision = async () => {
+    try { await cancelProvision(); } catch { /* ignore */ }
+    provCtrl.current?.abort();
+    setPhase3("error");
+    setPhase3Error("Stopped by user");
+  };
 
   const toggleFolderPermission = (path: string) => {
     const updated = folders.map((f) =>
@@ -1943,14 +1944,31 @@ function SandboxTab() {
     saveRecentFolders(updated);
   };
 
-  if (!config) return <div className="settings-section"><p className="settings-hint">Loading configuration...</p></div>;
-
   const e2bConfigured = !!config.sandbox.e2b_api_key;
+
+  // Helper for phase status icon
+  const phaseIcon = (status: PhaseStatus) => {
+    switch (status) {
+      case "checking": return <Loader2 size={14} className="spin" />;
+      case "pending": return <span className="vm-phase-dot vm-phase-dot--pending" />;
+      case "running": return <Loader2 size={14} className="spin" />;
+      case "done": return <CircleCheck size={14} className="vm-phase-icon--done" />;
+      case "error": return <CircleAlert size={14} className="vm-phase-icon--error" />;
+    }
+  };
+
+  // Determine overall VM status for the card header
+  // Cowork mode is usable once Lima is installed and VM is running (phases 1+2).
+  // Phase 3 (dependency installation) is optional and can run in the background.
+  // Cowork mode is usable once Lima is installed and VM is running (phases 1+2).
+  // Phase 3 (dependency installation) can run in the background.
+  const vmUsable = phase1 === "done" && phase2 === "done";
+  const allDone = vmUsable && phase3 === "done";
+  const anyRunning = phase1 === "running" || phase2 === "running" || phase3 === "running";
+  const coreError = phase1 === "error" || phase2 === "error";
 
   return (
     <div className="settings-section">
-      {error && <div className="model-error">{error}</div>}
-
       {/* ── E2B Sandbox (Chat mode) ── */}
       <div className="sb-card">
         <div className="sb-card-header">
@@ -1982,8 +2000,10 @@ function SandboxTab() {
                 placeholder="e2b_..."
                 value={config.sandbox.e2b_api_key}
                 onChange={(e) => {
-                  setConfig({ ...config, sandbox: { ...config.sandbox, e2b_api_key: e.target.value } });
-                  setSaved(false);
+                  onConfigChange((prev) => ({
+                    ...prev,
+                    sandbox: { ...prev.sandbox, e2b_api_key: e.target.value },
+                  }));
                 }}
               />
               <button
@@ -2011,75 +2031,175 @@ function SandboxTab() {
             </div>
             <span className="sb-card-desc">Local VM sandbox — runs agent code securely on your machine</span>
           </div>
-          <span className="sb-card-status sb-card-status--ok">
-            <CircleCheck size={14} /> Ready
-          </span>
+          {vmStatus === null ? (
+            <span className="sb-card-status"><Loader2 size={14} className="spin" /> Checking...</span>
+          ) : vmUsable ? (
+            <span className="sb-card-status sb-card-status--ok"><CircleCheck size={14} /> Ready</span>
+          ) : anyRunning && !vmUsable ? (
+            <span className="sb-card-status"><Loader2 size={14} className="spin" /> Setting up...</span>
+          ) : coreError ? (
+            <span className="sb-card-status sb-card-status--warn"><CircleAlert size={14} /> Error</span>
+          ) : !vmStatus.supported ? (
+            <span className="sb-card-status sb-card-status--warn"><CircleAlert size={14} /> Not supported</span>
+          ) : (
+            <span className="sb-card-status sb-card-status--warn"><CircleAlert size={14} /> Setup needed</span>
+          )}
         </div>
         <div className="sb-card-body">
-          <div className="vm-folder-list">
-            <label className="mc-label" style={{ marginBottom: 2 }}>Recent folders</label>
-            {folders.map((folder) => (
-              <div key={folder.path} className="vm-folder-row">
-                <FolderOpen size={14} className="vm-folder-icon" />
-                <span className="vm-folder-path" title={folder.path}><bdo dir="ltr">{folder.path}</bdo></span>
-                <CustomSelect
-                  value={folder.alwaysAllowed ? "allow" : "ask"}
-                  options={[
-                    { value: "allow", label: "Allow" },
-                    { value: "ask", label: "Ask" },
-                  ]}
-                  onChange={() => toggleFolderPermission(folder.path)}
-                />
-                <button
-                  className="settings-del vm-folder-remove"
-                  onClick={() => removeFolder(folder.path)}
-                  title="Remove folder"
-                >
-                  <Trash2 size={13} />
-                </button>
+          {/* ── All done: clean summary ── */}
+          {vmStatus && vmStatus.supported && allDone && (
+            <p className="vm-ready-summary">
+              <CircleCheck size={13} className="vm-phase-icon--done" /> VM is running and fully set up.
+            </p>
+          )}
+
+          {/* ── Setup in progress or not yet started ── */}
+          {vmStatus && vmStatus.supported && !allDone && (
+            <div className="vm-setup-phases">
+              {/* Phase 1: Lima */}
+              <div className={`vm-phase ${phase1 === "running" ? "vm-phase--active" : ""}`}>
+                <div className="vm-phase-header">
+                  {phaseIcon(phase1)}
+                  <span className="vm-phase-label">VM Engine</span>
+                  {phase1 === "done" && <span className="vm-phase-badge vm-phase-badge--done">Installed</span>}
+                  {phase1 === "running" && phase1Msg && <span className="vm-phase-msg">{phase1Msg}</span>}
+                  {phase1 === "pending" && (
+                    <button className="vm-phase-action" type="button" onClick={handleInstallLima}>Install</button>
+                  )}
+                  {phase1 === "error" && (
+                    <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={handleInstallLima}>Retry</button>
+                  )}
+                </div>
+                {phase1 === "error" && phase1Error && (
+                  <p className="vm-phase-error"><CircleAlert size={12} /> {phase1Error}</p>
+                )}
               </div>
-            ))}
-            <button
-              className="vm-folder-add"
-              type="button"
-              onClick={async () => {
-                const path = await browseFolder();
-                if (path) {
-                  const updated = [
-                    { path, alwaysAllowed: false },
-                    ...folders.filter((f) => f.path !== path),
-                  ].slice(0, 8);
-                  setFolders(updated);
-                  saveRecentFolders(updated);
-                }
-              }}
-            >
-              <FolderPlus size={14} />
-              <span>Add a folder</span>
-            </button>
-          </div>
+
+              {/* Phase 2: VM Build */}
+              <div className={`vm-phase ${phase2 === "running" ? "vm-phase--active" : ""}`}>
+                <div className="vm-phase-header">
+                  {phaseIcon(phase2)}
+                  <span className="vm-phase-label">VM Instance</span>
+                  {phase2 === "done" && <span className="vm-phase-badge vm-phase-badge--done">Ready</span>}
+                  {phase2 === "running" && phase2Msg && <span className="vm-phase-msg">{phase2Msg}</span>}
+                  {phase2 === "pending" && phase1 === "done" && (
+                    <button className="vm-phase-action" type="button" onClick={handleBuildVM}>Install</button>
+                  )}
+                  {phase2 === "error" && (
+                    <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={handleBuildVM}>Retry</button>
+                  )}
+                </div>
+                {phase2 === "error" && phase2Error && (
+                  <p className="vm-phase-error"><CircleAlert size={12} /> {phase2Error}</p>
+                )}
+              </div>
+
+              {/* Phase 3: Provision */}
+              <div className={`vm-phase ${phase3 === "running" ? "vm-phase--active" : ""}`}>
+                <div className="vm-phase-header">
+                  {phaseIcon(phase3)}
+                  <span className="vm-phase-label">VM System Dependencies</span>
+                  {phase3 === "done" && <span className="vm-phase-badge vm-phase-badge--done">Complete</span>}
+                  {phase3 === "pending" && vmUsable && (
+                    <button className="vm-phase-action" type="button" onClick={() => startProvision()}>Install in background</button>
+                  )}
+                  {phase3 === "running" && (
+                    <button className="vm-phase-action vm-phase-action--stop" type="button" onClick={handleStopProvision}>Stop</button>
+                  )}
+                  {phase3 === "error" && (
+                    <>
+                      <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={() => startProvision()}>Retry</button>
+                      <button className="vm-phase-action vm-phase-action--secondary" type="button" onClick={handleViewLog}>Log</button>
+                    </>
+                  )}
+                </div>
+
+                {/* Step list — visible during setup */}
+                {(phase3 === "running" || phase3 === "error" || (phase3 === "pending" && Object.keys(provStepStatus).length > 0)) && provSteps.length > 0 && (
+                  <div className="vm-provision-steps">
+                    {provSteps.map((step) => {
+                      const ss = provStepStatus[step.id] || "pending";
+                      const msg = provStepMsg[step.id] || "";
+                      return (
+                        <div key={step.id} className={`vm-prov-step vm-prov-step--${ss}`}>
+                          <span className="vm-prov-step-icon">
+                            {ss === "done" ? <CircleCheck size={12} /> :
+                             ss === "running" ? <Loader2 size={12} className="spin" /> :
+                             ss === "error" ? <CircleAlert size={12} /> :
+                             <span className="vm-prov-step-dot" />}
+                          </span>
+                          <span className="vm-prov-step-label">{step.label}</span>
+                          {ss === "running" && msg && <span className="vm-prov-step-msg">{msg}</span>}
+                          {ss === "error" && msg && <span className="vm-prov-step-msg vm-prov-step-msg--error">{msg}</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {phase3 === "error" && phase3Error && (
+                  <p className="vm-phase-error"><CircleAlert size={12} /> {phase3Error}</p>
+                )}
+
+                {provLog !== null && (
+                  <pre className="vm-provision-log">{provLog}</pre>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Not supported message */}
+          {vmStatus && !vmStatus.supported && (
+            <p className="vm-install-hint">VM backend is not available on this platform.</p>
+          )}
+
+          {/* Folder list — shown once VM is usable (phases 1+2 done) */}
+          {vmUsable && (
+            <div className="vm-folder-list">
+              <label className="mc-label" style={{ marginBottom: 2 }}>Recent folders</label>
+              {folders.map((folder) => (
+                <div key={folder.path} className="vm-folder-row">
+                  <FolderOpen size={14} className="vm-folder-icon" />
+                  <span className="vm-folder-path" title={folder.path}><bdo dir="ltr">{folder.path}</bdo></span>
+                  <CustomSelect
+                    value={folder.alwaysAllowed ? "allow" : "ask"}
+                    options={[
+                      { value: "allow", label: "Allow" },
+                      { value: "ask", label: "Ask" },
+                    ]}
+                    onChange={() => toggleFolderPermission(folder.path)}
+                  />
+                  <button
+                    className="settings-del vm-folder-remove"
+                    onClick={() => removeFolder(folder.path)}
+                    title="Remove folder"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+              <button
+                className="vm-folder-add"
+                type="button"
+                onClick={async () => {
+                  const path = await browseFolder();
+                  if (path) {
+                    const updated = [
+                      { path, alwaysAllowed: false },
+                      ...folders.filter((f) => f.path !== path),
+                    ].slice(0, 8);
+                    setFolders(updated);
+                    saveRecentFolders(updated);
+                  }
+                }}
+              >
+                <FolderPlus size={14} />
+                <span>Add a folder</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
-
-      <div className="model-save-bar">
-        {isDirty && !saved && <span className="model-unsaved-hint">Unsaved changes</span>}
-        <button
-          className={`model-save-btn ${saved ? "saved" : ""}`}
-          onClick={handleSave}
-          disabled={saving || (!isDirty && !saved)}
-        >
-          {saving ? (
-            <><Loader2 size={14} className="model-save-spinner" /> Applying...</>
-          ) : saved ? (
-            <><Check size={14} /> Saved</>
-          ) : isDirty ? (
-            "Save & Apply"
-          ) : (
-            "No Changes"
-          )}
-        </button>
-      </div>
-
     </div>
   );
 }
@@ -2088,7 +2208,7 @@ function SandboxTab() {
 
 function SkillsTab() {
   const [publicSkills, setPublicSkills] = useState<string[]>([]);
-  const [userSkills, setUserSkills] = useState<string[]>([]);
+  const [privateSkills, setPrivateSkills] = useState<string[]>([]);
   const [exampleSkills, setExampleSkills] = useState<string[]>([]);
   const [disabledSkills, setDisabledSkills] = useState<Set<string>>(new Set());
   const [errorPopup, setErrorPopup] = useState("");
@@ -2103,7 +2223,7 @@ function SkillsTab() {
     try {
       const data = await listSkills();
       setPublicSkills(data.public);
-      setUserSkills(data.user);
+      setPrivateSkills(data.private);
       setExampleSkills(data.examples ?? []);
       setDisabledSkills(new Set(data.disabled));
     } catch (e: unknown) {
@@ -2292,7 +2412,7 @@ function SkillsTab() {
       <div className="skills-group">
         <div className="skills-group-label">Custom</div>
         <div className="skills-list">
-          {userSkills.map((name) => (
+          {privateSkills.map((name) => (
             <div key={name} className={`skills-item ${disabledSkills.has(name) ? "skills-item--disabled" : ""}`}>
               <Package size={14} className="skills-item-icon" />
               <span className="skills-item-name">{name}</span>
@@ -2310,7 +2430,7 @@ function SkillsTab() {
               </button>
             </div>
           ))}
-          {userSkills.length === 0 && (
+          {privateSkills.length === 0 && (
             <p className="settings-hint skills-empty">No custom skills installed.</p>
           )}
         </div>

@@ -1,38 +1,51 @@
-"""Skills API endpoints."""
+"""Skills API endpoints.
+
+Skills are split across two root directories:
+
+- **Bundled** (``bundled_skills_dir()``): examples/ and public/ skills that
+  ship with the application source or PyInstaller package.  These are the
+  skills the project provides out-of-the-box.
+- **User data** (``skills_dir()``): private/ skills uploaded by the user,
+  plus skills-inactive/ for disabled skills of any category.
+"""
 
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from openagent.exceptions import SkillError
 from openagent.harness.skill_spec import parse_skill_md, validate_skill_dir_name
+
+from openagent_api.paths import bundled_skills_dir, skills_dir
 
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 
+# Bundled (read in dev, read-only in packaged builds)
+_BUNDLED = bundled_skills_dir()
+PUBLIC_DIR = _BUNDLED / "public"
+EXAMPLES_DIR = _BUNDLED / "examples"
 
-def _resolve_skills_dir() -> Path:
-    data_dir = os.environ.get("OPENAGENT_DATA_DIR")
-    if data_dir:
-        return Path(data_dir) / "skills"
-    return Path(__file__).resolve().parent.parent.parent / "skills"
+# User data (always writable)
+_USER_DATA = skills_dir()
+PRIVATE_DIR = _USER_DATA / "private"
+INACTIVE_DIR = _USER_DATA.parent / "skills-inactive"
 
-
-SKILLS_DIR = _resolve_skills_dir()
-PUBLIC_DIR = SKILLS_DIR / "public"
-USER_DIR = SKILLS_DIR / "user"
-EXAMPLES_DIR = SKILLS_DIR / "examples"
-INACTIVE_DIR = SKILLS_DIR.parent / "skills-inactive"
+# Maps each category to its active directory so toggle/delete can iterate
+# without hard-coding two different root paths.
+_ACTIVE_DIRS: dict[str, Path] = {
+    "public": PUBLIC_DIR,
+    "private": PRIVATE_DIR,
+}
 
 ACCEPTED_EXTENSIONS = (".zip", ".skill")
 
@@ -56,24 +69,24 @@ def _find_skill_md(directory: Path) -> Path | None:
 
 @router.get("")
 async def list_skills() -> dict[str, list[str]]:
-    """Return all public, user, and example skills, plus disabled list.
+    """Return all public, private, and example skills, plus disabled list.
 
-    Active and inactive skills are merged into the public/user lists.
-    The disabled list is derived from skills in the inactive directory.
+    Public and examples are read from the bundled skills directory.
+    Private skills and the disabled list come from user data.
     """
     inactive_public = _list_skills(INACTIVE_DIR / "public")
-    inactive_user = _list_skills(INACTIVE_DIR / "user")
+    inactive_private = _list_skills(INACTIVE_DIR / "private")
     return {
         "public": sorted(_list_skills(PUBLIC_DIR) + inactive_public),
-        "user": sorted(_list_skills(USER_DIR) + inactive_user),
+        "private": sorted(_list_skills(PRIVATE_DIR) + inactive_private),
         "examples": _list_skills(EXAMPLES_DIR),
-        "disabled": inactive_public + inactive_user,
+        "disabled": inactive_public + inactive_private,
     }
 
 
 @router.post("/upload")
 async def upload_skill(file: UploadFile = File(...)) -> dict[str, str]:
-    """Upload a .zip or .skill file to install a user skill.
+    """Upload a .zip or .skill file to install a private skill.
 
     The archive must contain a SKILL.md file with YAML frontmatter
     including skill name and description.
@@ -137,8 +150,8 @@ async def upload_skill(file: UploadFile = File(...)) -> dict[str, str]:
         skill_name = validated_name
 
         # Check for conflicts
-        USER_DIR.mkdir(parents=True, exist_ok=True)
-        dest = USER_DIR / skill_name
+        PRIVATE_DIR.mkdir(parents=True, exist_ok=True)
+        dest = PRIVATE_DIR / skill_name
         if dest.exists():
             raise HTTPException(
                 status_code=409,
@@ -159,21 +172,21 @@ async def upload_skill(file: UploadFile = File(...)) -> dict[str, str]:
 async def delete_skill(skill_name: str) -> dict[str, str]:
     """Delete a skill.
 
-    - User skills are removed from the filesystem (active or inactive).
+    - Private skills are removed from the filesystem (active or inactive).
     - Built-in (public) skills are removed from active/inactive.
       The example copy (if any) remains in the examples directory.
     """
     # Check all possible locations
     candidates = [
-        USER_DIR / skill_name,
-        INACTIVE_DIR / "user" / skill_name,
+        PRIVATE_DIR / skill_name,
+        INACTIVE_DIR / "private" / skill_name,
         PUBLIC_DIR / skill_name,
         INACTIVE_DIR / "public" / skill_name,
     ]
     removed = False
-    for path in candidates:
-        if path.is_dir():
-            shutil.rmtree(path)
+    for candidate in candidates:
+        if candidate.is_dir():
+            shutil.rmtree(candidate)
             removed = True
             break
 
@@ -212,20 +225,20 @@ class ToggleRequest(BaseModel):
 async def toggle_skill(skill_name: str, body: ToggleRequest) -> dict[str, bool]:
     """Enable or disable a skill by moving it between active/inactive dirs."""
     if body.enabled:
-        # Move from skills-inactive/ back to skills/
-        for subdir in ("public", "user"):
+        # Move from skills-inactive/ back to the appropriate active directory
+        for subdir, active_dir in _ACTIVE_DIRS.items():
             inactive_path = INACTIVE_DIR / subdir / skill_name
             if inactive_path.is_dir():
-                dest = SKILLS_DIR / subdir / skill_name
+                dest = active_dir / skill_name
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(inactive_path), str(dest))
                 logger.info("Skill enabled: %s", skill_name)
                 return {"enabled": True}
         raise HTTPException(status_code=404, detail=f"Inactive skill not found: {skill_name}")
     else:
-        # Move from skills/ to skills-inactive/
-        for subdir in ("public", "user"):
-            active_path = SKILLS_DIR / subdir / skill_name
+        # Move from active directory to skills-inactive/
+        for subdir, active_dir in _ACTIVE_DIRS.items():
+            active_path = active_dir / skill_name
             if active_path.is_dir():
                 dest = INACTIVE_DIR / subdir / skill_name
                 dest.parent.mkdir(parents=True, exist_ok=True)

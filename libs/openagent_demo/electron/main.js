@@ -45,14 +45,12 @@ function ensureUserData() {
     }
   }
 
-  // Create skills directories if missing
-  const skillsDir = path.join(userDataDir, "skills");
-  const publicSkills = path.join(skillsDir, "public");
-  const userSkills = path.join(skillsDir, "user");
-  for (const dir of [skillsDir, publicSkills, userSkills]) {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
+  // Create private skills directory if missing.
+  // Public and example skills are bundled with the application and
+  // read directly from the backend's _internal/skills/ directory.
+  const privateSkillsDir = path.join(userDataDir, "skills", "private");
+  if (!fs.existsSync(privateSkillsDir)) {
+    fs.mkdirSync(privateSkillsDir, { recursive: true });
   }
 
   // Create uploads directory if missing

@@ -7,6 +7,8 @@ import ChatInput from "./ChatInput";
 import FilePreview from "./FilePreview";
 import type { Attachment, Conversation, ConversationMode, ContentBlock, SubagentContentBlock } from "../types";
 
+const EMPTY_BLOCKS: ContentBlock[] = [];
+
 interface ChatAreaProps {
   conversation: Conversation | null;
   onSendMessage: (content: string, options?: { workingDir?: string; attachments?: Attachment[] }) => void;
@@ -24,46 +26,45 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
     state.isStreaming
   );
 
-  // Check if conversation has any PresentToUser tool calls
+  // Only consider streaming blocks that belong to this conversation (stable ref when not streaming)
+  const activeStreamingBlocks = useMemo(
+    () =>
+      state.isStreaming && state.streamingConversationId === conversation?.id
+        ? state.streamingBlocks
+        : EMPTY_BLOCKS,
+    [state.isStreaming, state.streamingConversationId, conversation?.id, state.streamingBlocks],
+  );
+
+  // Check if conversation has any PresentToUser or TodoWrite tool calls
   const hasPresentedFiles = useMemo(() => {
-    if (!conversation?.messages) return false;
-    const hasPF = (blocks: (ContentBlock | SubagentContentBlock)[]): boolean =>
+    const has = (blocks: (ContentBlock | SubagentContentBlock)[]): boolean =>
       blocks.some((b) => {
         if (b.type === "tool_call" && b.tool.name === "PresentToUser") return true;
-        if (b.type === "subagent") return hasPF(b.subagent.blocks);
+        if (b.type === "subagent") return has(b.subagent.blocks);
         return false;
       });
-    return conversation.messages.some((m) => m.blocks && hasPF(m.blocks));
-  }, [conversation?.messages]);
+    return (conversation?.messages?.some((m) => m.blocks && has(m.blocks)) ?? false)
+      || (activeStreamingBlocks.length > 0 && has(activeStreamingBlocks));
+  }, [conversation?.messages, activeStreamingBlocks]);
 
-  // Check if conversation has any TodoWrite tool calls (including live streaming)
   const hasTodoWrite = useMemo(() => {
-    const hasTW = (blocks: (ContentBlock | SubagentContentBlock)[]): boolean =>
+    const has = (blocks: (ContentBlock | SubagentContentBlock)[]): boolean =>
       blocks.some((b) => {
         if (b.type === "tool_call" && b.tool.name === "TodoWrite") return true;
-        if (b.type === "subagent") return hasTW(b.subagent.blocks);
+        if (b.type === "subagent") return has(b.subagent.blocks);
         return false;
       });
-    const inMessages = conversation?.messages?.some((m) => m.blocks && hasTW(m.blocks)) ?? false;
-    if (inMessages) return true;
-    return state.streamingBlocks.length > 0 && hasTW(state.streamingBlocks);
-  }, [conversation?.messages, state.streamingBlocks]);
+    return (conversation?.messages?.some((m) => m.blocks && has(m.blocks)) ?? false)
+      || (activeStreamingBlocks.length > 0 && has(activeStreamingBlocks));
+  }, [conversation?.messages, activeStreamingBlocks]);
 
-  // Auto-show right panel when TodoWrite or PresentToUser is first detected
-  const prevHasTodoWrite = useRef(false);
-  const prevHasPresentedFiles = useRef(false);
+  // Auto-show right panel (once per conversation) when relevant tools are first detected
   useEffect(() => {
-    if (hasTodoWrite && !prevHasTodoWrite.current) {
-      dispatch({ type: "SET_RIGHT_PANEL", payload: true });
+    if (!conversation) return;
+    if (hasPresentedFiles || hasTodoWrite) {
+      dispatch({ type: "AUTO_SHOW_RIGHT_PANEL", payload: conversation.id });
     }
-    prevHasTodoWrite.current = hasTodoWrite;
-  }, [hasTodoWrite, dispatch]);
-  useEffect(() => {
-    if (hasPresentedFiles && !prevHasPresentedFiles.current) {
-      dispatch({ type: "SET_RIGHT_PANEL", payload: true });
-    }
-    prevHasPresentedFiles.current = hasPresentedFiles;
-  }, [hasPresentedFiles, dispatch]);
+  }, [hasPresentedFiles, hasTodoWrite, conversation?.id, dispatch]);
 
   // Mode: use conversation's mode if it has one, otherwise the global selection
   const currentMode = conversation?.mode || state.selectedMode;
@@ -155,7 +156,7 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
           <div className="header-panel-toggles">
             <button
               className="right-panel-toggle"
-              onClick={() => dispatch({ type: "SET_RIGHT_PANEL", payload: !state.rightPanelVisible })}
+              onClick={() => dispatch({ type: "SET_RIGHT_PANEL", payload: !(state.rightPanelByConversation[conversation?.id ?? ""] ?? false) })}
               title="Toggle side panel"
             >
               <PanelRight />
@@ -177,7 +178,7 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
             )}
           </div>
         </div>
-        {hasMessages && state.filePreview && <FilePreview visible={state.filePreviewVisible} />}
+        {hasMessages && state.filePreview && state.filePreview.conversationId === conversation?.id && <FilePreview visible={state.filePreviewVisible} />}
         {hasMessages && rightPanel}
       </div>
     </div>

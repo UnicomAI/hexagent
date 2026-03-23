@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from openagent_api.agent_manager import agent_manager
-from openagent_api.routes import chat, config, conversations, sessions, skills
+from openagent_api.routes import chat, config, conversations, sessions, setup, skills
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,12 +29,11 @@ async def _cleanup_expired_sessions() -> None:
     """Periodically tear down unclaimed warm sessions."""
     import asyncio
     import shutil
-    import tempfile
-    from pathlib import Path
 
+    from openagent_api.paths import uploads_dir
     from openagent_api.store import session_store
 
-    uploads_dir = Path(tempfile.gettempdir()) / "openagent_uploads"
+    ul_dir = uploads_dir()
 
     while True:
         await asyncio.sleep(300)  # every 5 minutes
@@ -44,7 +43,7 @@ async def _cleanup_expired_sessions() -> None:
                 await agent_manager.teardown_session(session.mode, session.session_name)
                 session_store.delete(session.id)
                 # Clean up any upload files left on disk
-                session_uploads = uploads_dir / session.id
+                session_uploads = ul_dir / session.id
                 if session_uploads.is_dir():
                     shutil.rmtree(session_uploads)
         except Exception:
@@ -55,6 +54,10 @@ async def _cleanup_expired_sessions() -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage agent lifecycle on startup/shutdown."""
     import asyncio
+
+    # Ensure managed VM backend binaries are on PATH before agent manager tries to find them
+    from openagent_api.routes.setup import ensure_managed_deps_on_path
+    ensure_managed_deps_on_path()
 
     logger.info("Starting agent manager...")
     await agent_manager.start()
@@ -81,6 +84,7 @@ app.include_router(chat.router)
 app.include_router(config.router)
 app.include_router(conversations.router)
 app.include_router(sessions.router)
+app.include_router(setup.router)
 app.include_router(skills.router)
 
 

@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect, memo } from "react";
 import { ChevronDown } from "lucide-react";
 import TodoProgress, { extractTodos } from "../tools/renderers/TodoProgress";
 import PresentFilesResult from "../tools/renderers/PresentFilesResult";
@@ -11,7 +11,7 @@ interface RightPanelProps {
   streamingBlocks?: ContentBlock[];
 }
 
-export default function RightPanel({ visible, conversation, streamingBlocks }: RightPanelProps) {
+export default memo(function RightPanel({ visible, conversation, streamingBlocks }: RightPanelProps) {
   const [progressOpen, setProgressOpen] = useState(true);
   const [artifactsOpen, setArtifactsOpen] = useState(true);
   const progressBodyRef = useRef<HTMLDivElement>(null);
@@ -158,7 +158,7 @@ export default function RightPanel({ visible, conversation, streamingBlocks }: R
       </div>
     </div>
   );
-}
+});
 
 /** Collect all tool calls from content blocks (including nested subagent blocks). */
 function collectToolCalls(blocks: ContentBlock[], out: ToolCall[]): void {

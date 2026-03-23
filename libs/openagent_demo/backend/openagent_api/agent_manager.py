@@ -111,23 +111,47 @@ class AgentManager:
             if session_name and session_name in self._computers:
                 return self._computers[session_name], session_name
 
+            # Guard: check that limactl is available before attempting VM ops
+            import shutil
+
+            if not shutil.which("limactl"):
+                raise RuntimeError(
+                    "Cowork mode requires VM setup. "
+                    "Please install and configure it in Settings \u2192 Sandbox."
+                )
+
             # Lazy-create LocalVM
             if self._vm_manager is None:
                 await self._ensure_vm_manager()
 
-            if session_name:
-                logger.info("Resuming session: %s", session_name)
-                computer = await self._vm_manager.computer(resume=session_name)
-            else:
-                from pathlib import Path
+            try:
+                if session_name:
+                    logger.info("Resuming session: %s", session_name)
+                    computer = await self._vm_manager.computer(resume=session_name)
+                else:
+                    from pathlib import Path
 
-                from openagent.computer import Mount
+                    from openagent.computer import Mount
 
-                session_mounts: list[Mount] | None = None
-                if working_dir:
-                    session_mounts = [Mount(source=working_dir, target=Path(working_dir).name, writable=True)]
-                logger.info("Creating new session (mounts=%s)...", session_mounts)
-                computer = await self._vm_manager.computer(mounts=session_mounts)
+                    session_mounts: list[Mount] | None = None
+                    if working_dir:
+                        session_mounts = [Mount(source=working_dir, target=Path(working_dir).name, writable=True)]
+                    logger.info("Creating new session (mounts=%s)...", session_mounts)
+                    computer = await self._vm_manager.computer(mounts=session_mounts)
+            except FileNotFoundError:
+                raise RuntimeError(
+                    "Cowork mode requires VM setup. "
+                    "Please install and configure it in Settings \u2192 Sandbox."
+                ) from None
+            except Exception as exc:
+                # Convert VM infrastructure errors to user-friendly messages
+                msg = str(exc).lower()
+                if "not found" in msg or "does not exist" in msg or "not running" in msg:
+                    raise RuntimeError(
+                        "VM is not running. "
+                        "Please set it up in Settings \u2192 Sandbox."
+                    ) from None
+                raise
 
             actual_name = computer.session_name
             self._computers[actual_name] = computer
@@ -281,8 +305,8 @@ class AgentManager:
                 "Creating agent for model=%s (%s) session=%s",
                 target.display_name, target.model, session_key,
             )
-            # Cowork sessions have skills mounted at /mnt/skills/{public,user}
-            skill_paths = ("/mnt/skills/public", "/mnt/skills/user") if mode != "chat" else ()
+            # Cowork sessions have skills mounted at /mnt/skills/{public,private}
+            skill_paths = ("/mnt/skills/public", "/mnt/skills/private") if mode != "chat" else ()
 
             # PresentToUserTool output directory depends on mode
             if session_key == "chat":
@@ -328,24 +352,31 @@ class AgentManager:
             await self._mount_skills()
 
     async def _mount_skills(self) -> None:
-        """Mount skill directories (public + user) into the VM."""
+        """Mount skill directories (public + private) into the VM.
+
+        Public skills live in the bundled skills directory (ships with the
+        application).  Private skills live in user data.
+        """
         assert self._vm_manager is not None
-        from pathlib import Path
 
         from openagent.computer import Mount
 
+        from openagent_api.paths import bundled_skills_dir, skills_dir
+
         existing_guests = {m.guest_path for m in self._vm_manager.list_mounts()}
 
-        data_dir = os.environ.get("OPENAGENT_DATA_DIR")
-        skills_base = Path(data_dir) / "skills" if data_dir else Path(__file__).resolve().parent.parent / "skills"
+        # (subdir_name, host_root)
+        mount_sources = {
+            "public": bundled_skills_dir() / "public",
+            "private": skills_dir() / "private",
+        }
         skill_mounts: list[Mount] = []
-        for subdir in ("public", "user"):
-            skills_dir = skills_base / subdir
-            if skills_dir.is_dir():
+        for subdir, host_path in mount_sources.items():
+            if host_path.is_dir():
                 guest = f"/mnt/skills/{subdir}"
                 if guest not in existing_guests:
                     skill_mounts.append(
-                        Mount(source=str(skills_dir), target=f"skills/{subdir}")
+                        Mount(source=str(host_path), target=f"skills/{subdir}")
                     )
         if skill_mounts:
             logger.info("Mounting %d skill dir(s): %s", len(skill_mounts), [m.target for m in skill_mounts])
@@ -541,14 +572,9 @@ class AgentManager:
         self._mcp_servers = None  # Rebuild from config on next agent creation
         for key, agent in self._agents.items():
             logger.info("Closing cached agent for %s...", key)
-            try:
-                await agent.aclose()
-            except RuntimeError:
-                logger.warning(
-                    "Could not cleanly close agent for %s (cross-task scope), discarding",
-                    key,
-                )
+            await agent.aclose()
         self._agents.clear()
+        self._agent_locks.clear()
 
 
 # Module-level singleton

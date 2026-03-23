@@ -6,7 +6,7 @@
  */
 
 import {
-  Puzzle,
+  Plug,
   Terminal,
   FileText,
   FilePen,
@@ -69,9 +69,9 @@ export function getToolIcon(name: string): React.ComponentType<{ className?: str
   }
 
   // 3. MCP tools get puzzle icon
-  if (isMcpTool(name)) return Puzzle;
+  if (isMcpTool(name)) return Plug;
 
-  return Puzzle;
+  return Plug;
 }
 
 // ── Labels ──
@@ -88,7 +88,7 @@ export function getToolLabel(name: string, input: Record<string, unknown>, argsT
     if (label) return label;
   }
   // Default: format tool name
-  return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return name.replace(/__/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\bMcp\b/g, "MCP");
 }
 
 // ── Result target ──
@@ -143,4 +143,11 @@ export function hasNoFoldBody(name: string): boolean {
 /** Get custom input content for the fold body, or undefined for default. */
 export function getInputContent(name: string, input: Record<string, unknown>, argsText?: string): { text: string; language: string } | undefined {
   return BUILTIN_TOOLS[name]?.getInputContent?.(input, argsText);
+}
+
+// ── Built-in check ──
+
+/** Whether a tool is a built-in (registered in the registry). */
+export function isBuiltinTool(name: string): boolean {
+  return name in BUILTIN_TOOLS;
 }

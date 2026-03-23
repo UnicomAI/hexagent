@@ -168,7 +168,7 @@ export default function InputSettingsMenu({ onOpenSettings, dropUp = false }: In
   const allSkills = skills
     ? [
         ...skills.public.map((name) => ({ name, disabled: skills.disabled.includes(name) })),
-        ...skills.user.map((name) => ({ name, disabled: skills.disabled.includes(name) })),
+        ...skills.private.map((name) => ({ name, disabled: skills.disabled.includes(name) })),
       ]
     : [];
 

@@ -39,8 +39,8 @@ uploads/
 # Lock file (optional, uncomment if you want to track it)
 # uv.lock
 
-# User skills (runtime-generated)
-skills/user/
+# Private skills (user-uploaded, runtime-generated)
+skills/private/
 skills-inactive/
 
 # Bundled example/public skills (license restrictions)

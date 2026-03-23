@@ -171,11 +171,13 @@ class RemoteE2BComputer(AsyncComputerMixin):
                 _logger.info("Reconnected to sandbox %s", self._sandbox_id)
                 return
 
-        # Create fresh sandbox
+        # Create fresh sandbox with auto_pause so E2B pauses (not kills)
+        # the sandbox when the timeout expires, preserving state for resume.
         try:
-            self._sandbox = await AsyncSandbox.create(
+            self._sandbox = await AsyncSandbox.beta_create(
                 self._template,
                 timeout=self._lifetime,
+                auto_pause=True,
             )
             self._sandbox_id = self._sandbox.sandbox_id
             self._is_paused = False
@@ -199,6 +201,7 @@ class RemoteE2BComputer(AsyncComputerMixin):
         try:
             await self._sandbox.beta_pause()
             self._sandbox_id = sandbox_id
+            self._sandbox = None  # Release stale SDK object (holds httpx client)
             self._is_paused = True
             _logger.info("Sandbox %s paused (state preserved)", sandbox_id)
         except Exception as e:
@@ -320,12 +323,16 @@ class RemoteE2BComputer(AsyncComputerMixin):
         timeout_ms = min(timeout, BASH_MAX_TIMEOUT_MS) if timeout is not None else BASH_MAX_TIMEOUT_MS
         effective_timeout_s = timeout_ms / 1000
 
-        # Ensure sandbox has enough time remaining
+        # Ensure sandbox has enough time remaining.
+        # This may mark the sandbox as paused if it expired or became unreachable.
         await self._ensure_sandbox_ready(effective_timeout_s)
 
-        # Re-check sandbox after potential pause/resume
+        # Re-check: sandbox may have been marked paused by _ensure_sandbox_ready
+        # (e.g. expired while idle, auto-paused by E2B). Try to reconnect.
         if self._sandbox is None or self._is_paused:
-            msg = "Sandbox became unavailable during safety check"
+            await self.start()
+        if self._sandbox is None or self._is_paused:
+            msg = "Sandbox became unavailable and could not be reconnected"
             raise CLIError(msg)
 
         start_time = time.monotonic()
@@ -366,9 +373,10 @@ class RemoteE2BComputer(AsyncComputerMixin):
         """Ensure sandbox won't expire during command execution.
 
         Strategy:
-            1. If enough time remains: do nothing
-            2. If extending via set_timeout() stays within E2B's 1hr limit: extend
-            3. If extending would exceed 1hr limit: pause and resume (~30s)
+            1. If sandbox is unreachable or expired: mark as paused for reconnection
+            2. If enough time remains: do nothing
+            3. If extending via set_timeout() stays within E2B's 1hr limit: extend
+            4. If extending would exceed 1hr limit: pause and resume (~30s)
 
         Args:
             command_timeout_s: How long the command might take (seconds).
@@ -376,15 +384,43 @@ class RemoteE2BComputer(AsyncComputerMixin):
         if self._sandbox is None or self._is_paused:
             return
 
+        # Capture sandbox_id before any await — a concurrent run() on the
+        # same event loop can set self._sandbox = None while we're waiting.
+        sandbox_id = self._sandbox.sandbox_id
+
         try:
             info = await self._sandbox.get_info()
         except Exception as e:  # noqa: BLE001
-            # Can't get info, proceed and hope for the best
-            _logger.debug("Failed to get sandbox info: %s", e)
+            # Sandbox unreachable (killed, expired, network issue).
+            # Mark as paused so the caller can reconnect via start().
+            # Re-check: another concurrent task may have already handled this.
+            if self._sandbox is None:
+                return
+            _logger.warning("Sandbox %s unreachable: %s", sandbox_id, e)
+            self._sandbox_id = sandbox_id
+            self._sandbox = None
+            self._is_paused = True
+            return
+
+        # Re-check after await — another task may have cleared sandbox.
+        if self._sandbox is None:
             return
 
         now = datetime.now(UTC)
         remaining_s = (info.end_at - now).total_seconds()
+
+        if remaining_s <= 0:
+            # Sandbox already expired or was auto-paused by E2B.
+            _logger.warning(
+                "Sandbox %s expired (%.0fs past end_at). Marking for reconnection.",
+                sandbox_id,
+                -remaining_s,
+            )
+            self._sandbox_id = sandbox_id
+            self._sandbox = None
+            self._is_paused = True
+            return
+
         required_s = command_timeout_s + _SAFETY_BUFFER_S
 
         if remaining_s >= required_s:
@@ -427,6 +463,8 @@ class RemoteE2BComputer(AsyncComputerMixin):
         # Pause
         try:
             await self._sandbox.beta_pause()
+            self._sandbox = None  # Release stale SDK object (holds httpx client)
+            self._sandbox_id = sandbox_id
             self._is_paused = True
         except Exception as e:
             _logger.exception("Failed to pause sandbox %s", sandbox_id)
@@ -446,9 +484,9 @@ class RemoteE2BComputer(AsyncComputerMixin):
             _logger.info("Sandbox %s resumed with fresh timer", sandbox_id)
         except Exception as e:
             _logger.exception("Failed to resume sandbox %s", sandbox_id)
-            self._sandbox_id = None
-            self._sandbox = None
-            self._is_paused = False
+            # Sandbox is still paused on E2B — preserve ID so caller can retry
+            self._sandbox_id = sandbox_id
+            self._is_paused = True
             msg = f"Failed to resume sandbox after pause: {e}"
             raise CLIError(msg) from e
 

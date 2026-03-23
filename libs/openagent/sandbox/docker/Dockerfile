@@ -1,12 +1,11 @@
 # =============================================================================
 # Agent CLI-based Computer Image
 # =============================================================================
-# This Dockerfile defines a CLI-based computer sandbox environment purpose-built
-# for agent execution. It includes development tools, document processing
-# capabilities, data science packages, and browser automation tools.
+# CLI-based computer sandbox environment for agent execution. Includes
+# development tools, document processing, data science packages, and
+# browser automation.
 #
 # Base: Ubuntu 24.04 LTS (Noble Numbat)
-# Architecture: amd64/x86_64
 #
 # Build:
 #   docker build -t openagent-sandbox .
@@ -17,17 +16,13 @@
 
 FROM ubuntu:24.04
 
-# =============================================================================
-# Environment Configuration
-# =============================================================================
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
-    JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 \
     IS_SANDBOX=yes
 
 # =============================================================================
-# Base Prerequisites (needed for subsequent downloads)
+# Base Prerequisites
 # =============================================================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -36,7 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # =============================================================================
-# Node.js 22.x from NodeSource
+# Node.js 22.x
 # =============================================================================
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
@@ -46,61 +41,50 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
 # System Packages
 # =============================================================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Core utilities
     bash \
     coreutils \
     wget \
+    curl \
     git \
+    zip \
+    unzip \
+    bzip2 \
+    xz-utils \
+    file \
+    findutils \
+    patch \
+    perl \
+    jq \
+    tree \
+    sqlite3 \
+    ripgrep \
+    netcat-openbsd \
     apt-transport-https \
     software-properties-common \
-    # Build essentials (includes gcc, g++, make)
     build-essential \
     pkg-config \
-    # Python
     python3 \
     python3-dev \
     python3-pip \
     python3-venv \
     pipx \
-    # Java
     default-jre-headless \
-    # Compression
-    zip \
-    unzip \
-    bzip2 \
-    xz-utils \
-    # Text processing
-    perl \
-    patch \
-    # Network
-    netcat-openbsd \
-    # File utilities
-    file \
-    findutils \
-    # PDF tools
     poppler-utils \
     qpdf \
     pdftk-java \
     wkhtmltopdf \
-    # Document conversion
+    ghostscript \
     pandoc \
-    # LibreOffice
     libreoffice-writer \
     libreoffice-calc \
     libreoffice-impress \
-    libreoffice-draw \
-    libreoffice-base-core \
     libreoffice-common \
     libreoffice-java-common \
-    # Image processing
     imagemagick \
-    libmagickwand-dev \
-    # OCR
+    graphviz \
+    ffmpeg \
     tesseract-ocr \
     tesseract-ocr-eng \
-    # Diagrams
-    graphviz \
-    # LaTeX
     texlive-base \
     texlive-latex-base \
     texlive-latex-recommended \
@@ -110,15 +94,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     texlive-science \
     texlive-pictures \
     latexmk \
-    # Multimedia
-    ffmpeg \
-    # Fonts
-    fonts-liberation \
     fonts-liberation2 \
     fonts-dejavu \
-    fonts-dejavu-core \
-    fonts-dejavu-extra \
-    fonts-dejavu-mono \
     fonts-freefont-ttf \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
@@ -129,14 +106,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-opensymbol \
     fonts-wqy-zenhei \
     fonts-ipafont-gothic \
-    # X Virtual Framebuffer
     xvfb \
     x11-xkb-utils \
-    xfonts-base \
     xfonts-scalable \
     xfonts-cyrillic \
     xfonts-utils \
-    # Libraries for Playwright/Chrome
     libnss3 \
     libnss3-tools \
     libatk1.0-0t64 \
@@ -155,41 +129,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libatspi2.0-0t64 \
     libgtk-3-0t64 \
     libgtk-4-1 \
-    # Development libraries for Python C extensions
     libffi-dev \
-    libssl-dev \
     zlib1g-dev \
-    libbz2-dev \
-    libreadline-dev \
-    libsqlite3-dev \
-    libpq-dev \
-    libjpeg-dev \
     libpng-dev \
-    libtiff-dev \
-    libwebp-dev \
-    libopenjp2-7-dev \
     libfreetype-dev \
-    libfontconfig1-dev \
     libcairo2-dev \
-    libpango1.0-dev \
     libglib2.0-dev \
-    libxml2-dev \
-    libxslt1-dev \
-    libhdf5-dev \
+    libbz2-dev \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
 # =============================================================================
-# NPM Configuration and Global Packages
+# NPM Global Packages
 # =============================================================================
-RUN npm config set prefix /home/openagent/.npm-global && \
-    npm install -g \
-    docx@9.5.1 \
+RUN npm install -g \
+    docx@9 \
     pptxgenjs@4.0.1 \
     pdf-lib@1.17.1 \
     pdfjs-dist \
     marked \
-    markdown-pdf \
     markdown-toc \
     markdownlint-cli \
     markdownlint-cli2 \
@@ -204,33 +162,39 @@ RUN npm config set prefix /home/openagent/.npm-global && \
     ts-node \
     tsx \
     sharp \
-    playwright && \
-    echo "PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers" >> /home/openagent/.npmrc
+    playwright
+
+RUN if [ "$(uname -m)" = "x86_64" ]; then npm install -g markdown-pdf; fi
 
 # =============================================================================
 # Python Packages
 # =============================================================================
-RUN pip3 install --break-system-packages --no-cache-dir --ignore-installed \
+RUN pip3 install --break-system-packages --no-cache-dir --ignore-installed blinker
+
+RUN pip3 install --break-system-packages --no-cache-dir \
+    # --- Core numeric / scientific ---
     numpy \
     pandas \
     scipy \
+    sympy \
+    # --- ML / CV ---
     scikit-learn \
     scikit-image \
-    matplotlib \
-    seaborn \
-    networkx \
-    sympy \
-    jax \
-    jaxlib \
     onnxruntime \
-    mediapipe \
-    pillow \
     opencv-python \
     opencv-contrib-python \
     opencv-python-headless \
+    # --- Visualization ---
+    matplotlib \
+    seaborn \
+    networkx \
+    # --- Image / media ---
+    pillow \
     imageio \
     imageio-ffmpeg \
     Wand \
+    pytesseract \
+    # --- PDF tools ---
     pdfplumber \
     pdfminer.six \
     pypdf \
@@ -238,21 +202,22 @@ RUN pip3 install --break-system-packages --no-cache-dir --ignore-installed \
     pdf2image \
     pdfkit \
     img2pdf \
-    "camelot-py[cv]" \
+    camelot-py \
+    tabula-py \
     reportlab \
     pypdfium2 \
+    pymupdf \
+    # --- Office documents ---
     python-docx \
     python-pptx \
     openpyxl \
     xlsxwriter \
     odfpy \
+    # --- Markdown / docs ---
     markitdown \
     markdownify \
-    requests \
-    beautifulsoup4 \
-    lxml \
-    Flask \
-    httplib2 \
+    markdown \
+    grip \
     mistune \
     markdown-it-py \
     marko \
@@ -261,23 +226,39 @@ RUN pip3 install --break-system-packages --no-cache-dir --ignore-installed \
     mkdocs-material-extensions \
     mkdocs-get-deps \
     pymdown-extensions \
+    # --- Web / HTTP ---
+    requests \
+    beautifulsoup4 \
+    lxml \
+    Flask \
+    httplib2 \
+    # --- Automation / browser ---
+    playwright \
+    unoserver \
+    pyoo \
+    # --- System utilities ---
+    uv \
+    magika \
     click \
     colorama \
     coloredlogs \
     humanfriendly \
     tabulate \
-    tqdm \
     python-dotenv \
     psutil \
     watchdog \
-    pytesseract \
-    playwright \
-    unoserver \
-    pyoo \
+    sounddevice \
     pycairo \
     graphviz \
     freetype-py \
+    # --- Foundational / low-level ---
     attrs \
+    bcrypt \
+    jsonschema \
+    python-magic \
+    livereload \
+    tornado \
+    PyYAML \
     certifi \
     charset-normalizer \
     cryptography \
@@ -291,40 +272,28 @@ RUN pip3 install --break-system-packages --no-cache-dir --ignore-installed \
     typing_extensions \
     urllib3
 
-# =============================================================================
-# Runtime Environment Configuration
-# =============================================================================
-ENV PATH=/home/openagent/.npm-global/bin:/home/openagent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    PIP_CACHE_DIR=/home/openagent/.cache/pip
+RUN if [ "$(uname -m)" = "x86_64" ]; then \
+    pip3 install --break-system-packages --no-cache-dir "mediapipe>=0.10.32"; \
+    fi
 
 # =============================================================================
-# Install Playwright browsers (shared between Node.js and Python)
+# Playwright Browsers + ImageMagick Policy
 # =============================================================================
-RUN npx playwright install chromium && \
-    npx playwright install-deps chromium
+RUN npx playwright install-deps chromium && \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npx playwright install chromium
 
-# =============================================================================
-# ImageMagick Policy (allow PDF operations)
-# =============================================================================
 RUN if [ -f /etc/ImageMagick-6/policy.xml ]; then \
     sed -i 's/rights="none" pattern="PDF"/rights="read|write" pattern="PDF"/' /etc/ImageMagick-6/policy.xml; \
     fi
 
 # =============================================================================
-# CUSTOMIZATION: Mount Points
+# Finalize
 # =============================================================================
-RUN mkdir -p \
-    /mnt/uploads \
-    /mnt/outputs \
-    /mnt/skills
+RUN ln -sf /usr/bin/python3 /usr/bin/python
 
-# =============================================================================
-# Working Directory (running as root)
-# =============================================================================
+RUN mkdir -p /mnt/uploads /mnt/outputs /mnt/skills
+
 WORKDIR /home/openagent
 USER root
 
-# =============================================================================
-# Default command
-# =============================================================================
 CMD ["/bin/sh"]

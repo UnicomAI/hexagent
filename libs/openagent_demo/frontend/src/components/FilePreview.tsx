@@ -1195,7 +1195,7 @@ export default function FilePreview({ visible }: { visible: boolean }) {
 
     // Restore right panel synchronously so its transition starts in the same
     // paint frame as the preview collapse — prevents the "breathe" effect.
-    if (state.rightPanelBeforePreview === true) {
+    if (state.rightPanelBeforePreview === true && state.activeConversationId) {
       dispatch({ type: "SET_RIGHT_PANEL", payload: true });
     }
 

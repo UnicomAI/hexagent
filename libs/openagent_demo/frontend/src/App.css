@@ -132,7 +132,7 @@
 .sidebar-brand {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   overflow: hidden;
   min-width: 0;
 }
@@ -1537,8 +1537,13 @@
   gap: 3px;
 }
 
-.tool-status.is-running {
+.tool-status.is-streaming {
   color: var(--text-secondary);
+  font-style: italic;
+}
+
+.tool-status.is-running {
+  color: var(--warning, #f59e0b);
   font-style: italic;
 }
 
@@ -1585,6 +1590,12 @@
   background: var(--bg-primary);
   border-radius: 8px;
   padding: 10px 14px;
+}
+
+.tool-box.is-streaming .tool-pre {
+  white-space: pre;
+  word-break: normal;
+  overflow-x: auto;
 }
 
 .tool-box-label {
@@ -3450,24 +3461,29 @@
   align-items: center;
   gap: 8px;
   padding: 9px 16px;
-  border-radius: 10px;
+  border-radius: 8px;
   font-size: var(--font-sm);
   font-weight: 500;
-  color: var(--text-muted);
-  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  background: transparent;
   border: 1px solid var(--border);
-  transition: all 200ms ease;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 
-.settings-theme-btn:hover {
-  border-color: var(--border-hover);
-  color: var(--text-secondary);
+.settings-theme-btn:not(.active):hover {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+  background: rgba(128,128,128,0.06);
 }
 
 .settings-theme-btn.active {
-  background: var(--accent-bg);
+  background: rgba(var(--accent-rgb, 99,102,241), 0.06);
   border-color: var(--accent);
-  color: var(--text-primary);
+  color: var(--accent);
+}
+.settings-theme-btn.active:hover {
+  background: rgba(var(--accent-rgb, 99,102,241), 0.12);
 }
 
 .settings-theme-icon {
@@ -4542,6 +4558,7 @@
   to { transform: rotate(360deg); }
 }
 
+.spin,
 .model-save-spinner {
   animation: spin 1s linear infinite;
 }
@@ -5019,7 +5036,7 @@
 }
 
 .sb-card-status--ok {
-  color: rgb(16, 185, 129);
+  color: var(--success);
 }
 
 .sb-card-status--warn {
@@ -5116,6 +5133,294 @@
   border-color: var(--border-hover);
   color: var(--text-primary);
   background: var(--bg-hover);
+}
+
+/* ── VM install section ── */
+
+.vm-install-section {
+  padding: 2px 0 4px;
+}
+
+.vm-install-hint {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.vm-install-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.vm-install-btn:hover {
+  opacity: 0.85;
+}
+
+.vm-install-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.vm-install-error {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--error);
+}
+
+.vm-install-btn--secondary {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+.vm-install-btn--secondary:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+/* ── VM Setup Phases ── */
+
+.vm-ready-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 2px 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.vm-setup-phases {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0;
+}
+
+.vm-phase {
+  padding: 8px 10px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+.vm-phase--active {
+  background: var(--bg-hover, rgba(128,128,128,0.06));
+}
+
+.vm-phase-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.vm-phase-dot {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  box-sizing: border-box;
+}
+.vm-phase-dot--pending {
+  border-color: var(--text-tertiary, var(--border));
+}
+
+.vm-phase-icon--done { color: var(--success); }
+.vm-phase-icon--error { color: var(--error); }
+
+.vm-phase-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.vm-phase-msg {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  max-width: 55%;
+}
+
+/* Inline action buttons within a phase row */
+.vm-phase-action {
+  margin-left: auto;
+  padding: 0 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.vm-phase-action:hover { opacity: 0.85; }
+
+.vm-phase-action--retry {
+  background: rgba(var(--accent-rgb, 99,102,241), 0.1);
+  color: var(--accent);
+}
+.vm-phase-action--retry:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.vm-phase-action--stop {
+  background: rgba(128,128,128,0.1);
+  color: var(--text-secondary);
+}
+.vm-phase-action--stop:hover {
+  background: rgba(128,128,128,0.18);
+  color: var(--text-primary);
+}
+
+.vm-phase-action--secondary {
+  background: rgba(128,128,128,0.1);
+  color: var(--text-secondary);
+  margin-left: 4px;
+}
+.vm-phase-action--secondary:hover {
+  background: rgba(128,128,128,0.18);
+  color: var(--text-primary);
+}
+
+.vm-phase-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 8px;
+  border-radius: 10px;
+}
+.vm-phase-badge--done {
+  background: rgba(56, 161, 105, 0.12);
+  color: var(--success);
+}
+.vm-phase-badge--error {
+  background: rgba(229, 62, 62, 0.12);
+  color: var(--error);
+}
+
+.vm-phase-error {
+  margin: 4px 0 0 22px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--error);
+}
+
+.vm-phase-detail {
+  margin: 6px 0 2px 22px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vm-setup-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 2px 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Provision Step List ── */
+
+.vm-provision-steps {
+  margin: 6px 0 4px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.vm-prov-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.vm-prov-step-icon {
+  display: flex;
+  align-items: center;
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.vm-prov-step--done .vm-prov-step-icon { color: var(--success); }
+.vm-prov-step--running .vm-prov-step-icon { color: var(--accent); }
+.vm-prov-step--error .vm-prov-step-icon { color: var(--error); }
+.vm-prov-step--pending .vm-prov-step-icon { color: var(--text-tertiary, var(--border)); }
+
+.vm-prov-step-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-tertiary, var(--border));
+  margin: 0 3px;
+}
+
+.vm-prov-step-label {
+  color: var(--text-primary);
+}
+.vm-prov-step--pending .vm-prov-step-label {
+  color: var(--text-tertiary, var(--text-secondary));
+}
+
+.vm-prov-step-msg {
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  margin-left: auto;
+  max-width: 50%;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vm-prov-step-msg--error {
+  color: var(--error);
+}
+
+.vm-provision-log {
+  margin: 8px 0 4px 22px;
+  padding: 10px;
+  max-height: 200px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--bg-code, rgba(0,0,0,0.04));
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-secondary);
 }
 
 /* ── Folder permission dialog ── */
@@ -6632,6 +6937,12 @@
   justify-content: center;
 }
 
+.setup-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .setup-btn {
   display: inline-flex;
   align-items: center;
@@ -6763,6 +7074,197 @@
   padding: 8px 0 0;
 }
 
+/* ── VM setup phases inside onboarding wizard ── */
+
+.setup-vm-phases {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 6px;
+}
+
+.setup-vm-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 0;
+  font-size: 12.5px;
+}
+
+.setup-vm-dot {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.setup-vm-icon--done { color: var(--success, #38a169); flex-shrink: 0; }
+.setup-vm-icon--error { color: var(--error, #e53e3e); flex-shrink: 0; }
+
+.setup-vm-label {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+}
+
+.setup-vm-badge {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--success, #38a169);
+}
+
+.setup-vm-msg {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 50%;
+  text-align: right;
+}
+
+.setup-vm-error {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 2px 20px;
+  font-size: 11.5px;
+  color: var(--error, #e53e3e);
+}
+
+.setup-vm-hint {
+  margin: 4px 0 0 20px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.setup-btn--link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+}
+.setup-btn--link:hover {
+  text-decoration: underline;
+}
+
+/* Skip button (red outline) */
+.setup-btn--skip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 20px;
+  font-size: 13.5px;
+  font-weight: 500;
+  border: 1px solid var(--error, #e53e3e);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--error, #e53e3e);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.setup-btn--skip:hover {
+  background: var(--error, #e53e3e);
+  color: #fff;
+}
+
+/* Danger button (solid red) */
+.setup-btn--danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 20px;
+  font-size: 13.5px;
+  font-weight: 500;
+  border: 1px solid var(--error, #e53e3e);
+  border-radius: 8px;
+  background: var(--error, #e53e3e);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.setup-btn--danger:hover {
+  opacity: 0.85;
+}
+
+/* Skip confirmation popup */
+.setup-skip-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+  animation: setupFadeIn 150ms ease;
+}
+
+.setup-skip-popup {
+  width: 400px;
+  max-width: 90vw;
+  padding: 20px 22px;
+  border-radius: 12px;
+  background: var(--bg-primary, #fff);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+  animation: setupSlideIn 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.setup-skip-title--recommend {
+  color: var(--accent, #6366f1);
+}
+
+.setup-deps-desc {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.setup-deps-desc:last-of-type {
+  margin-bottom: 14px;
+}
+
+.setup-skip-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--error, #e53e3e);
+}
+
+.setup-skip-list {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.setup-skip-list li {
+  margin-bottom: 4px;
+}
+.setup-skip-list li:last-child {
+  margin-bottom: 0;
+}
+
+.setup-skip-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.setup-skip-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .setup-compute-status-dot {
   width: 6px;
   height: 6px;
@@ -6823,4 +7325,102 @@
   color: var(--text-muted);
   text-align: center;
   margin: 0 0 4px;
+}
+
+/* ── Onboarding Welcome Page ── */
+
+.setup-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.setup-welcome-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.setup-welcome-logo {
+  border-radius: 10px;
+}
+
+.setup-welcome-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
+}
+
+.setup-welcome-tagline {
+  margin: 0 0 28px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.setup-welcome-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  text-align: left;
+}
+
+.setup-welcome-input {
+  text-align: center;
+  font-size: 15px;
+}
+
+.setup-welcome-cta {
+  margin-top: 24px;
+  padding: 10px 32px;
+  font-size: 14px;
+}
+
+/* Theme selector in onboarding */
+.setup-theme-options {
+  display: flex;
+  gap: 6px;
+}
+
+.setup-theme-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  justify-content: center;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.setup-theme-btn:not(.setup-theme-btn--active):hover {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+  background: rgba(128,128,128,0.06);
+}
+.setup-theme-btn--active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(var(--accent-rgb, 99,102,241), 0.06);
+}
+.setup-theme-btn--active:hover {
+  background: rgba(var(--accent-rgb, 99,102,241), 0.12);
+}
+
+.setup-field-icon {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-tertiary, var(--text-secondary));
+  pointer-events: none;
 }

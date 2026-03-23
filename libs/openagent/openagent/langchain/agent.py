@@ -175,9 +175,23 @@ class Agent:
             yield event
 
     async def aclose(self) -> None:
-        """Release all owned resources (MCP connections, etc.)."""
+        """Release all owned resources (MCP connections, etc.).
+
+        Tolerates being called from a different task scope than where the
+        agent was created.  Some transports (anyio-based MCP clients)
+        enforce task-scope boundaries on their task-group teardown, which
+        raises ``RuntimeError`` when ``AsyncExitStack`` unwinds cross-task.
+        The individual resources still perform their logical cleanup
+        (e.g. HTTP DELETE to MCP servers); the error only affects the
+        transport-level teardown, which is safe to skip.
+        """
         await self._task_registry.cancel_all()
-        await self._resources.aclose()
+        try:
+            await self._resources.aclose()
+        except RuntimeError:
+            logger.debug(
+                "AsyncExitStack raised RuntimeError during cross-task aclose — transport teardown skipped (resources already logically closed).",
+            )
 
     async def __aenter__(self) -> Self:
         """Enter the async context manager."""

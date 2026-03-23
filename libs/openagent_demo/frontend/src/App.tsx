@@ -1,6 +1,6 @@
 import { useReducer, useEffect, useCallback, useRef, useState } from "react";
 import { AppContext, initialState, reducer } from "./store";
-import { listConversations, createConversation, createWarmSession, deleteWarmSession, sendMessage, getServerConfig } from "./api";
+import { listConversations, createConversation, createWarmSession, deleteWarmSession, sendMessage, getServerConfig, getVMStatus } from "./api";
 import { useSettings } from "./hooks/useSettings";
 import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
@@ -55,7 +55,7 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const initialLoadDone = useRef(false);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
 
   useEffect(() => {
     // Parse conversation ID from URL (e.g. /chat/{id} or /cowork/{id}).
@@ -70,16 +70,19 @@ function App() {
         if (urlConvId && conversations.some((c) => c.id === urlConvId)) {
           dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: urlConvId });
         }
-        initialLoadDone.current = true;
+        setInitialLoadDone(true);
       })
       .catch(() => {
-        initialLoadDone.current = true;
+        setInitialLoadDone(true);
       });
     getServerConfig()
       .then((cfg) => {
         dispatch({ type: "SET_SERVER_CONFIG", payload: cfg });
         if (cfg.models.length === 0) setSetupNeeded(true);
       })
+      .catch(() => {});
+    getVMStatus()
+      .then((vs) => dispatch({ type: "SET_VM_STATUS", payload: vs }))
       .catch(() => {});
   }, []);
 
@@ -115,7 +118,7 @@ function App() {
   // Sync URL when active conversation changes (skip until initial load completes
   // to avoid overwriting the URL-derived mode with the default "chat")
   useEffect(() => {
-    if (!initialLoadDone.current) return;
+    if (!initialLoadDone) return;
     if (state.activeConversationId) {
       const conv = state.conversations.find((c) => c.id === state.activeConversationId);
       const mode = conv?.mode || state.selectedMode;
@@ -157,12 +160,18 @@ function App() {
       warmSessionPromiseRef.current = null;
       return;
     }
-    if (!initialLoadDone.current) return;
+    if (!initialLoadDone) return;
     if (warmingRef.current) return;
     if (state.warmSessionId) return; // already have one
-    warmingRef.current = true;
 
     const mode = state.selectedMode;
+
+    // Skip warm session for cowork mode when VM is not ready — avoids
+    // hitting the backend and getting a guaranteed failure.
+    // Also skip when vmStatus hasn't been fetched yet (null).
+    if (mode === "cowork" && (!state.vmStatus || !state.vmStatus.vm_ready)) return;
+
+    warmingRef.current = true;
     const modelId = state.selectedModelId || undefined;
     const p = createWarmSession(mode, modelId)
       .then((session) => {
@@ -178,7 +187,7 @@ function App() {
       })
       .finally(() => { warmingRef.current = false; });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.activeConversationId, state.warmSessionId, state.selectedMode]);
+  }, [state.activeConversationId, state.warmSessionId, state.selectedMode, state.vmStatus, initialLoadDone]);
 
   // Tear down backend warm session when it's cleared by mode switch
   useEffect(() => {
@@ -335,6 +344,16 @@ function App() {
     (c) => c.id === state.activeConversationId
   );
 
+  // Per-conversation right panel visibility
+  const rightPanelVisible = state.activeConversationId
+    ? (state.rightPanelByConversation[state.activeConversationId] ?? false)
+    : false;
+
+  // Only pass streaming blocks when viewing the conversation that owns the stream
+  const activeStreamingBlocks =
+    state.isStreaming && state.streamingConversationId === state.activeConversationId
+      ? state.streamingBlocks
+      : undefined;
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>
@@ -355,9 +374,9 @@ function App() {
           onOpenSettings={openSettings}
           rightPanel={
             <RightPanel
-              visible={state.rightPanelVisible}
+              visible={rightPanelVisible}
               conversation={activeConversation ?? null}
-              streamingBlocks={state.isStreaming ? state.streamingBlocks : undefined}
+              streamingBlocks={activeStreamingBlocks}
             />
           }
         />
@@ -365,6 +384,8 @@ function App() {
       <OnboardingWizard
         open={setupNeeded}
         onComplete={() => setSetupNeeded(false)}
+        settings={settings}
+        onSettingsChange={setSettings}
       />
       <SettingsModal
         open={settingsOpen}

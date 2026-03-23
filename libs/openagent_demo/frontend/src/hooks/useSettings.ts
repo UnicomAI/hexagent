@@ -9,7 +9,7 @@ const STORAGE_KEY = "openagent-settings";
 
 const DEFAULT_SETTINGS: Settings = {
   fullName: "",
-  theme: "dark",
+  theme: "system",
 };
 
 function loadSettings(): Settings {

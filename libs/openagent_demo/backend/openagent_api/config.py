@@ -13,10 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_config_path() -> Path:
-    """Resolve config.json path, preferring OPENAGENT_DATA_DIR if set."""
-    data_dir = os.environ.get("OPENAGENT_DATA_DIR")
-    if data_dir:
-        return Path(data_dir) / "config.json"
+    """Resolve config.json path.
+
+    Uses ``paths.data_dir()`` when ``OPENAGENT_DATA_DIR`` is set (production /
+    Electron), otherwise falls back to ``backend/config.json`` next to the
+    package for local development convenience.
+    """
+    from openagent_api.paths import data_dir
+
+    data = os.environ.get("OPENAGENT_DATA_DIR")
+    if data:
+        return data_dir() / "config.json"
     return Path(__file__).resolve().parent.parent / "config.json"
 
 

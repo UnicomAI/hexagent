@@ -147,31 +147,7 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
           (outside the sliding aside). On wide screens it's static inside the clip. */}
       <div className="sidebar-header">
         <div className="sidebar-brand sidebar-fadeable">
-          <svg className="sidebar-brand-logo" width="26" height="26" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              {/* top face: lit from above — lightest, blue-silver highlight */}
-              <linearGradient id="gt" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stopColor="#c8daf4"/>
-                <stop offset="100%" stopColor="#a4c0ee"/>
-              </linearGradient>
-              {/* left face: shadow side — deeper blue */}
-              <linearGradient id="gl" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#6a9fe0"/>
-                <stop offset="100%" stopColor="#5580c0"/>
-              </linearGradient>
-              {/* right face: mid-tone — blue with silver sheen */}
-              <linearGradient id="gr" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#8db4e8"/>
-                <stop offset="100%" stopColor="#7098d4"/>
-              </linearGradient>
-            </defs>
-            {/* top face */}
-            <path d="M50 8L85 27L50 46L15 27Z" fill="url(#gt)"/>
-            {/* left face */}
-            <path d="M12 31L47 50V88L12 69Z" fill="url(#gl)"/>
-            {/* right face */}
-            <path d="M88 31L53 50V88L88 69Z" fill="url(#gr)"/>
-          </svg>
+          <img className="sidebar-brand-logo" width="25" height="25" src="/favicon.svg" alt="OpenAgent" />
           <span className="sidebar-brand-text">OpenAgent</span>
         </div>
         <button

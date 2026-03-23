@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/images/logo.svg" alt="Open Agent"/>
+  <img src=".github/images/logo.svg" alt="Open Agent" width="300"/>
 </p>
 
 <p align="center">

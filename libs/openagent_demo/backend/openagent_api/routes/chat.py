@@ -16,6 +16,7 @@ import tempfile
 import time
 import urllib.parse
 import uuid
+from contextlib import aclosing
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File
@@ -29,6 +30,7 @@ from openagent.exceptions import VMMountConflictError
 from openagent_api.agent_manager import agent_manager
 from openagent_api.config import load_config
 from openagent_api.models import MessageRequest
+from openagent_api.paths import pdf_cache_dir, uploads_dir
 from openagent_api.store import store
 
 # Image extensions that should be passed as visual content to the LLM
@@ -61,7 +63,7 @@ def _content_disposition(disposition: str, filename: str) -> str:
         encoded = urllib.parse.quote(filename)
         return f"{disposition}; filename*=UTF-8''{encoded}"
 
-UPLOADS_DIR = Path(tempfile.gettempdir()) / "openagent_uploads"
+UPLOADS_DIR = uploads_dir()
 
 
 def _build_human_message(
@@ -272,7 +274,8 @@ async def send_message(conversation_id: str, body: MessageRequest) -> StreamingR
 
             input_dict = {"messages": messages}
 
-            async for event in agent_manager.stream_response(input_dict, conversation_id, model_id, mode=mode, session_name=session_name):
+            async with aclosing(agent_manager.stream_response(input_dict, conversation_id, model_id, mode=mode, session_name=session_name)) as stream:
+              async for event in stream:
                 # Skip internal tool completion events (e.g. web-search summarisation)
                 if INTERNAL_TOOL_TAG in event.get("tags", []):
                     continue
@@ -703,7 +706,7 @@ def _get_cache_dir() -> str:
     """Return (and create) a persistent cache directory for converted PDFs."""
     global _pdf_cache_dir  # noqa: PLW0603
     if _pdf_cache_dir is None:
-        _pdf_cache_dir = os.path.join(tempfile.gettempdir(), "openagent_pdf_cache")
+        _pdf_cache_dir = str(pdf_cache_dir())
     os.makedirs(_pdf_cache_dir, exist_ok=True)
     return _pdf_cache_dir
 
@@ -747,7 +750,12 @@ async def _convert_to_pdf(soffice_bin: str, src_path: str, out_dir: str) -> str:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    try:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise
 
     pdf_name = os.path.splitext(os.path.basename(src_path))[0] + ".pdf"
     pdf_path = os.path.join(out_dir, pdf_name)

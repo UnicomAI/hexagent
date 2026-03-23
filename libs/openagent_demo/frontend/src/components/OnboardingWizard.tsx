@@ -1,15 +1,19 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Eye, EyeOff, ArrowRight, ChevronDown, ChevronRight,
   Sparkles, Globe, ScrollText, Server, Monitor, Check,
+  CircleCheck, CircleAlert, Loader2, Sun, Moon,
 } from "lucide-react";
-import { getServerConfig, updateServerConfig } from "../api";
+import { getServerConfig, updateServerConfig, getVMStatus, installVMBackend, getVMBuildStatus, buildVM, getVMProvisionStatus, provisionVM } from "../api";
 import type { ServerConfig, ModelConfig } from "../api";
+import type { Settings } from "../hooks/useSettings";
 import { useAppContext } from "../store";
 
 interface OnboardingWizardProps {
   open: boolean;
   onComplete: () => void;
+  settings: Settings;
+  onSettingsChange: (s: Settings | ((prev: Settings) => Settings)) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,9 +74,9 @@ function autoDisplayName(modelId: string): string {
 // Step definitions
 // ---------------------------------------------------------------------------
 
-type Step = "welcome" | "model" | "summarizer" | "tools" | "compute" | "done";
+type Step = "welcome" | "provider" | "model" | "summarizer" | "tools" | "compute" | "done";
 
-const STEPS: Step[] = ["welcome", "model", "summarizer", "tools", "compute", "done"];
+const STEPS: Step[] = ["welcome", "provider", "model", "summarizer", "tools", "compute", "done"];
 
 function stepIndex(s: Step): number {
   return STEPS.indexOf(s);
@@ -80,7 +84,7 @@ function stepIndex(s: Step): number {
 
 // ---------------------------------------------------------------------------
 
-export default function OnboardingWizard({ open, onComplete }: OnboardingWizardProps) {
+export default function OnboardingWizard({ open, onComplete, settings, onSettingsChange }: OnboardingWizardProps) {
   const { dispatch } = useAppContext();
   const [step, setStep] = useState<Step>("welcome");
   const [saving, setSaving] = useState(false);
@@ -118,12 +122,96 @@ export default function OnboardingWizard({ open, onComplete }: OnboardingWizardP
   const [e2bKey, setE2bKey] = useState("");
   const [showE2bKey, setShowE2bKey] = useState(false);
 
-  // Load server config once
+  // VM setup (inline in compute step)
+  type PhaseStatus = "checking" | "pending" | "running" | "done" | "error";
+  const [vmSupported, setVmSupported] = useState<boolean | null>(null);
+  const [vmSkipped, setVmSkipped] = useState(false);
+  const [showSkipConfirm, setShowSkipConfirm] = useState(false);
+  const [showDepsPrompt, setShowDepsPrompt] = useState(false);
+  const [vmPhase1, setVmPhase1] = useState<PhaseStatus>("checking");
+  const [vmPhase1Msg, setVmPhase1Msg] = useState("");
+  const [vmPhase1Error, setVmPhase1Error] = useState("");
+  const [vmPhase2, setVmPhase2] = useState<PhaseStatus>("checking");
+  const [vmPhase2Msg, setVmPhase2Msg] = useState("");
+  const [vmPhase2Error, setVmPhase2Error] = useState("");
+  const [vmPhase3, setVmPhase3] = useState<PhaseStatus>("checking");
+  const buildCtrlRef = useRef<AbortController | null>(null);
+  const provCtrlRef = useRef<AbortController | null>(null);
+
+  const vmUsable = vmPhase1 === "done" && vmPhase2 === "done";
+
+  // Check VM status when entering compute step
+  useEffect(() => {
+    if (step !== "compute") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const vs = await getVMStatus();
+        if (cancelled) return;
+        if (!vs.supported) { setVmSupported(false); return; }
+        setVmSupported(true);
+        setVmPhase1(vs.installed ? "done" : "pending");
+
+        if (!vs.installed) { setVmPhase2("pending"); setVmPhase3("pending"); return; }
+
+        const bs = await getVMBuildStatus();
+        if (cancelled) return;
+        if (bs.vm_state === "Running") { setVmPhase2("done"); } else { setVmPhase2("pending"); return; }
+
+        const ps = await getVMProvisionStatus();
+        if (cancelled) return;
+        if (ps.markers?.provisioned) { setVmPhase3("done"); } else { setVmPhase3("pending"); }
+      } catch {
+        if (!cancelled) setVmSupported(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [step]);
+
+  const refreshAppVm = useCallback(() => {
+    getVMStatus()
+      .then((vs) => dispatch({ type: "SET_VM_STATUS", payload: vs }))
+      .catch(() => {});
+  }, [dispatch]);
+
+  const handleVmInstallEngine = async () => {
+    setVmPhase1("running"); setVmPhase1Error("");
+    setVmPhase1Msg("Starting...");
+    await installVMBackend(
+      (_s, msg) => setVmPhase1Msg(msg),
+      () => { setVmPhase1("done"); setVmPhase1Msg(""); refreshAppVm(); },
+      (msg) => { setVmPhase1("error"); setVmPhase1Msg(""); setVmPhase1Error(msg); },
+    );
+  };
+
+  const handleVmInstallInstance = () => {
+    setVmPhase2("running"); setVmPhase2Error("");
+    buildCtrlRef.current?.abort();
+    buildCtrlRef.current = buildVM(
+      (_s, msg) => setVmPhase2Msg(msg),
+      () => { setVmPhase2("done"); setVmPhase2Msg(""); refreshAppVm(); },
+      (msg) => { setVmPhase2("error"); setVmPhase2Msg(""); setVmPhase2Error(msg); },
+    );
+  };
+
+  const handleVmInstallDeps = () => {
+    setVmPhase3("running");
+    provCtrlRef.current?.abort();
+    provCtrlRef.current = provisionVM(
+      {
+        onDone() { setVmPhase3("done"); },
+        onError() { setVmPhase3("error"); },
+      },
+    );
+  };
+
+  // Load server config and reset name on open
   useEffect(() => {
     if (open) {
       getServerConfig().then(setConfig).catch(() => {});
+      onSettingsChange((prev) => ({ ...prev, fullName: "" }));
     }
-  }, [open]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!open) return null;
 
@@ -150,11 +238,6 @@ export default function OnboardingWizard({ open, onComplete }: OnboardingWizardP
       setError("Please go back and configure your AI model first");
       return;
     }
-    if (!e2bKey.trim()) {
-      setError("E2B API key is required. Please go back and enter it in the Compute step.");
-      return;
-    }
-
     setSaving(true);
     setError("");
 
@@ -227,14 +310,65 @@ export default function OnboardingWizard({ open, onComplete }: OnboardingWizardP
     <div className="setup-overlay">
       <div className="setup-modal">
 
-        {/* ── Welcome: provider picker ── */}
+        {/* ── Step 0: Welcome — Name & Theme ── */}
         {step === "welcome" && (
-          <div className="setup-step">
-            <div className="setup-icon">
-              <Sparkles size={28} />
+          <div className="setup-step setup-welcome">
+            <div className="setup-welcome-brand">
+              <img className="setup-welcome-logo" width="40" height="40" src="/favicon.svg" alt="" />
+              <h2 className="setup-welcome-title">OpenAgent</h2>
             </div>
-            <h2 className="setup-title">Welcome to OpenAgent</h2>
-            <p className="setup-subtitle">Connect an AI model to get started</p>
+            <p className="setup-welcome-tagline">Powered by OpenAgent harness</p>
+
+            <div className="setup-welcome-form">
+              <div className="setup-field">
+                <label className="setup-label">What should OpenAgent call you?</label>
+                <input
+                  className="setup-input setup-welcome-input"
+                  type="text"
+                  value={settings.fullName}
+                  onChange={(e) => onSettingsChange((prev) => ({ ...prev, fullName: e.target.value }))}
+                  placeholder="Your name"
+                  autoComplete="off"
+                  autoFocus
+                />
+              </div>
+
+              <div className="setup-field">
+                <label className="setup-label">Theme</label>
+                <div className="setup-theme-options">
+                  {(["light", "dark", "system"] as const).map((theme) => (
+                    <button
+                      key={theme}
+                      className={`setup-theme-btn ${settings.theme === theme ? "setup-theme-btn--active" : ""}`}
+                      type="button"
+                      onClick={() => onSettingsChange((prev) => ({ ...prev, theme }))}
+                    >
+                      {theme === "light" && <Sun size={14} />}
+                      {theme === "dark" && <Moon size={14} />}
+                      {theme === "system" && <Monitor size={14} />}
+                      <span>{theme.charAt(0).toUpperCase() + theme.slice(1)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <button className="setup-btn setup-btn--primary setup-welcome-cta" onClick={goNext}>
+              Get Started <ArrowRight size={14} />
+            </button>
+          </div>
+        )}
+
+        {/* ── Step 1: Provider selection ── */}
+        {step === "provider" && (
+          <div className="setup-step">
+            <div className="setup-step-header">
+              <Sparkles size={20} className="setup-step-icon" />
+              <div>
+                <h2 className="setup-title">AI Model</h2>
+                <p className="setup-subtitle">Choose your AI provider to get started</p>
+              </div>
+            </div>
 
             <div className="setup-providers">
               {PROVIDERS.map((p) => (
@@ -258,10 +392,14 @@ export default function OnboardingWizard({ open, onComplete }: OnboardingWizardP
             <p className="setup-footer">
               You can add more models later in Settings.
             </p>
+
+            <div className="setup-actions">
+              <button className="setup-btn setup-btn--ghost" onClick={goBack}>Back</button>
+            </div>
           </div>
         )}
 
-        {/* ── Step 1: Model credentials ── */}
+        {/* ── Step 2: Model credentials ── */}
         {step === "model" && selectedProvider && (
           <div className="setup-step">
             <div className="setup-step-header">
@@ -291,7 +429,7 @@ export default function OnboardingWizard({ open, onComplete }: OnboardingWizardP
                     onClick={() => setShowKey(!showKey)}
                     type="button"
                   >
-                    {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                    {showKey ? <Eye size={14} /> : <EyeOff size={14} />}
                   </button>
                 </div>
               </div>
@@ -374,7 +512,7 @@ export default function OnboardingWizard({ open, onComplete }: OnboardingWizardP
             </div>
 
             <div className="setup-actions">
-              <button className="setup-btn setup-btn--ghost" onClick={() => setStep("welcome")}>Back</button>
+              <button className="setup-btn setup-btn--ghost" onClick={() => setStep("provider")}>Back</button>
               <button
                 className="setup-btn setup-btn--primary"
                 onClick={goNext}
@@ -459,7 +597,7 @@ export default function OnboardingWizard({ open, onComplete }: OnboardingWizardP
                           onClick={() => setShowSumKey(!showSumKey)}
                           type="button"
                         >
-                          {showSumKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                          {showSumKey ? <Eye size={14} /> : <EyeOff size={14} />}
                         </button>
                       </div>
                     </div>
@@ -606,7 +744,7 @@ export default function OnboardingWizard({ open, onComplete }: OnboardingWizardP
                         placeholder={`${searchProvider} API key`}
                       />
                       <button className="setup-key-toggle" onClick={() => setShowSearchKey(!showSearchKey)} type="button">
-                        {showSearchKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                        {showSearchKey ? <Eye size={14} /> : <EyeOff size={14} />}
                       </button>
                     </div>
                   </div>
@@ -652,7 +790,7 @@ export default function OnboardingWizard({ open, onComplete }: OnboardingWizardP
                         placeholder={`${fetchProvider} API key`}
                       />
                       <button className="setup-key-toggle" onClick={() => setShowFetchKey(!showFetchKey)} type="button">
-                        {showFetchKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                        {showFetchKey ? <Eye size={14} /> : <EyeOff size={14} />}
                       </button>
                     </div>
                   </div>
@@ -708,42 +846,224 @@ export default function OnboardingWizard({ open, onComplete }: OnboardingWizardP
                       placeholder="e2b_..."
                     />
                     <button className="setup-key-toggle" onClick={() => setShowE2bKey(!showE2bKey)} type="button">
-                      {showE2bKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                      {showE2bKey ? <Eye size={14} /> : <EyeOff size={14} />}
                     </button>
                   </div>
                 </div>
               </div>
 
-              {/* Lima for Cowork mode */}
+              {/* VM for Cowork mode */}
               <div className="setup-compute-card">
                 <div className="setup-compute-header">
                   <Monitor size={16} />
                   <div className="setup-compute-info">
-                    <span className="setup-compute-name">Lima VM</span>
+                    <span className="setup-compute-name">Virtual Machine</span>
                     <span className="setup-compute-badge">Cowork mode</span>
                   </div>
                 </div>
                 <p className="setup-compute-desc">
-                  Local Linux VM for cowork sessions. Requires <a href="https://lima-vm.io" target="_blank" rel="noreferrer">Lima</a> to be installed on your machine.
-                  Setup can be done later via the CLI.
+                  Local Linux VM for cowork sessions. You can skip this and set it up later in Settings.
                 </p>
-                <div className="setup-compute-status">
-                  <span className="setup-compute-status-dot" />
-                  Configured separately — no action needed here
-                </div>
+
+                {vmSupported === false && (
+                  <div className="setup-compute-status">
+                    <span className="setup-compute-status-dot" />
+                    Not supported on this platform
+                  </div>
+                )}
+
+                {vmSupported && !vmSkipped && (
+                  <div className="setup-vm-phases">
+                    {/* Phase 1: VM Engine */}
+                    <div className="setup-vm-row">
+                      {vmPhase1 === "done" ? <CircleCheck size={13} className="setup-vm-icon--done" /> :
+                       vmPhase1 === "running" ? <Loader2 size={13} className="spin" /> :
+                       vmPhase1 === "error" ? <CircleAlert size={13} className="setup-vm-icon--error" /> :
+                       <span className="setup-vm-dot" />}
+                      <span className="setup-vm-label">VM Engine</span>
+                      {vmPhase1 === "done" && <span className="setup-vm-badge">Installed</span>}
+                      {vmPhase1 === "running" && vmPhase1Msg && <span className="setup-vm-msg">{vmPhase1Msg}</span>}
+                      {vmPhase1 === "pending" && (
+                        <button className="vm-phase-action" type="button" onClick={handleVmInstallEngine}>Install</button>
+                      )}
+                      {vmPhase1 === "error" && (
+                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={handleVmInstallEngine}>Retry</button>
+                      )}
+                    </div>
+                    {vmPhase1 === "error" && vmPhase1Error && (
+                      <p className="setup-vm-error"><CircleAlert size={11} /> {vmPhase1Error}</p>
+                    )}
+
+                    {/* Phase 2: VM Instance */}
+                    <div className="setup-vm-row">
+                      {vmPhase2 === "done" ? <CircleCheck size={13} className="setup-vm-icon--done" /> :
+                       vmPhase2 === "running" ? <Loader2 size={13} className="spin" /> :
+                       vmPhase2 === "error" ? <CircleAlert size={13} className="setup-vm-icon--error" /> :
+                       <span className="setup-vm-dot" />}
+                      <span className="setup-vm-label">VM Instance</span>
+                      {vmPhase2 === "done" && <span className="setup-vm-badge">Ready</span>}
+                      {vmPhase2 === "running" && vmPhase2Msg && <span className="setup-vm-msg">{vmPhase2Msg}</span>}
+                      {vmPhase2 === "pending" && vmPhase1 === "done" && (
+                        <button className="vm-phase-action" type="button" onClick={handleVmInstallInstance}>Install</button>
+                      )}
+                      {vmPhase2 === "error" && (
+                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={handleVmInstallInstance}>Retry</button>
+                      )}
+                    </div>
+                    {vmPhase2 === "error" && vmPhase2Error && (
+                      <p className="setup-vm-error"><CircleAlert size={11} /> {vmPhase2Error}</p>
+                    )}
+
+                    {/* Phase 3: System Dependencies */}
+                    <div className="setup-vm-row">
+                      {vmPhase3 === "done" ? <CircleCheck size={13} className="setup-vm-icon--done" /> :
+                       vmPhase3 === "running" ? <Loader2 size={13} className="spin" /> :
+                       vmPhase3 === "error" ? <CircleAlert size={13} className="setup-vm-icon--error" /> :
+                       <span className="setup-vm-dot" />}
+                      <span className="setup-vm-label">VM System Dependencies</span>
+                      {vmPhase3 === "done" && <span className="setup-vm-badge">Complete</span>}
+                      {vmPhase3 === "running" && <span className="setup-vm-msg">Installing...</span>}
+                      {vmPhase3 === "pending" && vmUsable && (
+                        <button className="vm-phase-action" type="button" onClick={handleVmInstallDeps}>Install in background</button>
+                      )}
+                      {vmPhase3 === "error" && (
+                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={handleVmInstallDeps}>Retry</button>
+                      )}
+                    </div>
+
+                    {vmUsable && vmPhase3 !== "done" && (
+                      <p className="setup-vm-hint">
+                        System dependencies install in the background — you can continue using OpenAgent while it runs.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {vmSupported && vmSkipped && (
+                  <>
+                    <div className="setup-compute-status">
+                      <span className="setup-compute-status-dot" />
+                      Skipped — you can set this up later in Settings
+                    </div>
+                    <button
+                      className="setup-btn--link"
+                      type="button"
+                      onClick={() => { setVmSkipped(false); setShowSkipConfirm(false); }}
+                    >
+                      Set up Cowork
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
-            <div className="setup-actions">
-              <button className="setup-btn setup-btn--ghost" onClick={goBack}>Back</button>
-              <button
-                className="setup-btn setup-btn--primary"
-                onClick={goNext}
-                disabled={!e2bKey.trim()}
-              >
-                Next <ArrowRight size={14} />
-              </button>
-            </div>
+            {/* Skip confirmation popup */}
+            {showSkipConfirm && (
+              <div className="setup-skip-overlay" onClick={() => setShowSkipConfirm(false)}>
+                <div className="setup-skip-popup" onClick={(e) => e.stopPropagation()}>
+                  <p className="setup-skip-title">Are you sure you want to skip?</p>
+                  <ul className="setup-skip-list">
+                    {!e2bKey.trim() && (
+                      <li>Without an <strong>E2B API key</strong>, Chat mode will not be available.</li>
+                    )}
+                    {vmSupported && !vmUsable && !vmSkipped && (
+                      <li>Without a <strong>Virtual Machine</strong>, Cowork mode will not be available.</li>
+                    )}
+                    {vmUsable && vmPhase3 !== "done" && vmPhase3 !== "running" && (
+                      <li><strong>VM System Dependencies</strong> are not installed. Cowork mode will work but the agent may lack some tools. You can install them later in Settings (runs in the background).</li>
+                    )}
+                  </ul>
+                  <p className="setup-skip-note">You can configure these later in Settings.</p>
+                  <div className="setup-skip-actions">
+                    <button
+                      className="setup-btn setup-btn--ghost"
+                      type="button"
+                      onClick={() => setShowSkipConfirm(false)}
+                    >
+                      Go back
+                    </button>
+                    <button
+                      className="setup-btn setup-btn--danger"
+                      type="button"
+                      onClick={() => {
+                        if (!vmUsable && vmSupported) setVmSkipped(true);
+                        setShowSkipConfirm(false);
+                        goNext();
+                      }}
+                    >
+                      Skip anyway
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Deps recommendation popup */}
+            {showDepsPrompt && (
+              <div className="setup-skip-overlay" onClick={() => setShowDepsPrompt(false)}>
+                <div className="setup-skip-popup" onClick={(e) => e.stopPropagation()}>
+                  <p className="setup-skip-title setup-skip-title--recommend">Install system dependencies?</p>
+                  <p className="setup-deps-desc">
+                    Installing VM system dependencies is <strong>strongly recommended</strong>. It gives the agent access
+                    to tools like Python, Node.js, LaTeX, LibreOffice, and more.
+                  </p>
+                  <p className="setup-deps-desc">
+                    The installation runs in the background — you can start using OpenAgent immediately.
+                  </p>
+                  <div className="setup-skip-actions">
+                    <button
+                      className="setup-btn setup-btn--ghost"
+                      type="button"
+                      onClick={() => { setShowDepsPrompt(false); goNext(); }}
+                    >
+                      Continue without
+                    </button>
+                    <button
+                      className="setup-btn setup-btn--primary"
+                      type="button"
+                      onClick={() => { handleVmInstallDeps(); setShowDepsPrompt(false); goNext(); }}
+                    >
+                      Install & Continue
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {(() => {
+              const hasE2b = !!e2bKey.trim();
+              const vmReady = vmUsable || vmSkipped || vmSupported === false;
+              const canProceed = hasE2b && vmReady;
+              const anyVmRunning = vmPhase1 === "running" || vmPhase2 === "running" || vmPhase3 === "running";
+              const needsDepsPrompt = canProceed && vmUsable && vmPhase3 !== "done" && vmPhase3 !== "running";
+              const handleNext = () => {
+                if (needsDepsPrompt) { setShowDepsPrompt(true); return; }
+                goNext();
+              };
+              return (
+                <div className="setup-actions">
+                  <button className="setup-btn setup-btn--ghost" onClick={goBack}>Back</button>
+                  <div className="setup-actions-right">
+                    {!canProceed && !showSkipConfirm && (
+                      <button
+                        className="setup-btn setup-btn--skip"
+                        type="button"
+                        onClick={() => setShowSkipConfirm(true)}
+                      >
+                        Skip
+                      </button>
+                    )}
+                    <button
+                      className="setup-btn setup-btn--primary"
+                      onClick={handleNext}
+                      disabled={!canProceed || anyVmRunning}
+                    >
+                      Next <ArrowRight size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -796,6 +1116,13 @@ export default function OnboardingWizard({ open, onComplete }: OnboardingWizardP
                 <span className="setup-summary-label">E2B Sandbox</span>
                 <span className="setup-summary-value">
                   {e2bKey ? "Configured" : "Skipped"}
+                </span>
+              </div>
+              <div className="setup-summary-row">
+                <Monitor size={14} />
+                <span className="setup-summary-label">Virtual Machine</span>
+                <span className="setup-summary-value">
+                  {vmSkipped ? "Skipped" : vmUsable ? "Ready" : "Not set up"}
                 </span>
               </div>
             </div>

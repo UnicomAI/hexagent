@@ -6,20 +6,20 @@ import asyncio
 import logging
 import shutil
 import sys
-import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
 from openagent_api.agent_manager import agent_manager
 from openagent_api.models import ConversationCreateRequest, ConversationUpdateRequest
+from openagent_api.paths import uploads_dir
 from openagent_api.store import session_store, store
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-UPLOADS_DIR = Path(tempfile.gettempdir()) / "openagent_uploads"
+UPLOADS_DIR = uploads_dir()
 
 
 @router.post("/api/browse-folder")
@@ -32,7 +32,12 @@ async def browse_folder() -> dict:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return {"path": None}
         if proc.returncode != 0:
             return {"path": None}
         path = stdout.decode().strip().rstrip("/")
@@ -50,7 +55,12 @@ async def browse_folder() -> dict:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return {"path": None}
         if proc.returncode != 0:
             return {"path": None}
         path = stdout.decode().strip()

@@ -244,13 +244,17 @@ class TestStart:
         computer = RemoteE2BComputer(sandbox_id="expired-sandbox")
 
         mock_e2b_module.AsyncSandbox.connect = AsyncMock(side_effect=Exception("Sandbox not found"))
-        mock_e2b_module.AsyncSandbox.create = AsyncMock(return_value=mock_sandbox)
+        mock_e2b_module.AsyncSandbox.beta_create = AsyncMock(return_value=mock_sandbox)
 
         with patch.dict(sys.modules, {"e2b": mock_e2b_module}):
             await computer.start()
 
             mock_e2b_module.AsyncSandbox.connect.assert_called_once()
-            mock_e2b_module.AsyncSandbox.create.assert_called_once_with(None, timeout=SANDBOX_DEFAULT_LIFETIME_S)
+            mock_e2b_module.AsyncSandbox.beta_create.assert_called_once_with(
+                None,
+                timeout=SANDBOX_DEFAULT_LIFETIME_S,
+                auto_pause=True,
+            )
             assert computer._sandbox is mock_sandbox
             assert computer._sandbox_id == "sandbox-123"
 
@@ -259,12 +263,16 @@ class TestStart:
         """Test start() creates new sandbox when no sandbox_id."""
         computer = RemoteE2BComputer(template="my-template", lifetime=500)
 
-        mock_e2b_module.AsyncSandbox.create = AsyncMock(return_value=mock_sandbox)
+        mock_e2b_module.AsyncSandbox.beta_create = AsyncMock(return_value=mock_sandbox)
 
         with patch.dict(sys.modules, {"e2b": mock_e2b_module}):
             await computer.start()
 
-            mock_e2b_module.AsyncSandbox.create.assert_called_once_with("my-template", timeout=500)
+            mock_e2b_module.AsyncSandbox.beta_create.assert_called_once_with(
+                "my-template",
+                timeout=500,
+                auto_pause=True,
+            )
             assert computer._sandbox is mock_sandbox
             assert computer._sandbox_id == "sandbox-123"
             assert not computer._is_paused
@@ -274,7 +282,7 @@ class TestStart:
         """Test start() raises CLIError when sandbox creation fails."""
         computer = RemoteE2BComputer()
 
-        mock_e2b_module.AsyncSandbox.create = AsyncMock(side_effect=Exception("API error"))
+        mock_e2b_module.AsyncSandbox.beta_create = AsyncMock(side_effect=Exception("API error"))
 
         with (
             patch.dict(sys.modules, {"e2b": mock_e2b_module}),
@@ -288,7 +296,7 @@ class TestPause:
 
     @pytest.mark.usefixtures("mock_env")
     async def test_pause_sets_is_paused(self, mock_sandbox: MagicMock) -> None:
-        """Test _pause() pauses sandbox and sets flag."""
+        """Test _pause() pauses sandbox, clears stale reference, and sets flag."""
         computer = RemoteE2BComputer()
         computer._sandbox = mock_sandbox
         computer._is_paused = False
@@ -298,6 +306,7 @@ class TestPause:
         mock_sandbox.beta_pause.assert_called_once()
         assert computer._is_paused is True
         assert computer._sandbox_id == "sandbox-123"
+        assert computer._sandbox is None  # Stale SDK object must be released
 
     @pytest.mark.usefixtures("mock_env")
     async def test_pause_noop_when_already_paused(self, mock_sandbox: MagicMock) -> None:
@@ -399,12 +408,12 @@ class TestRun:
         """Test run() auto-starts sandbox if not running."""
         computer = RemoteE2BComputer()
 
-        mock_e2b_module.AsyncSandbox.create = AsyncMock(return_value=mock_sandbox)
+        mock_e2b_module.AsyncSandbox.beta_create = AsyncMock(return_value=mock_sandbox)
 
         with patch.dict(sys.modules, {"e2b": mock_e2b_module}):
             result = await computer.run("echo hello")
 
-            mock_e2b_module.AsyncSandbox.create.assert_called_once()
+            mock_e2b_module.AsyncSandbox.beta_create.assert_called_once()
             assert result.stdout == "output"
             assert result.exit_code == 0
 
@@ -420,6 +429,43 @@ class TestRun:
 
             mock_e2b_module.AsyncSandbox.connect.assert_called_once()
             assert result.stdout == "output"
+
+    @pytest.mark.usefixtures("mock_env")
+    async def test_run_reconnects_after_sandbox_expires(self, mock_sandbox: MagicMock, mock_e2b_module: MagicMock) -> None:
+        """Test run() reconnects when sandbox expired while idle."""
+        computer = RemoteE2BComputer()
+        computer._sandbox = mock_sandbox
+        computer._sandbox_id = "sandbox-123"
+        computer._is_paused = False
+
+        # get_info fails → sandbox expired/unreachable
+        mock_sandbox.get_info.side_effect = Exception("Sandbox not found")
+
+        # connect() resumes the (auto-paused) sandbox
+        new_sandbox = MagicMock()
+        new_sandbox.sandbox_id = "sandbox-123"
+        run_result = MagicMock()
+        run_result.stdout = "reconnected"
+        run_result.stderr = ""
+        run_result.exit_code = 0
+        new_sandbox.commands = MagicMock()
+        new_sandbox.commands.run = AsyncMock(return_value=run_result)
+        # get_info for the new sandbox shows plenty of time
+        new_info = MagicMock()
+        new_info.started_at = datetime.now(UTC)
+        new_info.end_at = datetime.now(UTC) + timedelta(seconds=600)
+        new_sandbox.get_info = AsyncMock(return_value=new_info)
+
+        mock_e2b_module.AsyncSandbox.connect = AsyncMock(return_value=new_sandbox)
+
+        with patch.dict(sys.modules, {"e2b": mock_e2b_module}):
+            result = await computer.run("echo hello")
+
+            # Should have reconnected via connect(), not created new
+            mock_e2b_module.AsyncSandbox.connect.assert_called_once()
+            assert result.stdout == "reconnected"
+            assert computer._sandbox is new_sandbox
+            assert not computer._is_paused
 
     @pytest.mark.usefixtures("mock_env")
     async def test_run_returns_result(self, mock_sandbox: MagicMock, mock_e2b_module: MagicMock) -> None:
@@ -598,16 +644,39 @@ class TestEnsureSandboxReady:
             mock_e2b_module.AsyncSandbox.connect.assert_called_once()
 
     @pytest.mark.usefixtures("mock_env")
-    async def test_handles_get_info_failure(self, mock_sandbox: MagicMock) -> None:
-        """Test continues when get_info fails."""
+    async def test_marks_paused_when_get_info_fails(self, mock_sandbox: MagicMock) -> None:
+        """Test marks sandbox as paused when get_info fails (sandbox unreachable)."""
         computer = RemoteE2BComputer()
         computer._sandbox = mock_sandbox
         computer._is_paused = False
 
         mock_sandbox.get_info.side_effect = Exception("API error")
 
-        # Should not raise, just continue
         await computer._ensure_sandbox_ready(command_timeout_s=60)
+
+        # Sandbox marked as paused for reconnection, ID preserved
+        assert computer._sandbox is None
+        assert computer._sandbox_id == "sandbox-123"
+        assert computer._is_paused is True
+
+    @pytest.mark.usefixtures("mock_env")
+    async def test_marks_paused_when_sandbox_expired(self, mock_sandbox: MagicMock) -> None:
+        """Test marks sandbox as paused when end_at is in the past."""
+        computer = RemoteE2BComputer()
+        computer._sandbox = mock_sandbox
+        computer._is_paused = False
+
+        info = MagicMock()
+        info.started_at = datetime.now(UTC) - timedelta(seconds=700)
+        info.end_at = datetime.now(UTC) - timedelta(seconds=100)  # Expired 100s ago
+        mock_sandbox.get_info.return_value = info
+
+        await computer._ensure_sandbox_ready(command_timeout_s=60)
+
+        # Sandbox marked as paused for reconnection, ID preserved
+        assert computer._sandbox is None
+        assert computer._sandbox_id == "sandbox-123"
+        assert computer._is_paused is True
 
 
 class TestPauseAndResume:
@@ -659,9 +728,10 @@ class TestPauseAndResume:
             with pytest.raises(CLIError, match="Failed to resume sandbox after pause"):
                 await computer._pause_and_resume()
 
-            # State should be cleared
+            # Sandbox is paused — ID preserved for retry, state reflects paused
             assert computer._sandbox is None
-            assert computer._sandbox_id is None
+            assert computer._sandbox_id == "sandbox-123"
+            assert computer._is_paused is True
 
 
 class TestUpload:
@@ -695,12 +765,12 @@ class TestUpload:
 
         mock_sandbox.files = MagicMock()
         mock_sandbox.files.write = AsyncMock()
-        mock_e2b_module.AsyncSandbox.create = AsyncMock(return_value=mock_sandbox)
+        mock_e2b_module.AsyncSandbox.beta_create = AsyncMock(return_value=mock_sandbox)
 
         with patch.dict(sys.modules, {"e2b": mock_e2b_module}):
             await computer.upload(str(src), "/sandbox/file.txt")
 
-        mock_e2b_module.AsyncSandbox.create.assert_called_once()
+        mock_e2b_module.AsyncSandbox.beta_create.assert_called_once()
 
     @pytest.mark.usefixtures("mock_env")
     async def test_upload_missing_src_raises_file_not_found(self, mock_sandbox: MagicMock, tmp_path: Path) -> None:
@@ -792,7 +862,7 @@ class TestContextManager:
     @pytest.mark.usefixtures("mock_env")
     async def test_context_manager_starts_and_stops(self, mock_sandbox: MagicMock, mock_e2b_module: MagicMock) -> None:
         """Test async with starts and stops sandbox."""
-        mock_e2b_module.AsyncSandbox.create = AsyncMock(return_value=mock_sandbox)
+        mock_e2b_module.AsyncSandbox.beta_create = AsyncMock(return_value=mock_sandbox)
 
         with patch.dict(sys.modules, {"e2b": mock_e2b_module}):
             async with RemoteE2BComputer() as computer:

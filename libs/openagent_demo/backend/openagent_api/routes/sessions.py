@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import shlex
 import shutil
-import tempfile
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pathlib import Path
@@ -15,13 +14,14 @@ from openagent.computer.base import SESSION_UPLOADS_DIR
 from openagent.exceptions import VMMountConflictError
 
 from openagent_api.agent_manager import agent_manager
+from openagent_api.paths import uploads_dir
 from openagent_api.store import session_store
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-UPLOADS_DIR = Path(tempfile.gettempdir()) / "openagent_uploads"
+UPLOADS_DIR = uploads_dir()
 
 
 class SessionCreateRequest(BaseModel):
