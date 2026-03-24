@@ -6,6 +6,7 @@ All tests mock the WSL backend — no wsl.exe or WSL2 required.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
 
@@ -16,8 +17,13 @@ import pytest
 
 from openagent.computer.base import BASH_MAX_TIMEOUT_MS, Computer
 from openagent.computer.local._types import ResolvedMount
-from openagent.computer.local._wsl import WslVM, _parse_status_output, _win_path_to_wsl
-from openagent.computer.local.vm_win import _VMSessionComputer
+from openagent.computer.local._wsl import (
+    WslVM,
+    _parse_status_output,
+    _session_user_from_guest_mount_path,
+    _win_path_to_wsl,
+)
+from openagent.computer.local.vm_win import LocalVM, _VMSessionComputer
 from openagent.exceptions import CLIError, MissingDependencyError, UnsupportedPlatformError, VMError, WslError
 from openagent.types import CLIResult
 
@@ -199,6 +205,26 @@ class TestRun:
         assert call_kwargs["cwd"] == "/sessions/test-session/mnt/project"
 
 
+class TestLocalVMComputerDefaultCwd:
+    """Tests for LocalVM.computer default working directory behavior."""
+
+    async def test_new_session_defaults_to_session_home(self) -> None:
+        backend = _mock_vm()
+        vm = object.__new__(LocalVM)
+        vm._vm = backend
+        vm._instance = "openagent"
+        vm._lock = asyncio.Lock()
+        vm._generate_unique_name = AsyncMock(return_value="alice")
+        vm._create_user = AsyncMock()
+
+        computer = await LocalVM.computer(vm)
+        await computer.run("pwd")
+
+        call_kwargs = backend.shell.call_args.kwargs
+        assert call_kwargs["user"] == "alice"
+        assert call_kwargs["cwd"] == "/sessions/alice"
+
+
 class TestUpload:
     """Tests for upload()."""
 
@@ -332,6 +358,7 @@ class TestWslVMInit:
         with (
             patch("openagent.computer.local._wsl._PLATFORM", "win32"),
             patch("shutil.which", return_value=None),
+            patch("pathlib.Path.is_file", return_value=False),
             pytest.raises(MissingDependencyError, match="wsl.exe"),
         ):
             WslVM(instance="test")
@@ -444,6 +471,20 @@ class TestWinPathToWsl:
             _win_path_to_wsl("relative/path")
 
 
+class TestSessionUserFromGuestMountPath:
+    """Tests for _session_user_from_guest_mount_path."""
+
+    def test_session_mnt_path(self) -> None:
+        assert _session_user_from_guest_mount_path("/sessions/alice/mnt/work") == "alice"
+
+    def test_trailing_slash(self) -> None:
+        assert _session_user_from_guest_mount_path("/sessions/bob/mnt/x/") == "bob"
+
+    def test_non_session_returns_none(self) -> None:
+        assert _session_user_from_guest_mount_path("/mnt/code") is None
+        assert _session_user_from_guest_mount_path("/sessions") is None
+
+
 # ===========================================================================
 # Mount config (JSON read/write)
 # ===========================================================================
@@ -486,15 +527,19 @@ class TestReadWriteMounts:
         assert result[0] == mounts[0]
         assert result[1] == mounts[1]
 
-    def test_write_raises_when_config_dir_missing(self, tmp_path: Path) -> None:
+    def test_write_creates_missing_config_dir(self, tmp_path: Path) -> None:
         vm = self._make_vm()
         missing_dir = tmp_path / "nonexistent"
+        config_path = missing_dir / "mounts.json"
 
         with (
             patch.object(type(vm), "_config_dir", new_callable=lambda: property(lambda self: missing_dir)),
-            pytest.raises(WslError, match="Config directory not found"),
+            patch.object(type(vm), "_config_path", new_callable=lambda: property(lambda self: config_path)),
         ):
-            vm.write_mounts([])
+            vm.write_mounts([ResolvedMount(host_path=r"C:\h", guest_path="/g", writable=False)])
+
+        assert missing_dir.exists()
+        assert config_path.exists()
 
 
 # ===========================================================================
@@ -524,7 +569,7 @@ class TestShellCommandBuilding:
     async def test_plain_command(self) -> None:
         args = await self._capture_exec_args()
         # wsl.exe -d test -- bash -c 'echo hello'
-        assert args[0] == "wsl.exe"
+        assert args[0].lower().endswith("wsl.exe")
         assert "-d" in args
         assert "test" in args
         assert "--" in args
@@ -663,6 +708,36 @@ class TestApplyBindMounts:
             mount_call_2 = mock_shell.call_args_list[4].args[0]
             assert "mount --bind" in mount_call_2
             assert "remount,ro" in mount_call_2
+
+    async def test_chown_after_writable_session_bind(self) -> None:
+        with (
+            patch("openagent.computer.local._wsl._PLATFORM", "win32"),
+            patch("shutil.which", return_value="C:\\Windows\\System32\\wsl.exe"),
+        ):
+            vm = WslVM(instance="test")
+
+        mounts = [
+            ResolvedMount(host_path=r"D:\w", guest_path="/sessions/alice/mnt/work", writable=True),
+        ]
+
+        with (
+            patch.object(vm, "read_mounts", return_value=mounts),
+            patch.object(vm, "shell", new_callable=AsyncMock) as mock_shell,
+        ):
+            mock_shell.side_effect = [
+                _fail(),  # mountpoint -q
+                _ok(),  # mount --bind
+                _ok(),  # chown -R alice:alice
+                _ok(stdout="/mnt/d/w"),  # findmnt
+            ]
+
+            await vm._apply_bind_mounts()
+
+            assert mock_shell.await_count == 4
+            chown_call = mock_shell.call_args_list[2].args[0]
+            assert "chown -R" in chown_call
+            assert "alice:alice" in chown_call
+            assert "/sessions/alice/mnt/work" in chown_call
 
     async def test_skips_already_mounted(self) -> None:
         with (

@@ -262,9 +262,25 @@ _WSL_COWORK_READY_STATES = frozenset(
 
 
 def _wsl_distro_ready_for_cowork(state: str | None) -> bool:
-    if state is None:
-        return False
-    return state.strip() in _WSL_COWORK_READY_STATES
+    """Return True if the cowork distro exists and has a non-empty state.
+
+    ``wsl -l -v`` localizes the STATE column by OS language, so exact
+    string matching is fragile. For cowork we only need the distro to
+    exist; WSL can start it on-demand when it's stopped.
+    """
+    return bool(state and state.strip())
+
+
+def _pick_wsl_source_distro(entries: list[dict[str, str]]) -> str | None:
+    """Pick an Ubuntu source distro name from installed WSL distributions.
+
+    Prefers an exact ``Ubuntu`` match, then falls back to common
+    versioned names such as ``Ubuntu-22.04`` / ``Ubuntu-24.04``.
+    """
+    exact = next((e["name"] for e in entries if e["name"].lower() == _WSL_EXPORT_SOURCE.lower()), None)
+    if exact:
+        return exact
+    return next((e["name"] for e in entries if e["name"].lower().startswith("ubuntu")), None)
 
 
 def _wsl_status() -> dict[str, object]:
@@ -736,8 +752,8 @@ class _BuildManager(_ProcessManager):
         # Distro does not exist: bootstrap from Ubuntu export.
         self._emit("progress", {"step": "creating", "message": "Preparing source distro (Ubuntu)..."})
         entries = await _wsl_list()
-        has_source = any(e["name"].lower() == _WSL_EXPORT_SOURCE.lower() for e in entries)
-        if not has_source:
+        source_distro = _pick_wsl_source_distro(entries)
+        if source_distro is None:
             proc = await asyncio.create_subprocess_exec(
                 wsl_exe, "--install", "-d", _WSL_EXPORT_SOURCE,
                 stdout=asyncio.subprocess.PIPE,
@@ -755,16 +771,26 @@ class _BuildManager(_ProcessManager):
                 self._error = f"exit {proc.returncode}"
                 return
             self._emit("progress", {"step": "creating", "message": "Ubuntu installed. Continuing..."})
+            entries = await _wsl_list()
+            source_distro = _pick_wsl_source_distro(entries)
+            if source_distro is None:
+                self._emit(
+                    "error",
+                    {"message": "Ubuntu distro was installed but could not be found in `wsl --list --verbose`."},
+                )
+                self._status = "error"
+                self._error = "Ubuntu source distro not found after install"
+                return
 
         export_root = deps_dir() / "wsl"
         export_root.mkdir(parents=True, exist_ok=True)
-        export_tar = export_root / f"{_WSL_EXPORT_SOURCE.lower()}-seed.tar"
+        export_tar = export_root / f"{source_distro.lower()}-seed.tar"
         import_dir = data_dir() / "wsl" / _WSL_INSTANCE / "disk"
         import_dir.mkdir(parents=True, exist_ok=True)
 
         self._emit("progress", {"step": "creating", "message": "Exporting Ubuntu rootfs..."})
         proc_export = await asyncio.create_subprocess_exec(
-            wsl_exe, "--export", _WSL_EXPORT_SOURCE, str(export_tar),
+            wsl_exe, "--export", source_distro, str(export_tar),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
