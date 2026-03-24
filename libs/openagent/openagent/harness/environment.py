@@ -72,13 +72,15 @@ class EnvironmentResolver:
         # Parse into a timezone-aware datetime.
         # Shell outputs ISO 8601 with numeric offset, e.g. "2026-02-14T10:30:00-0800".
         raw_dt = values[5]
-        if not raw_dt:
-            msg = f"Environment shell returned empty datetime (raw output: {result.stdout!r})"
-            raise ValueError(msg)
-        try:
-            now = datetime.strptime(raw_dt, "%Y-%m-%dT%H:%M:%S%z")
-        except ValueError:
-            now = datetime.strptime(raw_dt[:19], "%Y-%m-%dT%H:%M:%S")  # noqa: DTZ007
+        if raw_dt:
+            try:
+                now = datetime.strptime(raw_dt, "%Y-%m-%dT%H:%M:%S%z")
+            except ValueError:
+                now = datetime.strptime(raw_dt[:19], "%Y-%m-%dT%H:%M:%S")  # noqa: DTZ007
+        else:
+            # Some hosts occasionally return empty stdout for this probe.
+            # Degrade gracefully so environment detection does not block task execution.
+            now = datetime.now().astimezone()
 
         return EnvironmentContext(
             working_dir=values[0],

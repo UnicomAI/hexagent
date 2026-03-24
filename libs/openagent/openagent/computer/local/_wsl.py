@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import re
 import shlex
@@ -31,6 +32,8 @@ from openagent.computer.base import ExecutionMetadata
 from openagent.computer.local._types import ResolvedMount
 from openagent.exceptions import MissingDependencyError, UnsupportedPlatformError, WslError
 from openagent.types import CLIResult
+
+logger = logging.getLogger(__name__)
 
 # UNC path prefixes for accessing WSL filesystem from Windows.
 # Modern Windows 11 uses ``wsl.localhost``; older builds use ``wsl$``.
@@ -199,12 +202,11 @@ class WslVM:
         The change takes effect on the next distro restart (via
         ``apply_mounts`` or ``start``).
 
-        Raises:
-            WslError: If the config directory does not exist.
+        Creates the config directory if missing. This can happen when a distro
+        was installed outside ``build()`` (for example via setup migration or
+        manual WSL import) and cowork mounts are configured later.
         """
-        if not self._config_dir.exists():
-            msg = f"Config directory not found for instance '{self._instance}'"
-            raise WslError(msg)
+        self._config_dir.mkdir(parents=True, exist_ok=True)
 
         entries = [
             {
@@ -489,6 +491,8 @@ class WslVM:
         if not mounts:
             return
 
+        logger.debug("WSL applying %d bind mount(s) from mounts.json", len(mounts))
+
         for m in mounts:
             wsl_host = _win_path_to_wsl(m.host_path)
             qguest = shlex.quote(m.guest_path)
@@ -497,6 +501,12 @@ class WslVM:
             # Skip if already mounted.
             check = await self.shell(f"mountpoint -q {qguest}", user="root")
             if check.exit_code == 0:
+                logger.info(
+                    "WSL bind-mount already active: guest=%s wsl_source=%s host_win=%s",
+                    m.guest_path,
+                    wsl_host,
+                    m.host_path,
+                )
                 continue
 
             cmd = f"mkdir -p {qguest} && mount --bind {qhost} {qguest}"
@@ -507,6 +517,26 @@ class WslVM:
             if result.exit_code != 0:
                 msg = f"Failed to bind-mount {m.host_path} → {m.guest_path}: {result.stderr}"
                 raise WslError(msg)
+
+            # Post-verify so logs show whether the guest path is really a mount (debug empty ls issues).
+            verify = await self.shell(f"findmnt -n {qguest}", user="root")
+            if verify.exit_code == 0 and (verify.stdout or "").strip():
+                logger.info(
+                    "WSL bind-mount applied+verified: guest=%s host_win=%s findmnt=%s",
+                    m.guest_path,
+                    m.host_path,
+                    verify.stdout.strip().replace("\n", " | "),
+                )
+            else:
+                logger.warning(
+                    "WSL bind-mount mount(8) succeeded but findmnt could not confirm guest=%s "
+                    "(host_win=%s, wsl_source=%s, findmnt_exit=%s, findmnt_stderr=%s)",
+                    m.guest_path,
+                    m.host_path,
+                    wsl_host,
+                    verify.exit_code,
+                    (verify.stderr or "").strip() or "(empty)",
+                )
 
     async def _resolve_unc_prefix(self) -> str:
         r"""Resolve and cache the working UNC prefix for this system.

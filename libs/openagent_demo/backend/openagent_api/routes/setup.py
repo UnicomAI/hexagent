@@ -25,7 +25,7 @@ from typing import AsyncIterator
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, StreamingResponse
 
-from openagent_api.paths import deps_dir, vm_lima_dir, vm_setup_dir
+from openagent_api.paths import data_dir, deps_dir, vm_lima_dir, vm_setup_dir
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +156,107 @@ def _lima_status() -> dict[str, object]:
     return {"installed": False, "path": None, "managed": False}
 
 
+# ---------------------------------------------------------------------------
+# WSL (Windows)
+# ---------------------------------------------------------------------------
+
+_WSL_INSTANCE = "openagent"
+_WSL_EXPORT_SOURCE = "Ubuntu"
+
+
+def _wsl_cmd() -> str | None:
+    return shutil.which("wsl.exe") or shutil.which("wsl")
+
+
+def _decode_wsl_output(raw: bytes) -> str:
+    if raw[:2] == b"\xff\xfe" or b"\x00" in raw:
+        return raw.decode("utf-16-le", errors="replace").replace("\x00", "")
+    return raw.decode("utf-8", errors="replace")
+
+
+def _parse_wsl_list(text: str) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if "NAME" in stripped.upper() and "STATE" in stripped.upper():
+            continue
+        if stripped.startswith("*"):
+            stripped = stripped[1:].strip()
+        parts = stripped.split()
+        if len(parts) < 3:
+            continue
+        entries.append({"name": parts[0], "state": parts[1], "version": parts[2]})
+    return entries
+
+
+async def _wsl_list() -> list[dict[str, str]]:
+    if not _wsl_cmd():
+        return []
+    proc = await asyncio.create_subprocess_exec(
+        "wsl.exe",
+        "--list",
+        "--verbose",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out_b, _ = await proc.communicate()
+    if proc.returncode != 0:
+        return []
+    return _parse_wsl_list(_decode_wsl_output(out_b or b""))
+
+
+async def _wsl_instance_status() -> str | None:
+    entries = await _wsl_list()
+    for entry in entries:
+        if entry["name"].lower() == _WSL_INSTANCE.lower():
+            return entry["state"]
+    return None
+
+
+def _wsl_status() -> dict[str, object]:
+    wsl = _wsl_cmd()
+    return {"installed": bool(wsl), "path": wsl, "managed": False}
+
+
+def _win_path_to_wsl(path: Path | str) -> str:
+    s = str(path).replace("\\", "/")
+    m = re.match(r"^([A-Za-z]):(.*)$", s)
+    if not m:
+        raise ValueError(f"Unsupported Windows path for WSL conversion: {s}")
+    drive = m.group(1).lower()
+    rest = m.group(2)
+    if not rest.startswith("/"):
+        rest = "/" + rest
+    return f"/mnt/{drive}{rest}"
+
+
+async def _wsl_shell(cmd: str, *, timeout: float = 60) -> tuple[int, str, str]:
+    proc = await asyncio.create_subprocess_exec(
+        "wsl.exe",
+        "-d",
+        _WSL_INSTANCE,
+        "--",
+        "bash",
+        "-lc",
+        cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return 1, "", "Timed out"
+    return (
+        proc.returncode or 0,
+        (stdout_b or b"").decode("utf-8", errors="replace"),
+        (stderr_b or b"").decode("utf-8", errors="replace"),
+    )
+
+
 async def _install_lima_stream():
     """SSE generator that downloads and installs Lima."""
     def sse(event: str, data: dict[str, object]) -> str:
@@ -219,6 +320,35 @@ async def _install_lima_stream():
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+async def _install_wsl_stream():
+    """SSE generator that enables WSL on Windows."""
+    def sse(event: str, data: dict[str, object]) -> str:
+        return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+    wsl = _wsl_cmd()
+    if wsl:
+        yield sse("done", {"message": f"WSL already installed ({wsl})"})
+        return
+
+    yield sse("progress", {"step": "installing", "message": "Installing WSL components..."})
+    proc = await asyncio.create_subprocess_exec(
+        "wsl.exe",
+        "--install",
+        "--no-distribution",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out_b, err_b = await proc.communicate()
+    out = _decode_wsl_output(out_b or b"").strip()
+    err = _decode_wsl_output(err_b or b"").strip()
+    if proc.returncode != 0:
+        msg = err or out or "Failed to install WSL. Please run 'wsl --install' as Administrator."
+        yield sse("error", {"message": msg})
+        return
+
+    yield sse("done", {"message": "WSL installed. A reboot may be required before continuing."})
+
+
 # ---------------------------------------------------------------------------
 # Platform dispatch
 # ---------------------------------------------------------------------------
@@ -247,8 +377,7 @@ def _vm_status() -> dict[str, object]:
     if sys.platform == "darwin":
         return {"supported": True, "backend": "lima", **_lima_status()}
     if sys.platform == "win32":
-        # Placeholder for WSL support
-        return {"supported": True, "backend": "wsl", "installed": False}
+        return {"supported": True, "backend": "wsl", **_wsl_status()}
     return {"supported": False, "backend": None, "installed": False, "reason": f"No VM backend for {sys.platform}"}
 
 
@@ -272,7 +401,10 @@ async def get_vm_status() -> dict[str, object]:
     instance_status: str | None = None
     if result.get("installed"):
         try:
-            instance_status = await _lima_instance_status()
+            if result.get("backend") == "lima":
+                instance_status = await _lima_instance_status()
+            elif result.get("backend") == "wsl":
+                instance_status = await _wsl_instance_status()
             vm_ready = instance_status == "Running"
         except Exception:
             pass
@@ -298,8 +430,9 @@ async def install_vm_backend() -> StreamingResponse:
     backend = status["backend"]
     if backend == "lima":
         return StreamingResponse(_install_lima_stream(), media_type="text/event-stream")
+    if backend == "wsl":
+        return StreamingResponse(_install_wsl_stream(), media_type="text/event-stream")
 
-    # Future: WSL installation
     raise HTTPException(status_code=501, detail=f"Auto-install not yet supported for {backend}")
 
 
@@ -450,6 +583,12 @@ class _BuildManager(_ProcessManager):
     """Manages ``limactl start`` to create or boot the VM."""
 
     async def _run(self, **kwargs: object) -> None:
+        if sys.platform == "win32":
+            await self._run_wsl()
+            return
+        await self._run_lima()
+
+    async def _run_lima(self) -> None:
         instance_status = await _lima_instance_status()
 
         if instance_status == "Running":
@@ -501,6 +640,114 @@ class _BuildManager(_ProcessManager):
             self._status = "error"
             self._error = f"exit {proc.returncode}"
 
+    async def _run_wsl(self) -> None:
+        if not _wsl_cmd():
+            self._emit("error", {"message": "WSL is not installed. Install it first in Phase 1."})
+            self._status = "error"
+            self._error = "WSL missing"
+            return
+
+        status = await _wsl_instance_status()
+        if status == "Running":
+            self._emit("done", {"message": "WSL distro is already running"})
+            self._status = "done"
+            return
+
+        if status == "Stopped":
+            self._emit("progress", {"step": "starting", "message": "Starting existing WSL distro..."})
+            proc = await asyncio.create_subprocess_exec(
+                "wsl.exe", "-d", _WSL_INSTANCE, "--", "echo", "ok",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            self._process = proc
+            _, stderr_b = await proc.communicate()
+            if proc.returncode == 0:
+                self._emit("done", {"message": "WSL distro started successfully"})
+                self._status = "done"
+            else:
+                err = _decode_wsl_output(stderr_b or b"").strip()
+                self._emit("error", {"message": err or f"WSL start failed (exit {proc.returncode})"})
+                self._status = "error"
+                self._error = f"exit {proc.returncode}"
+            return
+
+        # Distro does not exist: bootstrap from Ubuntu export.
+        self._emit("progress", {"step": "creating", "message": "Preparing source distro (Ubuntu)..."})
+        entries = await _wsl_list()
+        has_source = any(e["name"].lower() == _WSL_EXPORT_SOURCE.lower() for e in entries)
+        if not has_source:
+            proc = await asyncio.create_subprocess_exec(
+                "wsl.exe", "--install", "-d", _WSL_EXPORT_SOURCE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            self._process = proc
+            out_b, err_b = await proc.communicate()
+            if proc.returncode != 0:
+                err = (_decode_wsl_output(err_b or b"") or _decode_wsl_output(out_b or b"")).strip()
+                self._emit(
+                    "error",
+                    {"message": err or "Failed to install Ubuntu distro. Try running `wsl --install -d Ubuntu` manually once."},
+                )
+                self._status = "error"
+                self._error = f"exit {proc.returncode}"
+                return
+            self._emit("progress", {"step": "creating", "message": "Ubuntu installed. Continuing..."})
+
+        export_root = deps_dir() / "wsl"
+        export_root.mkdir(parents=True, exist_ok=True)
+        export_tar = export_root / f"{_WSL_EXPORT_SOURCE.lower()}-seed.tar"
+        import_dir = data_dir() / "wsl" / _WSL_INSTANCE / "disk"
+        import_dir.mkdir(parents=True, exist_ok=True)
+
+        self._emit("progress", {"step": "creating", "message": "Exporting Ubuntu rootfs..."})
+        proc_export = await asyncio.create_subprocess_exec(
+            "wsl.exe", "--export", _WSL_EXPORT_SOURCE, str(export_tar),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        self._process = proc_export
+        _, err_b = await proc_export.communicate()
+        if proc_export.returncode != 0:
+            err = _decode_wsl_output(err_b or b"").strip()
+            self._emit("error", {"message": err or f"WSL export failed (exit {proc_export.returncode})"})
+            self._status = "error"
+            self._error = f"exit {proc_export.returncode}"
+            return
+
+        self._emit("progress", {"step": "creating", "message": "Importing OpenAgent WSL distro..."})
+        proc_import = await asyncio.create_subprocess_exec(
+            "wsl.exe", "--import", _WSL_INSTANCE, str(import_dir), str(export_tar), "--version", "2",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        self._process = proc_import
+        _, err_b = await proc_import.communicate()
+        if proc_import.returncode != 0:
+            err = _decode_wsl_output(err_b or b"").strip()
+            self._emit("error", {"message": err or f"WSL import failed (exit {proc_import.returncode})"})
+            self._status = "error"
+            self._error = f"exit {proc_import.returncode}"
+            return
+
+        self._emit("progress", {"step": "starting", "message": "Starting OpenAgent WSL distro..."})
+        proc_start = await asyncio.create_subprocess_exec(
+            "wsl.exe", "-d", _WSL_INSTANCE, "--", "echo", "ok",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        self._process = proc_start
+        _, err_b = await proc_start.communicate()
+        if proc_start.returncode == 0:
+            self._emit("done", {"message": "WSL distro created and started successfully"})
+            self._status = "done"
+        else:
+            err = _decode_wsl_output(err_b or b"").strip()
+            self._emit("error", {"message": err or f"WSL start failed (exit {proc_start.returncode})"})
+            self._status = "error"
+            self._error = f"exit {proc_start.returncode}"
+
     async def _stream_stderr(self, proc: asyncio.subprocess.Process) -> None:
         """Read limactl stderr line-by-line and emit progress events."""
         assert proc.stderr is not None
@@ -547,6 +794,12 @@ class _ProvisionManager(_ProcessManager):
     """Manages setup.sh execution inside the Lima VM."""
 
     async def _run(self, **kwargs: object) -> None:
+        if sys.platform == "win32":
+            await self._run_wsl(**kwargs)
+            return
+        await self._run_lima(**kwargs)
+
+    async def _run_lima(self, **kwargs: object) -> None:
         force = bool(kwargs.get("force", False))
 
         # 1. Verify VM is running
@@ -633,6 +886,65 @@ class _ProvisionManager(_ProcessManager):
             self._status = "error"
             self._error = f"exit {proc.returncode}"
 
+    async def _run_wsl(self, **kwargs: object) -> None:
+        force = bool(kwargs.get("force", False))
+        instance_status = await _wsl_instance_status()
+        if instance_status != "Running":
+            self._emit("error", {"message": f"WSL distro is not running (status: {instance_status})"})
+            self._status = "error"
+            self._error = "WSL distro not running"
+            return
+
+        self._emit("progress", {"step": "copying", "message": "Preparing setup files in WSL..."})
+        setup_dir = vm_setup_dir()
+        if not setup_dir.is_dir():
+            self._emit("error", {"message": f"Setup directory not found: {setup_dir}"})
+            self._status = "error"
+            self._error = "Setup dir not found"
+            return
+
+        setup_wsl = _win_path_to_wsl(setup_dir)
+        rc, _, err = await _wsl_shell(
+            f"sudo rm -rf {_SETUP_VM_DIR} && sudo mkdir -p {_SETUP_VM_DIR} && "
+            f"sudo cp -r {setup_wsl}/. {_SETUP_VM_DIR}/",
+            timeout=60,
+        )
+        if rc != 0:
+            self._emit("error", {"message": f"Failed to stage setup files in WSL: {err}"})
+            self._status = "error"
+            self._error = "Stage failed"
+            return
+
+        self._emit("progress", {"step": "starting", "message": "Starting provisioning..."})
+        cmd = f"sudo bash {_SETUP_VM_DIR}/setup.sh"
+        if force:
+            cmd += " --force"
+
+        proc = await asyncio.create_subprocess_exec(
+            "wsl.exe", "-d", _WSL_INSTANCE, "--", "bash", "-lc", cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        self._process = proc
+
+        assert proc.stdout is not None
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").strip()
+            if text.startswith("@@SETUP:"):
+                self._handle_setup_line(text)
+
+        await proc.wait()
+        if proc.returncode == 0:
+            self._emit("done", {"message": "Provisioning complete"})
+            self._status = "done"
+        else:
+            self._emit("error", {"message": f"Provisioning failed (exit {proc.returncode})"})
+            self._status = "error"
+            self._error = f"exit {proc.returncode}"
+
     def _handle_setup_line(self, line: str) -> None:
         """Parse @@SETUP:step_id:status:message and emit typed SSE events."""
         # Format: @@SETUP:<step_id>:<status>:<message>
@@ -656,11 +968,16 @@ class _ProvisionManager(_ProcessManager):
 
     async def check_markers(self) -> dict[str, object]:
         """Read VM-side marker files to determine provision state."""
-        instance_status = await _lima_instance_status()
+        if sys.platform == "win32":
+            instance_status = await _wsl_instance_status()
+            shell = _wsl_shell
+        else:
+            instance_status = await _lima_instance_status()
+            shell = _lima_shell
         if instance_status != "Running":
             return {"provisioned": False, "steps_done": [], "total_steps": len(_PROVISION_STEPS)}
 
-        rc, stdout, _ = await _lima_shell(f"ls {_SETUP_MARKER_DIR}/*.done 2>/dev/null || true")
+        rc, stdout, _ = await shell(f"ls {_SETUP_MARKER_DIR}/*.done 2>/dev/null || true")
         if rc != 0 or not stdout.strip():
             return {"provisioned": False, "steps_done": [], "total_steps": len(_PROVISION_STEPS)}
 
@@ -679,7 +996,8 @@ class _ProvisionManager(_ProcessManager):
 
     async def get_log(self) -> str:
         """Fetch the latest setup log from the VM."""
-        rc, stdout, _ = await _lima_shell(
+        shell = _wsl_shell if sys.platform == "win32" else _lima_shell
+        rc, stdout, _ = await shell(
             f"ls -t {_SETUP_LOG_DIR}/setup-*.log 2>/dev/null | head -1 | xargs cat 2>/dev/null | tail -500",
             timeout=15,
         )
@@ -718,7 +1036,8 @@ async def build_vm() -> StreamingResponse:
     """Create or start the VM. Streams SSE progress events."""
     status = _vm_status()
     if not status.get("installed"):
-        raise HTTPException(status_code=422, detail="VM backend (Lima) is not installed")
+        backend = status.get("backend") or "vm backend"
+        raise HTTPException(status_code=422, detail=f"VM backend ({backend}) is not installed")
 
     mgr = _get_build_manager()
     if mgr._status != "running":
@@ -732,7 +1051,10 @@ async def get_build_status() -> dict[str, object]:
     mgr = _get_build_manager()
     result = dict(mgr.status_dict())
     if mgr._status in ("idle", "done", "error"):
-        result["vm_state"] = await _lima_instance_status()
+        if sys.platform == "win32":
+            result["vm_state"] = await _wsl_instance_status()
+        else:
+            result["vm_state"] = await _lima_instance_status()
     return result
 
 

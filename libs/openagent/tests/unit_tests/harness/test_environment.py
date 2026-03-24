@@ -83,10 +83,10 @@ class TestResolve:
         assert env.today_date.year == 2026
         assert env.today_date.tzinfo is None
 
-    async def test_empty_datetime_raises(self) -> None:
+    async def test_empty_datetime_fallback_now(self) -> None:
         computer = _mock_computer(_make_stdout(date=""))
-        with pytest.raises(ValueError, match="empty datetime"):
-            await EnvironmentResolver(computer).resolve()
+        env = await EnvironmentResolver(computer).resolve()
+        assert isinstance(env.today_date, datetime)
 
     async def test_pads_missing_parts(self) -> None:
         """When stdout has fewer delimiters, missing fields are padded."""
@@ -94,9 +94,9 @@ class TestResolve:
         stdout = f"/home/user\n{_DELIM}\ntrue"
         computer = _mock_computer(stdout)
 
-        # Date will be empty → raises ValueError
-        with pytest.raises(ValueError, match="empty datetime"):
-            await EnvironmentResolver(computer).resolve()
+        # Date will be empty -> fallback to current time.
+        env = await EnvironmentResolver(computer).resolve()
+        assert isinstance(env.today_date, datetime)
 
     async def test_darwin_platform(self) -> None:
         computer = _mock_computer(_make_stdout(platform="darwin", os_version="Darwin 25.3.0"))

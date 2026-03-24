@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from typing import Any
 
 from collections.abc import AsyncIterator
@@ -48,12 +49,21 @@ class AgentManager:
         self._agent_locks: dict[tuple[str, str], asyncio.Lock] = {}
         # session_name -> (working_dir_source, mount_target)
         self._session_working_dirs: dict[str, tuple[str, str]] = {}
+        # Background warm-up task: auto-start VM manager after app startup.
+        self._vm_warm_task: asyncio.Task[None] | None = None
 
     def conversation_lock(self, conversation_id: str) -> asyncio.Lock:
         """Per-conversation lock to serialise prepare/send/mount operations."""
         if conversation_id not in self._conv_locks:
             self._conv_locks[conversation_id] = asyncio.Lock()
         return self._conv_locks[conversation_id]
+
+    @staticmethod
+    def _set_computer_default_cwd(computer: Any, cwd: str | None) -> None:
+        """Best-effort hook for session computers that support default cwd."""
+        setter = getattr(computer, "set_default_cwd", None)
+        if callable(setter):
+            setter(cwd)
 
     # ── Computer management ──
 
@@ -111,10 +121,15 @@ class AgentManager:
             if session_name and session_name in self._computers:
                 return self._computers[session_name], session_name
 
-            # Guard: check that limactl is available before attempting VM ops
+            # Guard: check that the platform VM backend is available before VM ops
             import shutil
 
-            if not shutil.which("limactl"):
+            vm_backend_ready = (
+                bool(shutil.which("wsl.exe") or shutil.which("wsl"))
+                if sys.platform == "win32"
+                else bool(shutil.which("limactl"))
+            )
+            if not vm_backend_ready:
                 raise RuntimeError(
                     "Cowork mode requires VM setup. "
                     "Please install and configure it in Settings \u2192 Sandbox."
@@ -134,10 +149,18 @@ class AgentManager:
                     from openagent.computer import Mount
 
                     session_mounts: list[Mount] | None = None
+                    default_cwd: str | None = None
                     if working_dir:
-                        session_mounts = [Mount(source=working_dir, target=Path(working_dir).name, writable=True)]
+                        mount_target = Path(working_dir).name
+                        session_mounts = [Mount(source=working_dir, target=mount_target, writable=True)]
+                        default_cwd = f"/sessions/{{session}}/mnt/{mount_target}"
                     logger.info("Creating new session (mounts=%s)...", session_mounts)
                     computer = await self._vm_manager.computer(mounts=session_mounts)
+                    if default_cwd is not None:
+                        self._set_computer_default_cwd(
+                            computer,
+                            default_cwd.format(session=computer.session_name),
+                        )
             except FileNotFoundError:
                 raise RuntimeError(
                     "Cowork mode requires VM setup. "
@@ -392,16 +415,38 @@ class AgentManager:
         from dotenv import load_dotenv
 
         load_dotenv()
-        # VM setup is lazy — _ensure_vm_manager() is called on demand
-        # when a cowork-mode conversation starts.
+        # Keep startup fast: warm VM in background (non-blocking). Cowork
+        # still lazily initializes on first use if warm-up fails.
+        self._schedule_vm_warmup()
+        logger.info("Agent manager initialized.")
+
+    def _schedule_vm_warmup(self) -> None:
+        """Best-effort background VM warm-up on supported hosts."""
+        if self._vm_warm_task is not None and not self._vm_warm_task.done():
+            return
+
+        import shutil
+
+        vm_backend_available = (
+            bool(shutil.which("wsl.exe") or shutil.which("wsl"))
+            if sys.platform == "win32"
+            else bool(shutil.which("limactl"))
+        )
+        if not vm_backend_available:
+            return
+
+        self._vm_warm_task = asyncio.create_task(self._warm_vm_manager())
+
+    async def _warm_vm_manager(self) -> None:
+        """Background VM initialization used to auto-start installed VMs."""
         try:
             await self._ensure_vm_manager()
+            logger.info("Background VM warm-up completed.")
         except Exception:
             logger.warning(
-                "VM manager not available (Lima not installed?). "
-                "Cowork mode will be unavailable; chat mode still works."
+                "Background VM warm-up failed; cowork mode will initialize VM on demand.",
+                exc_info=True,
             )
-        logger.info("Agent manager initialized.")
 
     async def ensure_agent(
         self,
@@ -451,6 +496,9 @@ class AgentManager:
 
     async def stop(self) -> None:
         """Shut down all agents and computers."""
+        if self._vm_warm_task is not None and not self._vm_warm_task.done():
+            self._vm_warm_task.cancel()
+            self._vm_warm_task = None
         for key, agent in self._agents.items():
             logger.info("Closing agent for %s...", key)
             await agent.aclose()
@@ -526,6 +574,8 @@ class AgentManager:
         mount = Mount(source=working_dir, target=new_target, writable=True)
         await self._vm_manager.mount([mount], session=session_name)
         self._session_working_dirs[session_name] = (working_dir, new_target)
+        computer = self._computers.get(session_name)
+        self._set_computer_default_cwd(computer, f"/sessions/{session_name}/mnt/{new_target}")
         logger.info("Mounted working dir %s for session %s", working_dir, session_name)
 
         # Remove the stale mount-point directory left behind after unmount.

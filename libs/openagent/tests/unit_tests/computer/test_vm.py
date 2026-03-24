@@ -195,7 +195,6 @@ class TestRun:
         with pytest.raises(CLIError, match="boom"):
             await computer.run("bad")
 
-
 class TestUpload:
     """Tests for upload()."""
 

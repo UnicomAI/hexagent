@@ -1684,7 +1684,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
       .catch(() => {});
   }, [dispatch]);
 
-  // Phase 1: Lima
+  // Phase 1: VM backend (Lima on macOS / WSL on Windows)
   const [vmStatus, setVmStatus] = useState<VMStatus | null>(null);
   const [phase1, setPhase1] = useState<PhaseStatus>("checking");
   const [phase1Msg, setPhase1Msg] = useState("");
@@ -1694,6 +1694,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
   const [phase2, setPhase2] = useState<PhaseStatus>("pending");
   const [phase2Msg, setPhase2Msg] = useState("");
   const [phase2Error, setPhase2Error] = useState("");
+  const [vmInstanceStopped, setVmInstanceStopped] = useState(false);
 
   // Phase 3: Provision
   const [phase3, setPhase3] = useState<PhaseStatus>("pending");
@@ -1738,7 +1739,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
       } catch { /* best effort — step defs come from backend constants */ }
 
       // Phase 1
-      let limaInstalled = false;
+      let vmBackendInstalled = false;
       try {
         const vs = await getVMStatus();
         if (cancelled) return;
@@ -1746,7 +1747,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
         if (!vs.supported) { setPhase1("error"); setPhase1Error("Not supported on this platform"); return; }
         if (vs.installed) {
           setPhase1("done");
-          limaInstalled = true;
+          vmBackendInstalled = true;
         } else {
           setPhase1("pending");
         }
@@ -1757,7 +1758,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
         return;
       }
 
-      if (!limaInstalled) return;
+      if (!vmBackendInstalled) return;
 
       // Phase 2
       let vmReady = false;
@@ -1766,15 +1767,19 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
         if (cancelled) return;
         if (bs.status === "running") {
           setPhase2("running");
+          setVmInstanceStopped(false);
           attachBuild();
         } else if (bs.vm_state === "Running") {
           setPhase2("done");
+          setVmInstanceStopped(false);
           vmReady = true;
         } else if (bs.vm_state === "Stopped") {
           setPhase2("pending");
+          setVmInstanceStopped(true);
           setPhase2Msg("VM exists but is stopped");
         } else {
           setPhase2("pending");
+          setVmInstanceStopped(false);
         }
       } catch {
         if (cancelled) return;
@@ -1815,8 +1820,8 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Phase 1: Install Lima ──
-  const handleInstallLima = async () => {
+  // ── Phase 1: Install VM backend ──
+  const handleInstallVmBackend = async () => {
     setPhase1("running");
     setPhase1Error("");
     setPhase1Msg("Starting installation...");
@@ -1846,6 +1851,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
       (_step, message) => setPhase2Msg(message),
       () => {
         setPhase2("done");
+        setVmInstanceStopped(false);
         setPhase2Msg("");
         refreshAppVmStatus(); // Unblocks cowork mode in the app
       },
@@ -1957,6 +1963,12 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
     }
   };
 
+  const inferredBackend = navigator.platform.toUpperCase().includes("WIN") ? "wsl" : "lima";
+  const vmBackend = vmStatus?.backend ?? inferredBackend;
+  const vmEngineLabel = vmBackend === "wsl" ? "WSL Engine" : "Lima Engine";
+  const vmBackendName = vmBackend === "wsl" ? "WSL" : "Lima";
+  const vmPlatformLabel = vmBackend === "wsl" ? "Windows only" : "macOS only";
+
   // Determine overall VM status for the card header
   // Cowork mode is usable once Lima is installed and VM is running (phases 1+2).
   // Phase 3 (dependency installation) is optional and can run in the background.
@@ -2027,7 +2039,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
             <div className="sb-card-title-row">
               <span className="sb-card-title">Virtual Machine</span>
               <span className="sb-card-badge sb-card-badge--cowork">Cowork mode</span>
-              <span className="sb-card-badge sb-card-badge--platform">macOS only</span>
+              <span className="sb-card-badge sb-card-badge--platform">{vmPlatformLabel}</span>
             </div>
             <span className="sb-card-desc">Local VM sandbox — runs agent code securely on your machine</span>
           </div>
@@ -2056,22 +2068,25 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
           {/* ── Setup in progress or not yet started ── */}
           {vmStatus && vmStatus.supported && !allDone && (
             <div className="vm-setup-phases">
-              {/* Phase 1: Lima */}
+              {/* Phase 1: VM backend */}
               <div className={`vm-phase ${phase1 === "running" ? "vm-phase--active" : ""}`}>
                 <div className="vm-phase-header">
                   {phaseIcon(phase1)}
-                  <span className="vm-phase-label">VM Engine</span>
+                  <span className="vm-phase-label">{vmEngineLabel}</span>
                   {phase1 === "done" && <span className="vm-phase-badge vm-phase-badge--done">Installed</span>}
                   {phase1 === "running" && phase1Msg && <span className="vm-phase-msg">{phase1Msg}</span>}
                   {phase1 === "pending" && (
-                    <button className="vm-phase-action" type="button" onClick={handleInstallLima}>Install</button>
+                    <button className="vm-phase-action" type="button" onClick={handleInstallVmBackend}>Install</button>
                   )}
                   {phase1 === "error" && (
-                    <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={handleInstallLima}>Retry</button>
+                    <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={handleInstallVmBackend}>Retry</button>
                   )}
                 </div>
                 {phase1 === "error" && phase1Error && (
                   <p className="vm-phase-error"><CircleAlert size={12} /> {phase1Error}</p>
+                )}
+                {phase1 === "done" && (
+                  <p className="vm-phase-detail">{vmBackendName} is installed and available.</p>
                 )}
               </div>
 
@@ -2083,7 +2098,9 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
                   {phase2 === "done" && <span className="vm-phase-badge vm-phase-badge--done">Ready</span>}
                   {phase2 === "running" && phase2Msg && <span className="vm-phase-msg">{phase2Msg}</span>}
                   {phase2 === "pending" && phase1 === "done" && (
-                    <button className="vm-phase-action" type="button" onClick={handleBuildVM}>Install</button>
+                    <button className="vm-phase-action" type="button" onClick={handleBuildVM}>
+                      {vmInstanceStopped ? "Start" : "Install"}
+                    </button>
                   )}
                   {phase2 === "error" && (
                     <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={handleBuildVM}>Retry</button>

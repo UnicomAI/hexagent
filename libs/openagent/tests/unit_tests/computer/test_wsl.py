@@ -179,6 +179,25 @@ class TestRun:
         with pytest.raises(CLIError, match="boom"):
             await computer.run("bad")
 
+    async def test_run_passes_default_cwd_to_vm_shell(self) -> None:
+        vm = _mock_vm()
+        computer = _VMSessionComputer(vm=vm, session_name="test-session", default_cwd="/sessions/test-session/mnt/code")
+
+        await computer.run("pwd")
+
+        call_kwargs = vm.shell.call_args.kwargs
+        assert call_kwargs["cwd"] == "/sessions/test-session/mnt/code"
+
+    async def test_set_default_cwd_updates_future_run_calls(self) -> None:
+        vm = _mock_vm()
+        computer = _make_computer(vm)
+        computer.set_default_cwd("/sessions/test-session/mnt/project")
+
+        await computer.run("pwd")
+
+        call_kwargs = vm.shell.call_args.kwargs
+        assert call_kwargs["cwd"] == "/sessions/test-session/mnt/project"
+
 
 class TestUpload:
     """Tests for upload()."""
@@ -626,20 +645,22 @@ class TestApplyBindMounts:
             mock_shell.side_effect = [
                 _fail(),  # mountpoint -q /mnt/code -> not mounted
                 _ok(),  # mount --bind ... /mnt/code
+                _ok(stdout="/mnt/c/Users/foo/code"),  # findmnt -n /mnt/code
                 _fail(),  # mountpoint -q /mnt/data -> not mounted
                 _ok(),  # mount --bind ... /mnt/data (+ remount ro)
+                _ok(stdout="/mnt/d/data"),  # findmnt -n /mnt/data
             ]
 
             await vm._apply_bind_mounts()
 
-            assert mock_shell.await_count == 4
+            assert mock_shell.await_count == 6
             # Check writable mount (no remount)
             mount_call_1 = mock_shell.call_args_list[1].args[0]
             assert "mount --bind" in mount_call_1
             assert "/mnt/c/Users/foo/code" in mount_call_1
             assert "remount,ro" not in mount_call_1
             # Check read-only mount (remount ro)
-            mount_call_2 = mock_shell.call_args_list[3].args[0]
+            mount_call_2 = mock_shell.call_args_list[4].args[0]
             assert "mount --bind" in mount_call_2
             assert "remount,ro" in mount_call_2
 
