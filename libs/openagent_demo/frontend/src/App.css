@@ -1543,7 +1543,7 @@
 }
 
 .tool-status.is-running {
-  color: var(--warning, #f59e0b);
+  color: var(--warning, #d4a847);
   font-style: italic;
 }
 
@@ -5711,6 +5711,12 @@
   color: var(--text-primary);
 }
 
+.toast-success {
+  background: var(--bg-primary);
+  border: 1px solid #22c55e;
+  color: #22c55e;
+}
+
 .toast-message {
   flex: 1;
   word-break: break-word;
@@ -5755,6 +5761,72 @@
   to {
     opacity: 0;
     transform: translateX(20px);
+  }
+}
+
+/* ===== VM Setup Floating Indicator ===== */
+
+.vm-floater {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9998;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  animation: vm-floater-in 0.3s ease-out;
+  max-width: 320px;
+}
+
+.vm-floater:hover {
+  border-color: var(--accent);
+}
+
+.vm-floater-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.vm-floater-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.vm-floater-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.vm-floater-msg {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vm-floater-arrow {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+@keyframes vm-floater-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

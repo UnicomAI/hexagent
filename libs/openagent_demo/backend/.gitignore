@@ -12,8 +12,9 @@ dist/
 build/
 *.egg
 
-# Virtual environments
+# Virtual environments (dev + build)
 .venv/
+.venv-build*/
 venv/
 env/
 

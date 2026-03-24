@@ -84,7 +84,16 @@ def pdf_cache_dir() -> Path:
 
 
 def vm_dir() -> Path:
-    """Root directory for VM assets (``libs/openagent/sandbox/vm/``)."""
+    """Root directory for VM assets (``libs/openagent/sandbox/vm/``).
+
+    In a PyInstaller bundle the sandbox tree is placed at
+    ``sys._MEIPASS/sandbox/vm/`` via ``--add-data``.
+    """
+    import sys  # noqa: PLC0415
+
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "sandbox" / "vm"  # type: ignore[attr-defined]
+
     import openagent  # noqa: PLC0415 — deferred to avoid circular import
 
     return Path(openagent.__file__).parent.parent / "sandbox" / "vm"

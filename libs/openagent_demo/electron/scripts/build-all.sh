@@ -29,40 +29,56 @@ ELECTRON_MIRROR="${ELECTRON_MIRROR:-}" npm install
 case "$TARGET" in
     mac-arm64)
         echo ""
-        echo "[2.5/3] Building backend (arm64)..."
+        echo "[2.5/4] Building backend (arm64)..."
         bash "$SCRIPT_DIR/build-backend.sh" arm64
 
         echo ""
-        echo "[3/3] Packaging macOS arm64 DMG..."
+        echo "[3/4] Packaging macOS arm64 app..."
         npx electron-builder --mac --arm64
+
+        echo ""
+        echo "[4/4] Creating DMG..."
+        bash "$SCRIPT_DIR/create-dmg.sh" arm64
         ;;
     mac-x64)
         echo ""
-        echo "[2.5/3] Building backend (x64)..."
+        echo "[2.5/4] Building backend (x64)..."
         bash "$SCRIPT_DIR/build-backend.sh" x64
 
         echo ""
-        echo "[3/3] Packaging macOS x64 DMG..."
+        echo "[3/4] Packaging macOS x64 app..."
         npx electron-builder --mac --x64
+
+        echo ""
+        echo "[4/4] Creating DMG..."
+        bash "$SCRIPT_DIR/create-dmg.sh" x64
         ;;
     mac-all)
         # Build arm64 first
         echo ""
-        echo "[2.5/3] Building backend (arm64)..."
+        echo "[2.5/4] Building backend (arm64)..."
         bash "$SCRIPT_DIR/build-backend.sh" arm64
 
         echo ""
-        echo "[3a/3] Packaging macOS arm64 DMG..."
+        echo "[3a/4] Packaging macOS arm64 app..."
         npx electron-builder --mac --arm64
+
+        echo ""
+        echo "[4a/4] Creating arm64 DMG..."
+        bash "$SCRIPT_DIR/create-dmg.sh" arm64
 
         # Then build x64
         echo ""
-        echo "[2.5/3] Building backend (x64)..."
+        echo "[2.5/4] Building backend (x64)..."
         bash "$SCRIPT_DIR/build-backend.sh" x64
 
         echo ""
-        echo "[3b/3] Packaging macOS x64 DMG..."
+        echo "[3b/4] Packaging macOS x64 app..."
         npx electron-builder --mac --x64
+
+        echo ""
+        echo "[4b/4] Creating x64 DMG..."
+        bash "$SCRIPT_DIR/create-dmg.sh" x64
         ;;
     win)
         echo ""

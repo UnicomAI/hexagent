@@ -3,7 +3,7 @@ const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const path = require("path");
 const net = require("net");
 const fs = require("fs");
-const { spawn } = require("child_process");
+const { spawn, execFileSync } = require("child_process");
 const treeKill = require("tree-kill");
 
 const IS_DEV = !!process.env.ELECTRON_DEV;
@@ -135,6 +135,17 @@ async function spawnBackend() {
     // Verify binary exists
     if (!fs.existsSync(binaryPath)) {
       throw new Error(`Backend binary not found: ${binaryPath}`);
+    }
+
+    // Remove macOS quarantine flags from backend resources so Gatekeeper
+    // does not block the unsigned binary (error -86) on first launch.
+    if (process.platform === "darwin") {
+      const backendDir = path.join(process.resourcesPath, "backend");
+      try {
+        execFileSync("xattr", ["-dr", "com.apple.quarantine", backendDir]);
+      } catch (_) {
+        // Ignore — attribute may not be present
+      }
     }
 
     // Build PATH with bundled Lima so limactl is discoverable

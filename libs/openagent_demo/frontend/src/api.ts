@@ -424,41 +424,19 @@ export async function getVMStatus(): Promise<VMStatus> {
   return res.json();
 }
 
-export async function installVMBackend(
+export function installVMBackend(
   onProgress: (step: string, message: string) => void,
   onDone: (message: string) => void,
   onError: (message: string) => void,
-): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/setup/vm/install`, { method: "POST" });
-  if (!res.ok) {
-    const detail = await res.json().catch(() => null);
-    onError(detail?.detail || `Install failed: ${res.statusText}`);
-    return;
-  }
-  const reader = res.body?.getReader();
-  if (!reader) { onError("No response stream"); return; }
-
-  const decoder = new TextDecoder();
-  let buf = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split("\n");
-    buf = lines.pop() || "";
-    let event = "";
-    for (const line of lines) {
-      if (line.startsWith("event: ")) event = line.slice(7).trim();
-      else if (line.startsWith("data: ") && event) {
-        const data = JSON.parse(line.slice(6));
-        if (event === "progress") onProgress(data.step, data.message);
-        else if (event === "done") onDone(data.message);
-        else if (event === "error") onError(data.message);
-        event = "";
-      }
-    }
-  }
+): AbortController {
+  return _consumeSSE(`${API_BASE}/api/setup/vm/install`, "POST", {
+    onEvent(event, data) {
+      if (event === "progress") onProgress(data.step as string, data.message as string);
+      else if (event === "done") onDone(data.message as string);
+      else if (event === "error") onError(data.message as string);
+    },
+    onError,
+  });
 }
 
 // ── VM Build ──

@@ -1,13 +1,15 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
+import faviconSvg from "../assets/favicon.svg";
 import {
   Eye, EyeOff, ArrowRight, ChevronDown, ChevronRight,
   Sparkles, Globe, ScrollText, Server, Monitor, Check,
   CircleCheck, CircleAlert, Loader2, Sun, Moon,
 } from "lucide-react";
-import { getServerConfig, updateServerConfig, getVMStatus, installVMBackend, getVMBuildStatus, buildVM, getVMProvisionStatus, provisionVM } from "../api";
+import { getServerConfig, updateServerConfig } from "../api";
 import type { ServerConfig, ModelConfig } from "../api";
 import type { Settings } from "../hooks/useSettings";
 import { useAppContext } from "../store";
+import { useVMSetup } from "../vmSetup";
 
 interface OnboardingWizardProps {
   open: boolean;
@@ -122,88 +124,21 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [e2bKey, setE2bKey] = useState("");
   const [showE2bKey, setShowE2bKey] = useState(false);
 
-  // VM setup (inline in compute step)
-  type PhaseStatus = "checking" | "pending" | "running" | "done" | "error";
-  const [vmSupported, setVmSupported] = useState<boolean | null>(null);
+  // VM setup — shared with Settings via VMSetupProvider (single source of truth)
+  const vm = useVMSetup();
   const [vmSkipped, setVmSkipped] = useState(false);
   const [showSkipConfirm, setShowSkipConfirm] = useState(false);
   const [showDepsPrompt, setShowDepsPrompt] = useState(false);
-  const [vmPhase1, setVmPhase1] = useState<PhaseStatus>("checking");
-  const [vmPhase1Msg, setVmPhase1Msg] = useState("");
-  const [vmPhase1Error, setVmPhase1Error] = useState("");
-  const [vmPhase2, setVmPhase2] = useState<PhaseStatus>("checking");
-  const [vmPhase2Msg, setVmPhase2Msg] = useState("");
-  const [vmPhase2Error, setVmPhase2Error] = useState("");
-  const [vmPhase3, setVmPhase3] = useState<PhaseStatus>("checking");
-  const buildCtrlRef = useRef<AbortController | null>(null);
-  const provCtrlRef = useRef<AbortController | null>(null);
 
+  const vmSupported = vm.vmStatus === null ? null : vm.vmStatus.supported;
+  const vmPhase1 = vm.phase1;
+  const vmPhase1Msg = vm.phase1Msg;
+  const vmPhase1Error = vm.phase1Error;
+  const vmPhase2 = vm.phase2;
+  const vmPhase2Msg = vm.phase2Msg;
+  const vmPhase2Error = vm.phase2Error;
+  const vmPhase3 = vm.phase3;
   const vmUsable = vmPhase1 === "done" && vmPhase2 === "done";
-
-  // Check VM status when entering compute step
-  useEffect(() => {
-    if (step !== "compute") return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const vs = await getVMStatus();
-        if (cancelled) return;
-        if (!vs.supported) { setVmSupported(false); return; }
-        setVmSupported(true);
-        setVmPhase1(vs.installed ? "done" : "pending");
-
-        if (!vs.installed) { setVmPhase2("pending"); setVmPhase3("pending"); return; }
-
-        const bs = await getVMBuildStatus();
-        if (cancelled) return;
-        if (bs.vm_state === "Running") { setVmPhase2("done"); } else { setVmPhase2("pending"); return; }
-
-        const ps = await getVMProvisionStatus();
-        if (cancelled) return;
-        if (ps.markers?.provisioned) { setVmPhase3("done"); } else { setVmPhase3("pending"); }
-      } catch {
-        if (!cancelled) setVmSupported(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [step]);
-
-  const refreshAppVm = useCallback(() => {
-    getVMStatus()
-      .then((vs) => dispatch({ type: "SET_VM_STATUS", payload: vs }))
-      .catch(() => {});
-  }, [dispatch]);
-
-  const handleVmInstallEngine = async () => {
-    setVmPhase1("running"); setVmPhase1Error("");
-    setVmPhase1Msg("Starting...");
-    await installVMBackend(
-      (_s, msg) => setVmPhase1Msg(msg),
-      () => { setVmPhase1("done"); setVmPhase1Msg(""); refreshAppVm(); },
-      (msg) => { setVmPhase1("error"); setVmPhase1Msg(""); setVmPhase1Error(msg); },
-    );
-  };
-
-  const handleVmInstallInstance = () => {
-    setVmPhase2("running"); setVmPhase2Error("");
-    buildCtrlRef.current?.abort();
-    buildCtrlRef.current = buildVM(
-      (_s, msg) => setVmPhase2Msg(msg),
-      () => { setVmPhase2("done"); setVmPhase2Msg(""); refreshAppVm(); },
-      (msg) => { setVmPhase2("error"); setVmPhase2Msg(""); setVmPhase2Error(msg); },
-    );
-  };
-
-  const handleVmInstallDeps = () => {
-    setVmPhase3("running");
-    provCtrlRef.current?.abort();
-    provCtrlRef.current = provisionVM(
-      {
-        onDone() { setVmPhase3("done"); },
-        onError() { setVmPhase3("error"); },
-      },
-    );
-  };
 
   // Load server config and reset name on open
   useEffect(() => {
@@ -314,7 +249,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
         {step === "welcome" && (
           <div className="setup-step setup-welcome">
             <div className="setup-welcome-brand">
-              <img className="setup-welcome-logo" width="40" height="40" src="./favicon.svg" alt="" />
+              <img className="setup-welcome-logo" width="40" height="40" src={faviconSvg} alt="" />
               <h2 className="setup-welcome-title">OpenAgent</h2>
             </div>
             <p className="setup-welcome-tagline">Powered by OpenAgent harness</p>
@@ -884,10 +819,10 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                       {vmPhase1 === "done" && <span className="setup-vm-badge">Installed</span>}
                       {vmPhase1 === "running" && vmPhase1Msg && <span className="setup-vm-msg">{vmPhase1Msg}</span>}
                       {vmPhase1 === "pending" && (
-                        <button className="vm-phase-action" type="button" onClick={handleVmInstallEngine}>Install</button>
+                        <button className="vm-phase-action" type="button" onClick={vm.installLima}>Install</button>
                       )}
                       {vmPhase1 === "error" && (
-                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={handleVmInstallEngine}>Retry</button>
+                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.installLima}>Retry</button>
                       )}
                     </div>
                     {vmPhase1 === "error" && vmPhase1Error && (
@@ -904,10 +839,10 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                       {vmPhase2 === "done" && <span className="setup-vm-badge">Ready</span>}
                       {vmPhase2 === "running" && vmPhase2Msg && <span className="setup-vm-msg">{vmPhase2Msg}</span>}
                       {vmPhase2 === "pending" && vmPhase1 === "done" && (
-                        <button className="vm-phase-action" type="button" onClick={handleVmInstallInstance}>Install</button>
+                        <button className="vm-phase-action" type="button" onClick={vm.buildVMInstance}>Install</button>
                       )}
                       {vmPhase2 === "error" && (
-                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={handleVmInstallInstance}>Retry</button>
+                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.buildVMInstance}>Retry</button>
                       )}
                     </div>
                     {vmPhase2 === "error" && vmPhase2Error && (
@@ -924,10 +859,10 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                       {vmPhase3 === "done" && <span className="setup-vm-badge">Complete</span>}
                       {vmPhase3 === "running" && <span className="setup-vm-msg">Installing...</span>}
                       {vmPhase3 === "pending" && vmUsable && (
-                        <button className="vm-phase-action" type="button" onClick={handleVmInstallDeps}>Install in background</button>
+                        <button className="vm-phase-action" type="button" onClick={() => vm.startProvision()}>Install in background</button>
                       )}
                       {vmPhase3 === "error" && (
-                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={handleVmInstallDeps}>Retry</button>
+                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={() => vm.startProvision()}>Retry</button>
                       )}
                     </div>
 
@@ -1021,7 +956,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                     <button
                       className="setup-btn setup-btn--primary"
                       type="button"
-                      onClick={() => { handleVmInstallDeps(); setShowDepsPrompt(false); goNext(); }}
+                      onClick={() => { vm.startProvision(); setShowDepsPrompt(false); goNext(); }}
                     >
                       Install & Continue
                     </button>

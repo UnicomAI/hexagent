@@ -12,7 +12,7 @@ import type { ServerConfig, VMStatus } from "./api";
 export interface Notification {
   id: string;
   message: string;
-  type: "error" | "info";
+  type: "error" | "info" | "success";
 }
 
 export interface AppState {
@@ -97,7 +97,7 @@ export type Action =
   | { type: "SET_VM_STATUS"; payload: VMStatus }
   | { type: "SET_SELECTED_MODEL"; payload: string }
   | { type: "SET_SELECTED_MODE"; payload: ConversationMode }
-  | { type: "SHOW_NOTIFICATION"; payload: { message: string; type: "error" | "info" } }
+  | { type: "SHOW_NOTIFICATION"; payload: { message: string; type: "error" | "info" | "success" } }
   | { type: "DISMISS_NOTIFICATION"; payload: string }
   | { type: "SET_FILE_PREVIEW"; payload: { path: string; mimeType: string; conversationId: string } | null }
   | { type: "SET_FILE_PREVIEW_VISIBLE"; payload: boolean };

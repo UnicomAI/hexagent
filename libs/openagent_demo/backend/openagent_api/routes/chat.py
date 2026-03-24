@@ -119,6 +119,11 @@ def _build_human_message(
 SUBAGENT_TAG_PREFIX = "openagent:subagent:"
 INTERNAL_TOOL_TAG = "openagent:tool"
 
+# Seconds of silence before sending an SSE keepalive comment.
+# Keeps the connection alive through proxies (Vite dev proxy defaults to
+# ~120 s, nginx default proxy_read_timeout is 60 s).
+_SSE_KEEPALIVE_SECONDS = 15
+
 
 def _extract_tool_output_text(output: object) -> str:
     """Extract a plain-text string from tool output.
@@ -275,7 +280,32 @@ async def send_message(conversation_id: str, body: MessageRequest) -> StreamingR
             input_dict = {"messages": messages}
 
             async with aclosing(agent_manager.stream_response(input_dict, conversation_id, model_id, mode=mode, session_name=session_name)) as stream:
-              async for event in stream:
+              # Wrap the async iterator so we can send SSE keepalive
+              # comments while waiting for long-running tool executions.
+              # Without this, idle connections get killed by proxies
+              # (Vite dev proxy, nginx, etc.) causing "network error" on
+              # the frontend.
+              #
+              # We use asyncio.wait() instead of asyncio.wait_for()
+              # because wait_for cancels the awaitable on timeout, which
+              # would corrupt the underlying async generator state.
+              stream_iter = stream.__aiter__()
+              next_event: asyncio.Task[dict] | None = None  # type: ignore[type-arg]
+              while True:
+                if next_event is None:
+                    next_event = asyncio.ensure_future(stream_iter.__anext__())
+                done, _ = await asyncio.wait(
+                    {next_event}, timeout=_SSE_KEEPALIVE_SECONDS,
+                )
+                if not done:
+                    yield ": keepalive\n\n"
+                    continue
+                next_event = None
+                try:
+                    event = done.pop().result()
+                except StopAsyncIteration:
+                    break
+
                 # Skip internal tool completion events (e.g. web-search summarisation)
                 if INTERNAL_TOOL_TAG in event.get("tags", []):
                     continue
@@ -380,7 +410,7 @@ async def send_message(conversation_id: str, body: MessageRequest) -> StreamingR
                     if is_subagent:
                         yield (
                             f"event: subagent_tool_result\n"
-                            f"data: {json.dumps({'task_id': task_id, 'id': run_id, 'output': output_text[:2000]})}\n\n"
+                            f"data: {json.dumps({'task_id': task_id, 'id': run_id, 'output': output_text})}\n\n"
                         )
                     else:
                         # Update the tool block with output
@@ -389,11 +419,11 @@ async def send_message(conversation_id: str, body: MessageRequest) -> StreamingR
                         if idx is not None and idx < len(blocks):
                             tool_data = blocks[idx].get("tool")
                             if isinstance(tool_data, dict):
-                                tool_data["output"] = output_text[:2000]
+                                tool_data["output"] = output_text
                                 resolved_tool_name = tool_data.get("name", "")
                         yield (
                             f"event: tool_result\n"
-                            f"data: {json.dumps({'id': run_id, 'output': output_text[:2000]})}\n\n"
+                            f"data: {json.dumps({'id': run_id, 'output': output_text})}\n\n"
                         )
 
                         # Eager pre-conversion: when PresentToUser emits

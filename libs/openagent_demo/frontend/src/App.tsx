@@ -10,6 +10,8 @@ import type { Tab as SettingsTab } from "./components/SettingsModal";
 import OnboardingWizard from "./components/OnboardingWizard";
 import SearchModal from "./components/SearchModal";
 import Toast from "./components/Toast";
+import VMSetupFloater from "./components/VMSetupFloater";
+import { VMSetupProvider } from "./vmSetup";
 import type { Attachment, ConversationMode, Message } from "./types";
 import "./App.css";
 
@@ -63,24 +65,25 @@ function App() {
     const m = window.location.pathname.match(/^\/(chat|cowork)(?:\/(.+))?/);
     const urlConvId = m?.[2] ?? null;
 
-    listConversations()
+    // Wait for both conversations and config to load before marking
+    // initialLoadDone.  This prevents the warm-session effect from
+    // firing before we know whether onboarding is still needed.
+    const convP = listConversations()
       .then((conversations) => {
         dispatch({ type: "SET_CONVERSATIONS", payload: conversations });
         // Restore active conversation from URL
         if (urlConvId && conversations.some((c) => c.id === urlConvId)) {
           dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: urlConvId });
         }
-        setInitialLoadDone(true);
       })
-      .catch(() => {
-        setInitialLoadDone(true);
-      });
-    getServerConfig()
+      .catch(() => {});
+    const cfgP = getServerConfig()
       .then((cfg) => {
         dispatch({ type: "SET_SERVER_CONFIG", payload: cfg });
         if (cfg.models.length === 0) setSetupNeeded(true);
       })
       .catch(() => {});
+    Promise.all([convP, cfgP]).then(() => setInitialLoadDone(true));
     getVMStatus()
       .then((vs) => dispatch({ type: "SET_VM_STATUS", payload: vs }))
       .catch(() => {});
@@ -316,10 +319,17 @@ function App() {
       const modelId = state.selectedModelId || undefined;
       const mode = state.selectedMode;
       const workingDir = options?.workingDir;
-      // Wait for in-flight warm session if user sent before it resolved
+      // Use the warm session if it's already resolved.  If it's still
+      // in-flight, give it a short grace period — but never block the user
+      // for long (the backend can create a session on the fly).
       let sessionId = state.warmSessionId || undefined;
       if (!sessionId && warmSessionPromiseRef.current) {
-        try { sessionId = await warmSessionPromiseRef.current; } catch { /* proceed without */ }
+        try {
+          sessionId = await Promise.race([
+            warmSessionPromiseRef.current,
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
+          ]);
+        } catch { /* proceed without — backend will create session on demand */ }
       }
 
       try {
@@ -358,51 +368,57 @@ function App() {
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>
-      <div className="app">
-        <Sidebar
-          onNewConversation={handleNewConversation}
-          onOpenSettings={() => openSettings()}
-          onOpenSearch={() => setSearchOpen(true)}
-          userName={settings.fullName}
+      <VMSetupProvider>
+        <div className="app">
+          <Sidebar
+            onNewConversation={handleNewConversation}
+            onOpenSettings={() => openSettings()}
+            onOpenSearch={() => setSearchOpen(true)}
+            userName={settings.fullName}
+          />
+          <div
+            className={`sidebar-backdrop ${state.sidebarCollapsed ? "hidden" : ""}`}
+            onClick={() => dispatch({ type: "TOGGLE_SIDEBAR" })}
+          />
+          <ChatArea
+            conversation={activeConversation ?? null}
+            onSendMessage={handleSendMessage}
+            onOpenSettings={openSettings}
+            rightPanel={
+              <RightPanel
+                visible={rightPanelVisible}
+                conversation={activeConversation ?? null}
+                streamingBlocks={activeStreamingBlocks}
+              />
+            }
+          />
+        </div>
+        <OnboardingWizard
+          open={setupNeeded}
+          onComplete={() => setSetupNeeded(false)}
+          settings={settings}
+          onSettingsChange={setSettings}
         />
-        <div
-          className={`sidebar-backdrop ${state.sidebarCollapsed ? "hidden" : ""}`}
-          onClick={() => dispatch({ type: "TOGGLE_SIDEBAR" })}
+        <SettingsModal
+          open={settingsOpen}
+          onClose={() => { setSettingsOpen(false); setSettingsTab(undefined); }}
+          settings={settings}
+          onSettingsChange={setSettings}
+          initialTab={settingsTab}
         />
-        <ChatArea
-          conversation={activeConversation ?? null}
-          onSendMessage={handleSendMessage}
-          onOpenSettings={openSettings}
-          rightPanel={
-            <RightPanel
-              visible={rightPanelVisible}
-              conversation={activeConversation ?? null}
-              streamingBlocks={activeStreamingBlocks}
-            />
-          }
+        <SearchModal
+          open={searchOpen}
+          onClose={() => setSearchOpen(false)}
         />
-      </div>
-      <OnboardingWizard
-        open={setupNeeded}
-        onComplete={() => setSetupNeeded(false)}
-        settings={settings}
-        onSettingsChange={setSettings}
-      />
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => { setSettingsOpen(false); setSettingsTab(undefined); }}
-        settings={settings}
-        onSettingsChange={setSettings}
-        initialTab={settingsTab}
-      />
-      <SearchModal
-        open={searchOpen}
-        onClose={() => setSearchOpen(false)}
-      />
-      <Toast
-        notifications={state.notifications}
-        onDismiss={(id) => dispatch({ type: "DISMISS_NOTIFICATION", payload: id })}
-      />
+        <VMSetupFloater
+          settingsOpen={settingsOpen}
+          onOpenSettings={() => openSettings("sandbox")}
+        />
+        <Toast
+          notifications={state.notifications}
+          onDismiss={(id) => dispatch({ type: "DISMISS_NOTIFICATION", payload: id })}
+        />
+      </VMSetupProvider>
     </AppContext.Provider>
   );
 }

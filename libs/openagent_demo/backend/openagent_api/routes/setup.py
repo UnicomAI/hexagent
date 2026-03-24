@@ -54,7 +54,11 @@ def _lima_bin() -> Path:
 
 
 def _resolve_arch() -> str:
-    """Map platform.machine() to Lima release asset arch names.
+    """Return the *real* hardware architecture for Lima release asset names.
+
+    ``platform.machine()`` lies when Python runs under Rosetta 2 on Apple
+    Silicon — it returns ``x86_64`` instead of ``arm64``.  We detect this via
+    ``sysctl.proc_translated`` (``1`` ⇒ Rosetta) and correct accordingly.
 
     Lima release naming differs by OS:
       - macOS (Darwin): ``arm64``, ``x86_64``
@@ -62,6 +66,19 @@ def _resolve_arch() -> str:
     Since we only install Lima on macOS, we use macOS naming.
     """
     m = platform.machine().lower()
+
+    # Detect Rosetta: Python reports x86_64 but real hardware is arm64
+    if sys.platform == "darwin" and m == "x86_64":
+        try:
+            out = _sp.check_output(
+                ["sysctl", "-n", "sysctl.proc_translated"],
+                stderr=_sp.DEVNULL,
+            )
+            if out.decode().strip() == "1":
+                return "arm64"
+        except (OSError, _sp.CalledProcessError):
+            pass
+
     if m in ("arm64", "aarch64"):
         return "arm64"
     if m in ("x86_64", "amd64"):
@@ -604,13 +621,14 @@ class _BuildManager(_ProcessManager):
                 stderr=asyncio.subprocess.PIPE,
             )
             self._process = proc
-            await self._stream_stderr(proc)
+            last_line = await self._stream_stderr(proc)
             await proc.wait()
             if proc.returncode == 0:
                 self._emit("done", {"message": "VM started successfully"})
                 self._status = "done"
             else:
-                self._emit("error", {"message": f"VM start failed (exit {proc.returncode})"})
+                detail = f" — {last_line}" if last_line else ""
+                self._emit("error", {"message": f"VM start failed (exit {proc.returncode}){detail}"})
                 self._status = "error"
                 self._error = f"exit {proc.returncode}"
             return
@@ -630,13 +648,14 @@ class _BuildManager(_ProcessManager):
             stderr=asyncio.subprocess.PIPE,
         )
         self._process = proc
-        await self._stream_stderr(proc)
+        last_line = await self._stream_stderr(proc)
         await proc.wait()
         if proc.returncode == 0:
             self._emit("done", {"message": "VM created successfully"})
             self._status = "done"
         else:
-            self._emit("error", {"message": f"VM creation failed (exit {proc.returncode})"})
+            detail = f" — {last_line}" if last_line else ""
+            self._emit("error", {"message": f"VM creation failed (exit {proc.returncode}){detail}"})
             self._status = "error"
             self._error = f"exit {proc.returncode}"
 
@@ -748,9 +767,13 @@ class _BuildManager(_ProcessManager):
             self._status = "error"
             self._error = f"exit {proc_start.returncode}"
 
-    async def _stream_stderr(self, proc: asyncio.subprocess.Process) -> None:
-        """Read limactl stderr line-by-line and emit progress events."""
+    async def _stream_stderr(self, proc: asyncio.subprocess.Process) -> str:
+        """Read limactl stderr line-by-line and emit progress events.
+
+        Returns the last non-empty stderr line (useful for error context).
+        """
         assert proc.stderr is not None
+        last_line = ""
         while True:
             line = await proc.stderr.readline()
             if not line:
@@ -758,6 +781,7 @@ class _BuildManager(_ProcessManager):
             text = line.decode("utf-8", errors="replace").strip()
             if not text:
                 continue
+            last_line = text
             # Heuristic progress from limactl output
             if "Downloading" in text or "downloading" in text:
                 self._emit("progress", {"step": "downloading", "message": text})
@@ -767,6 +791,7 @@ class _BuildManager(_ProcessManager):
                 self._emit("progress", {"step": "ready", "message": text})
             else:
                 self._emit("progress", {"step": "output", "message": text})
+        return last_line
 
 
 # ---------------------------------------------------------------------------
