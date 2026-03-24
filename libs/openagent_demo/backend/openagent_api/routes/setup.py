@@ -21,6 +21,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 from typing import AsyncIterator
+from collections.abc import Callable
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, StreamingResponse
@@ -260,6 +261,20 @@ _WSL_COWORK_READY_STATES = frozenset(
     }
 )
 
+_WSL_RUNNING_STATES = frozenset(
+    {
+        "Running",
+        "姝ｅ湪杩愯",
+    }
+)
+
+_WSL_STOPPED_STATES = frozenset(
+    {
+        "Stopped",
+        "宸插仠姝?",
+    }
+)
+
 
 def _wsl_distro_ready_for_cowork(state: str | None) -> bool:
     """Return True if the cowork distro exists and has a non-empty state.
@@ -269,6 +284,11 @@ def _wsl_distro_ready_for_cowork(state: str | None) -> bool:
     exist; WSL can start it on-demand when it's stopped.
     """
     return bool(state and state.strip())
+
+
+def _wsl_state_equals(state: str | None, accepted: frozenset[str]) -> bool:
+    """Locale-tolerant WSL state check."""
+    return bool(state and state.strip() in accepted)
 
 
 def _pick_wsl_source_distro(entries: list[dict[str, str]]) -> str | None:
@@ -656,6 +676,34 @@ class _ProcessManager(abc.ABC):
 class _BuildManager(_ProcessManager):
     """Manages ``limactl start`` to create or boot the VM."""
 
+    async def _communicate_with_heartbeat(
+        self,
+        proc: asyncio.subprocess.Process,
+        *,
+        step: str,
+        message: str,
+        heartbeat_seconds: float = 5.0,
+        progress_info: Callable[[], str] | None = None,
+    ) -> tuple[bytes, bytes]:
+        """Wait for process completion while emitting periodic progress heartbeats."""
+        started = asyncio.get_running_loop().time()
+        comm_task = asyncio.create_task(proc.communicate())
+        while True:
+            done, _ = await asyncio.wait({comm_task}, timeout=heartbeat_seconds)
+            if done:
+                stdout_b, stderr_b = comm_task.result()
+                return stdout_b, stderr_b
+            elapsed = int(asyncio.get_running_loop().time() - started)
+            extra = ""
+            if progress_info is not None:
+                try:
+                    detail = progress_info().strip()
+                    if detail:
+                        extra = f" {detail}"
+                except Exception:
+                    extra = ""
+            self._emit("progress", {"step": step, "message": f"{message} (elapsed {elapsed}s){extra}"})
+
     async def _run(self, **kwargs: object) -> None:
         if sys.platform == "win32":
             await self._run_wsl()
@@ -725,12 +773,12 @@ class _BuildManager(_ProcessManager):
             return
 
         status = await _wsl_instance_status()
-        if status == "Running":
+        if _wsl_state_equals(status, _WSL_RUNNING_STATES):
             self._emit("done", {"message": "WSL distro is already running"})
             self._status = "done"
             return
 
-        if status == "Stopped":
+        if _wsl_state_equals(status, _WSL_STOPPED_STATES):
             self._emit("progress", {"step": "starting", "message": "Starting existing WSL distro..."})
             proc = await asyncio.create_subprocess_exec(
                 wsl_exe, "-d", _WSL_INSTANCE, "--", "echo", "ok",
@@ -738,7 +786,11 @@ class _BuildManager(_ProcessManager):
                 stderr=asyncio.subprocess.PIPE,
             )
             self._process = proc
-            _, stderr_b = await proc.communicate()
+            _, stderr_b = await self._communicate_with_heartbeat(
+                proc,
+                step="starting",
+                message="Starting existing WSL distro...",
+            )
             if proc.returncode == 0:
                 self._emit("done", {"message": "WSL distro started successfully"})
                 self._status = "done"
@@ -760,7 +812,11 @@ class _BuildManager(_ProcessManager):
                 stderr=asyncio.subprocess.PIPE,
             )
             self._process = proc
-            out_b, err_b = await proc.communicate()
+            out_b, err_b = await self._communicate_with_heartbeat(
+                proc,
+                step="creating",
+                message="Preparing source distro (Ubuntu)...",
+            )
             if proc.returncode != 0:
                 err = (_decode_wsl_output(err_b or b"") or _decode_wsl_output(out_b or b"")).strip()
                 self._emit(
@@ -795,7 +851,12 @@ class _BuildManager(_ProcessManager):
             stderr=asyncio.subprocess.PIPE,
         )
         self._process = proc_export
-        _, err_b = await proc_export.communicate()
+        _, err_b = await self._communicate_with_heartbeat(
+            proc_export,
+            step="creating",
+            message="Exporting Ubuntu rootfs...",
+            progress_info=lambda: f"(exported ~{(export_tar.stat().st_size / (1024 * 1024)):.1f} MB)" if export_tar.exists() else "",
+        )
         if proc_export.returncode != 0:
             err = _decode_wsl_output(err_b or b"").strip()
             self._emit("error", {"message": err or f"WSL export failed (exit {proc_export.returncode})"})
@@ -810,7 +871,11 @@ class _BuildManager(_ProcessManager):
             stderr=asyncio.subprocess.PIPE,
         )
         self._process = proc_import
-        _, err_b = await proc_import.communicate()
+        _, err_b = await self._communicate_with_heartbeat(
+            proc_import,
+            step="creating",
+            message="Importing OpenAgent WSL distro...",
+        )
         if proc_import.returncode != 0:
             err = _decode_wsl_output(err_b or b"").strip()
             self._emit("error", {"message": err or f"WSL import failed (exit {proc_import.returncode})"})
@@ -825,7 +890,11 @@ class _BuildManager(_ProcessManager):
             stderr=asyncio.subprocess.PIPE,
         )
         self._process = proc_start
-        _, err_b = await proc_start.communicate()
+        _, err_b = await self._communicate_with_heartbeat(
+            proc_start,
+            step="starting",
+            message="Starting OpenAgent WSL distro...",
+        )
         if proc_start.returncode == 0:
             self._emit("done", {"message": "WSL distro created and started successfully"})
             self._status = "done"

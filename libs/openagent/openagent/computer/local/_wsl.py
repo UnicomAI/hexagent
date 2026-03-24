@@ -559,6 +559,28 @@ class WslVM:
                 msg = f"Failed to bind-mount {m.host_path} → {m.guest_path}: {result.stderr}"
                 raise WslError(msg)
 
+            # Cowork mounts bind a DrvFs path (/mnt/<drive>/...) into /sessions/<user>/mnt/....
+            # DrvFs often presents files as root:root with mode 755 to Linux UIDs that are not
+            # the WSL default user, so session users see a read-only directory even though
+            # Windows ACLs allow writes. chown maps ownership to the session Linux user so
+            # mkdir/Write behave consistently.
+            sess = _session_user_from_guest_mount_path(m.guest_path)
+            skip_chown = os.environ.get("OPENAGENT_WSL_SKIP_SESSION_MOUNT_CHOWN", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+            if m.writable and sess is not None and not skip_chown:
+                quser = shlex.quote(sess)
+                own = await self.shell(f"chown -R {quser}:{quser} {qguest}", user="root")
+                if own.exit_code != 0:
+                    logger.warning(
+                        "WSL post-bind chown failed (session=%s guest=%s): %s",
+                        sess,
+                        m.guest_path,
+                        (own.stderr or own.stdout or "").strip() or "(empty)",
+                    )
+
             # Post-verify so logs show whether the guest path is really a mount (debug empty ls issues).
             verify = await self.shell(f"findmnt -n {qguest}", user="root")
             if verify.exit_code == 0 and (verify.stdout or "").strip():
@@ -655,6 +677,18 @@ def _win_path_to_wsl(win_path: str) -> str:
         rest = "/" + rest
 
     return f"/mnt/{drive}{rest}"
+
+
+def _session_user_from_guest_mount_path(guest_path: str) -> str | None:
+    """Return the cowork session Linux username if *guest_path* is under ``/sessions/<user>/``.
+
+    Session-scoped mounts resolve to ``/sessions/<petname>/mnt/...``; the first path component
+    after ``sessions`` matches the Linux account created for that sandbox session.
+    """
+    parts = guest_path.split("/")
+    if len(parts) >= 3 and parts[1] == "sessions" and parts[2]:
+        return parts[2]
+    return None
 
 
 def _parse_status_output(stdout: bytes) -> list[dict[str, str]]:

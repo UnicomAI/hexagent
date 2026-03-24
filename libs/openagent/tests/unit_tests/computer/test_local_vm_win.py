@@ -80,7 +80,9 @@ class TestStart:
         await mgr.start()
         await mgr.start()
 
-        vm.start.assert_not_awaited()
+        # Even when Running, LocalVM delegates to WslVM.start() so bind
+        # mounts from mounts.json are re-applied.
+        assert vm.start.await_count == 2
 
     async def test_start_does_not_apply_mounts(self) -> None:
         vm = _mock_vm(status="Stopped")
@@ -173,6 +175,27 @@ class TestMount:
         await mgr.mount(Mount(source=str(d), target="code"))
 
         vm.apply_mounts.assert_not_awaited()
+
+    async def test_mount_idempotent_self_heals_missing_live_mount(self, tmp_path: Any) -> None:
+        vm = _mock_vm()
+        mgr = _make_manager(vm)
+        d = tmp_path / "code"
+        d.mkdir()
+
+        vm.read_mounts = lambda: [ResolvedMount(host_path=str(d), guest_path="/mnt/code", writable=False)]
+        vm.shell = AsyncMock(
+            side_effect=[
+                _fail(),  # findmnt -n /mnt/code -> missing
+                _ok(),  # mount --bind
+                _ok(stdout="/mnt/code /mnt/c/code"),  # verify findmnt
+            ]
+        )
+
+        await mgr.mount(Mount(source=str(d), target="code"))
+
+        vm.apply_mounts.assert_not_awaited()
+        assert vm.shell.await_count == 3
+        assert "mount --bind" in vm.shell.call_args_list[1].args[0]
 
     async def test_mount_empty_list_is_noop(self) -> None:
         vm = _mock_vm()

@@ -20,6 +20,8 @@ export interface AppState {
   activeConversationId: string | null;
   /** Pre-conversation warm session ID (exists before first message). */
   warmSessionId: string | null;
+  /** True after user submits until SSE stream starts (or request fails). */
+  isRequestPending: boolean;
   isStreaming: boolean;
   streamingBlocks: ContentBlock[];
   streamingMessageId: string | null;
@@ -47,6 +49,7 @@ export const initialState: AppState = {
   conversations: [],
   activeConversationId: null,
   warmSessionId: null,
+  isRequestPending: false,
   isStreaming: false,
   streamingBlocks: [],
   streamingMessageId: null,
@@ -74,6 +77,8 @@ export type Action =
   | { type: "DELETE_CONVERSATION"; payload: string }
   | { type: "SET_ACTIVE_CONVERSATION"; payload: string | null }
   | { type: "SET_WARM_SESSION"; payload: string | null }
+  | { type: "REQUEST_START" }
+  | { type: "REQUEST_END" }
   | { type: "ADD_USER_MESSAGE"; payload: { conversationId: string; message: Message } }
   | { type: "STREAM_START"; payload: { messageId: string } }
   | { type: "STREAM_TEXT_DELTA"; payload: string }
@@ -506,6 +511,12 @@ export function reducer(state: AppState, action: Action): AppState {
     case "SET_WARM_SESSION":
       return { ...state, warmSessionId: action.payload };
 
+    case "REQUEST_START":
+      return { ...state, isRequestPending: true };
+
+    case "REQUEST_END":
+      return { ...state, isRequestPending: false };
+
     case "ADD_USER_MESSAGE":
       return {
         ...state,
@@ -525,6 +536,7 @@ export function reducer(state: AppState, action: Action): AppState {
       };
       return {
         ...state,
+        isRequestPending: false,
         isStreaming: true,
         streamingBlocks: [],
         streamingMessageId: action.payload.messageId,
@@ -632,6 +644,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const streamConvId = state.streamingConversationId;
       return {
         ...state,
+        isRequestPending: false,
         isStreaming: false,
         streamingBlocks: [],
         streamingMessageId: null,
@@ -655,6 +668,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "STREAM_ERROR":
       return {
         ...state,
+        isRequestPending: false,
         isStreaming: false,
         streamingConversationId: null,
         streamingBlocks: appendTextDelta(

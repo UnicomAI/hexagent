@@ -219,7 +219,10 @@ function App() {
         fullContent = fullContent ? `${fullContent}\n\n${refs}` : refs;
       }
 
-      if (!fullContent) return;
+      if (!fullContent) {
+        dispatch({ type: "REQUEST_END" });
+        return;
+      }
 
       const userMessage: Message = {
         id: crypto.randomUUID(),
@@ -251,6 +254,7 @@ function App() {
 
       const controller = sendMessage(conversationId, fullContent, {
         onMessageStart: (id) => {
+          dispatch({ type: "REQUEST_END" });
           dispatch({ type: "STREAM_START", payload: { messageId: id } });
         },
         onTextDelta: (delta) => {
@@ -287,6 +291,7 @@ function App() {
           dispatch({ type: "STREAM_END", payload: { messageId: id } });
         },
         onError: (error) => {
+          dispatch({ type: "REQUEST_END" });
           if (state.isStreaming) {
             dispatch({ type: "STREAM_ERROR", payload: error });
           } else {
@@ -297,7 +302,7 @@ function App() {
 
       abortRef.current = controller;
     },
-    [state.conversations, state.selectedModelId]
+    [dispatch, state.conversations, state.selectedModelId, state.isStreaming]
   );
 
   const handleNewConversation = useCallback(() => {
@@ -307,7 +312,8 @@ function App() {
 
   const handleSendMessage = useCallback(
     async (content: string, options?: { workingDir?: string; attachments?: Attachment[] }) => {
-      if (state.isStreaming) return;
+      if (state.isStreaming || state.isRequestPending) return;
+      dispatch({ type: "REQUEST_START" });
 
       // If we have an active conversation, send directly
       if (state.activeConversationId) {
@@ -345,10 +351,11 @@ function App() {
         // Now send the message to the newly created conversation
         doSendMessage(conv.id, content, options?.attachments);
       } catch {
+        dispatch({ type: "REQUEST_END" });
         dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to create conversation", type: "error" } });
       }
     },
-    [state.activeConversationId, state.isStreaming, state.selectedModelId, state.selectedMode, state.warmSessionId, doSendMessage]
+    [dispatch, state.activeConversationId, state.isRequestPending, state.isStreaming, state.selectedModelId, state.selectedMode, state.warmSessionId, doSendMessage]
   );
 
   const activeConversation = state.conversations.find(

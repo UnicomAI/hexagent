@@ -27,6 +27,7 @@ to an isolated Linux user on the WSL distro.
 from __future__ import annotations
 
 import asyncio
+import os
 import shlex
 import uuid
 from pathlib import Path
@@ -265,9 +266,13 @@ class LocalVM:
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Ensure the distro is running. Idempotent."""
-        if await self._vm.status() == "Running":
-            return
+        """Ensure the distro is running and session mounts are applied.
+
+        WSL bind mounts are ephemeral; they are often absent if the distro
+        was started outside LocalVM (for example during setup/build flows).
+        Always delegate to ``WslVM.start()`` so it can re-apply mounts from
+        ``mounts.json`` even when status is already Running.
+        """
         await self._vm.start()
 
     async def stop(self) -> None:
@@ -325,6 +330,39 @@ class LocalVM:
 
             truly_new = [r for r in resolved_new if (r.host_path, r.guest_path, r.writable) not in existing_set]
             if not truly_new:
+                # Config may already contain the mount while the live bind mount
+                # was lost (for example after external WSL restart). Verify and
+                # self-heal by restoring only the missing live bind mount.
+                for r in resolved_new:
+                    probe = await self._vm.shell(f"findmnt -n {shlex.quote(r.guest_path)}")
+                    if probe.exit_code != 0:
+                        from openagent.computer.local._wsl import _session_user_from_guest_mount_path, _win_path_to_wsl
+
+                        wsl_host = _win_path_to_wsl(r.host_path)
+                        qguest = shlex.quote(r.guest_path)
+                        qhost = shlex.quote(wsl_host)
+                        cmd = f"mkdir -p {qguest} && mount --bind {qhost} {qguest}"
+                        if not r.writable:
+                            cmd += f" && mount -o remount,ro,bind {qguest}"
+                        remount = await self._vm.shell(cmd, user="root")
+                        if remount.exit_code != 0:
+                            msg = f"Failed to self-heal mount '{r.guest_path}': {remount.stderr or remount.stdout}"
+                            raise VMError(msg)
+
+                        sess = _session_user_from_guest_mount_path(r.guest_path)
+                        skip_chown = os.environ.get("OPENAGENT_WSL_SKIP_SESSION_MOUNT_CHOWN", "").strip().lower() in (
+                            "1",
+                            "true",
+                            "yes",
+                        )
+                        if r.writable and sess is not None and not skip_chown:
+                            quser = shlex.quote(sess)
+                            await self._vm.shell(f"chown -R {quser}:{quser} {qguest}", user="root")
+
+                        verify = await self._vm.shell(f"findmnt -n {qguest}", user="root")
+                        if verify.exit_code != 0 or not (verify.stdout or "").strip():
+                            msg = f"Mount self-heal verification failed for '{r.guest_path}'"
+                            raise VMError(msg)
                 return
 
             existing_guests = {r.guest_path for r in existing}
@@ -448,7 +486,11 @@ class LocalVM:
                     await self._vm.shell(f"sudo userdel -r {shlex.quote(name)}")
                     raise
 
-        return _VMSessionComputer(vm=self._vm, session_name=name)
+        # Keep cowork commands inside the session home by default. Without an
+        # explicit cwd, WSL may inherit a host-side working directory
+        # (e.g. /mnt/c/Windows/System32), which is often not writable.
+        default_cwd = f"/sessions/{name}"
+        return _VMSessionComputer(vm=self._vm, session_name=name, default_cwd=default_cwd)
 
     async def destroy(self, name: str) -> None:
         """Delete a session user and its mounts.

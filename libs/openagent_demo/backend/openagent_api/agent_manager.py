@@ -581,13 +581,44 @@ class AgentManager:
 
         import shlex
 
+        async def _is_mount_active(target_name: str) -> bool:
+            guest_path = f"/sessions/{session_name}/mnt/{target_name}"
+            result = await self._vm_manager._vm.shell(f"findmnt -n {shlex.quote(guest_path)}")
+            return result.exit_code == 0 and bool((result.stdout or "").strip())
+
         # Unmount previous working dir if switching to a different one
         prev = self._session_working_dirs.get(session_name)
         prev_guest_path: str | None = None
         if prev is not None:
             prev_source, prev_target = prev
             if prev_source == working_dir:
-                return  # Same dir already mounted
+                resolved_cwd = f"/sessions/{session_name}/mnt/{prev_target}"
+                self._set_computer_default_cwd(self._computers.get(session_name), resolved_cwd)
+                if await _is_mount_active(prev_target):
+                    # Happy path: mount is still active and writable.
+                    await self._verify_session_dir_writable(session_name, resolved_cwd)
+                    return
+                logger.warning(
+                    "Session mount missing, forcing remount. session=%s target=%s source=%s",
+                    session_name,
+                    prev_target,
+                    prev_source,
+                )
+                # Same source/target: self-heal mount in place to avoid
+                # full apply/restart across all historical session mounts.
+                mount = Mount(source=working_dir, target=prev_target, writable=True)
+                await self._vm_manager.mount([mount], session=session_name)
+                try:
+                    await self._verify_session_dir_writable(session_name, resolved_cwd)
+                except RuntimeError:
+                    logger.warning(
+                        "Writable check failed after in-place remount; forcing VM apply() and retry. session=%s",
+                        session_name,
+                    )
+                    await self._vm_manager.apply()
+                    await self._verify_session_dir_writable(session_name, resolved_cwd)
+                logger.info("Remounted working dir in place %s for session %s", working_dir, session_name)
+                return
             prev_guest_path = f"/sessions/{session_name}/mnt/{prev_target}"
 
             # Force-unmount inside the guest BEFORE the VM restart to flush
@@ -612,13 +643,21 @@ class AgentManager:
         computer = self._computers.get(session_name)
         resolved_cwd = f"/sessions/{session_name}/mnt/{new_target}"
         self._set_computer_default_cwd(computer, resolved_cwd)
-        await self._verify_session_dir_writable(session_name, resolved_cwd)
+        try:
+            await self._verify_session_dir_writable(session_name, resolved_cwd)
+        except RuntimeError:
+            # One-shot recovery: apply mounts.json to restore bind mounts if
+            # WSL was restarted externally and mount state was lost.
+            logger.warning("Writable check failed after mount; forcing VM apply() and retry. session=%s", session_name)
+            await self._vm_manager.apply()
+            await self._verify_session_dir_writable(session_name, resolved_cwd)
         logger.info("Mounted working dir %s for session %s", working_dir, session_name)
 
         # Remove the stale mount-point directory left behind after unmount.
-        # The dir may still be a FUSE mount point briefly after restart, so
-        # attempt umount before rmdir.
-        if prev_guest_path is not None:
+        # Only do this when we switched targets; for same-target remount
+        # (e.g. self-heal on lost bind mount), cleanup would remove the
+        # newly restored live mount.
+        if prev_guest_path is not None and prev_guest_path != resolved_cwd:
             quoted = shlex.quote(prev_guest_path)
             result = await self._vm_manager._vm.shell(
                 f"sudo umount {quoted} 2>/dev/null; sudo rmdir {quoted}"
