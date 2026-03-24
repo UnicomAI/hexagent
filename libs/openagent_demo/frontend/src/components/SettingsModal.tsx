@@ -1733,11 +1733,6 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
     }
   };
 
-  const inferredBackend = navigator.platform.toUpperCase().includes("WIN") ? "wsl" : "lima";
-  const vmBackend = vmStatus?.backend ?? inferredBackend;
-  const vmEngineLabel = vmBackend === "wsl" ? "WSL Engine" : "Lima Engine";
-  const vmBackendName = vmBackend === "wsl" ? "WSL" : "Lima";
-  const vmPlatformLabel = vmBackend === "wsl" ? "Windows only" : "macOS only";
   // Cowork mode is usable once Lima is installed and VM is running (phases 1+2).
   // Phase 3 (dependency installation) can run in the background.
   const vmUsable = phase1 === "done" && phase2 === "done";
