@@ -182,7 +182,23 @@ _WSL_EXPORT_SOURCE = "Ubuntu"
 
 
 def _wsl_cmd() -> str | None:
-    return shutil.which("wsl.exe") or shutil.which("wsl")
+    """Resolve path to ``wsl.exe``.
+
+    Electron / minimal service environments sometimes omit ``System32`` from
+    ``PATH``, which makes ``shutil.which`` fail even though WSL is installed.
+    Fall back to the well-known location so ``/api/setup/vm`` reports
+    ``installed: true`` and subprocess launches succeed.
+    """
+    w = shutil.which("wsl.exe") or shutil.which("wsl")
+    if w:
+        return w
+    system_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
+    if not system_root:
+        system_root = r"C:\Windows"
+    candidate = Path(system_root) / "System32" / "wsl.exe"
+    if candidate.is_file():
+        return str(candidate)
+    return None
 
 
 def _decode_wsl_output(raw: bytes) -> str:
@@ -209,10 +225,11 @@ def _parse_wsl_list(text: str) -> list[dict[str, str]]:
 
 
 async def _wsl_list() -> list[dict[str, str]]:
-    if not _wsl_cmd():
+    wsl_exe = _wsl_cmd()
+    if not wsl_exe:
         return []
     proc = await asyncio.create_subprocess_exec(
-        "wsl.exe",
+        wsl_exe,
         "--list",
         "--verbose",
         stdout=asyncio.subprocess.PIPE,
@@ -230,6 +247,24 @@ async def _wsl_instance_status() -> str | None:
         if entry["name"].lower() == _WSL_INSTANCE.lower():
             return entry["state"]
     return None
+
+
+# ``wsl -l -v`` uses the Windows display language for the STATE column.
+# Cowork only needs the ``openagent`` distro to exist; WSL starts it on demand.
+_WSL_COWORK_READY_STATES = frozenset(
+    {
+        "Running",
+        "Stopped",
+        "正在运行",
+        "已停止",
+    }
+)
+
+
+def _wsl_distro_ready_for_cowork(state: str | None) -> bool:
+    if state is None:
+        return False
+    return state.strip() in _WSL_COWORK_READY_STATES
 
 
 def _wsl_status() -> dict[str, object]:
@@ -250,8 +285,11 @@ def _win_path_to_wsl(path: Path | str) -> str:
 
 
 async def _wsl_shell(cmd: str, *, timeout: float = 60) -> tuple[int, str, str]:
+    wsl_exe = _wsl_cmd()
+    if not wsl_exe:
+        return 1, "", "wsl.exe not found"
     proc = await asyncio.create_subprocess_exec(
-        "wsl.exe",
+        wsl_exe,
         "-d",
         _WSL_INSTANCE,
         "--",
@@ -348,8 +386,10 @@ async def _install_wsl_stream():
         return
 
     yield sse("progress", {"step": "installing", "message": "Installing WSL components..."})
+    # ``wsl.exe`` may exist in System32 even when not on PATH
+    wsl_for_install = _wsl_cmd() or str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "wsl.exe")
     proc = await asyncio.create_subprocess_exec(
-        "wsl.exe",
+        wsl_for_install,
         "--install",
         "--no-distribution",
         stdout=asyncio.subprocess.PIPE,
@@ -407,22 +447,23 @@ def _vm_status() -> dict[str, object]:
 async def get_vm_status() -> dict[str, object]:
     """Check whether the VM backend is available.
 
-    Returns ``vm_ready: true`` only when the backend is installed AND
-    the VM instance is running — i.e. cowork mode can start sessions
-    immediately.
+    Returns ``vm_ready: true`` when cowork can start: Lima needs the instance
+    **Running**; WSL accepts **Running** or **Stopped** (distro exists — WSL
+    starts it on first ``wsl -d``). Localized ``wsl -l -v`` state strings are
+    recognized where known.
     """
     result = _vm_status()
 
-    # Quick readiness check: installed + instance running?
     vm_ready = False
     instance_status: str | None = None
     if result.get("installed"):
         try:
             if result.get("backend") == "lima":
                 instance_status = await _lima_instance_status()
+                vm_ready = instance_status == "Running"
             elif result.get("backend") == "wsl":
                 instance_status = await _wsl_instance_status()
-            vm_ready = instance_status == "Running"
+                vm_ready = _wsl_distro_ready_for_cowork(instance_status)
         except Exception:
             pass
 
@@ -660,7 +701,8 @@ class _BuildManager(_ProcessManager):
             self._error = f"exit {proc.returncode}"
 
     async def _run_wsl(self) -> None:
-        if not _wsl_cmd():
+        wsl_exe = _wsl_cmd()
+        if not wsl_exe:
             self._emit("error", {"message": "WSL is not installed. Install it first in Phase 1."})
             self._status = "error"
             self._error = "WSL missing"
@@ -675,7 +717,7 @@ class _BuildManager(_ProcessManager):
         if status == "Stopped":
             self._emit("progress", {"step": "starting", "message": "Starting existing WSL distro..."})
             proc = await asyncio.create_subprocess_exec(
-                "wsl.exe", "-d", _WSL_INSTANCE, "--", "echo", "ok",
+                wsl_exe, "-d", _WSL_INSTANCE, "--", "echo", "ok",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -697,7 +739,7 @@ class _BuildManager(_ProcessManager):
         has_source = any(e["name"].lower() == _WSL_EXPORT_SOURCE.lower() for e in entries)
         if not has_source:
             proc = await asyncio.create_subprocess_exec(
-                "wsl.exe", "--install", "-d", _WSL_EXPORT_SOURCE,
+                wsl_exe, "--install", "-d", _WSL_EXPORT_SOURCE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -722,7 +764,7 @@ class _BuildManager(_ProcessManager):
 
         self._emit("progress", {"step": "creating", "message": "Exporting Ubuntu rootfs..."})
         proc_export = await asyncio.create_subprocess_exec(
-            "wsl.exe", "--export", _WSL_EXPORT_SOURCE, str(export_tar),
+            wsl_exe, "--export", _WSL_EXPORT_SOURCE, str(export_tar),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -737,7 +779,7 @@ class _BuildManager(_ProcessManager):
 
         self._emit("progress", {"step": "creating", "message": "Importing OpenAgent WSL distro..."})
         proc_import = await asyncio.create_subprocess_exec(
-            "wsl.exe", "--import", _WSL_INSTANCE, str(import_dir), str(export_tar), "--version", "2",
+            wsl_exe, "--import", _WSL_INSTANCE, str(import_dir), str(export_tar), "--version", "2",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -752,7 +794,7 @@ class _BuildManager(_ProcessManager):
 
         self._emit("progress", {"step": "starting", "message": "Starting OpenAgent WSL distro..."})
         proc_start = await asyncio.create_subprocess_exec(
-            "wsl.exe", "-d", _WSL_INSTANCE, "--", "echo", "ok",
+            wsl_exe, "-d", _WSL_INSTANCE, "--", "echo", "ok",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -945,8 +987,15 @@ class _ProvisionManager(_ProcessManager):
         if force:
             cmd += " --force"
 
+        wsl_exe = _wsl_cmd()
+        if not wsl_exe:
+            self._emit("error", {"message": "wsl.exe not found — cannot provision"})
+            self._status = "error"
+            self._error = "WSL missing"
+            return
+
         proc = await asyncio.create_subprocess_exec(
-            "wsl.exe", "-d", _WSL_INSTANCE, "--", "bash", "-lc", cmd,
+            wsl_exe, "-d", _WSL_INSTANCE, "--", "bash", "-lc", cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

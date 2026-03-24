@@ -50,6 +50,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
   const [current, setCurrent] = useState(0);
   const [prev, setPrev] = useState<number | null>(null);
   const [selectedFolder, setSelectedFolder] = useState("");
+  const [mountingFolder, setMountingFolder] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -116,7 +117,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     if (sandboxBlocked) { flashE2bHint(); return; }
     const trimmed = value.trim();
     const hasContent = trimmed || doneFiles.length > 0;
-    if (!hasContent || anyUploading) return;
+    if (!hasContent || anyUploading || mountingFolder) return;
     const opts: { workingDir?: string; attachments?: Attachment[] } = {};
     if (selectedFolder) opts.workingDir = selectedFolder;
     if (doneFiles.length > 0) {
@@ -125,7 +126,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     onSubmit(trimmed, Object.keys(opts).length > 0 ? opts : undefined);
     setValue("");
     setPendingFiles([]);
-  }, [value, onSubmit, selectedFolder, doneFiles, anyUploading, sandboxBlocked, flashE2bHint]);
+  }, [value, onSubmit, selectedFolder, doneFiles, anyUploading, mountingFolder, sandboxBlocked, flashE2bHint]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -196,9 +197,15 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     setSelectedFolder(folder);
     if (warmSessionId && folder) {
       // Mount the folder in the warm session
-      updateWarmSession(warmSessionId, { working_dir: folder }).catch(() => {
-        dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to mount folder", type: "error" } });
-      });
+      setMountingFolder(true);
+      updateWarmSession(warmSessionId, { working_dir: folder })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          // Benign race: warm session may be claimed by conversation creation.
+          if (msg.includes("(404)") && msg.includes("Session was claimed")) return;
+          dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to mount folder", type: "error" } });
+        })
+        .finally(() => setMountingFolder(false));
     }
     // If warmSessionId isn't ready yet, the effect below will flush when it arrives
   }, [warmSessionId, dispatch, vmNotReady, flashE2bHint]);
@@ -206,9 +213,14 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
   // Flush pending folder mount when warm session becomes available
   useEffect(() => {
     if (warmSessionId && selectedFolder) {
-      updateWarmSession(warmSessionId, { working_dir: selectedFolder }).catch(() => {
-        dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to mount folder", type: "error" } });
-      });
+      setMountingFolder(true);
+      updateWarmSession(warmSessionId, { working_dir: selectedFolder })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes("(404)") && msg.includes("Session was claimed")) return;
+          dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to mount folder", type: "error" } });
+        })
+        .finally(() => setMountingFolder(false));
     }
     // Only trigger when warmSessionId changes (not on every folder change —
     // handleFolderChange already handles that when the session is ready)
@@ -354,7 +366,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
                 <button
                   className="input-send"
                   onClick={handleSubmit}
-                  disabled={(!value.trim() && doneFiles.length === 0) || anyUploading || noModels || sandboxBlocked}
+                  disabled={(!value.trim() && doneFiles.length === 0) || anyUploading || mountingFolder || noModels || sandboxBlocked}
                   title={noModels ? "Configure a model in Settings first" : sandboxBlocked ? "Sandbox setup required" : "Send message"}
                 >
                   <ArrowUp />

@@ -45,6 +45,42 @@ _UNC_PREFIXES = (r"\\wsl.localhost", r"\\wsl$")
 _PLATFORM = sys.platform
 
 
+def _resolve_wsl_exe() -> str | None:
+    """Return a usable ``wsl.exe`` path.
+
+    Some hosts (notably Electron-spawned backends) omit ``System32`` from
+    ``PATH``, so ``shutil.which`` fails even though WSL is installed.
+    """
+    w = shutil.which("wsl.exe") or shutil.which("wsl")
+    if w:
+        return w
+    system_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
+    if not system_root:
+        system_root = r"C:\Windows"
+    candidate = Path(system_root) / "System32" / "wsl.exe"
+    if candidate.is_file():
+        return str(candidate)
+    return None
+
+
+def _stable_host_cwd() -> str:
+    """Return a safe Windows cwd for launching ``wsl.exe``.
+
+    WSL tries to translate the parent process cwd into Linux path on every
+    invocation. If that cwd is a stale UNC/session path, startup prints
+    ``CreateProcessCommon: ... chdir(...) failed`` and commands may run in an
+    unexpected context. Force a stable host cwd to avoid inheriting stale
+    per-session paths.
+    """
+    system_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows"
+    # ``wsl.exe`` exists under System32 on supported hosts; use that directory
+    # as a stable cwd if available, otherwise fall back to the process cwd.
+    safe_dir = Path(system_root) / "System32"
+    if safe_dir.is_dir():
+        return str(safe_dir)
+    return os.getcwd()
+
+
 def _ensure_proactor_event_loop() -> None:
     """Switch to ``ProactorEventLoop`` if not already active.
 
@@ -81,7 +117,7 @@ def _check_wsl_prerequisites() -> None:
     if _PLATFORM != "win32":
         msg = f"WSL is a Windows subsystem — it cannot run on {_PLATFORM}"
         raise UnsupportedPlatformError(msg)
-    if not shutil.which("wsl") and not shutil.which("wsl.exe"):
+    if _resolve_wsl_exe() is None:
         msg = "wsl.exe not found. Install WSL2: https://learn.microsoft.com/windows/wsl/install"
         raise MissingDependencyError(msg)
 
@@ -99,6 +135,9 @@ class WslVM:
 
     def __init__(self, instance: str) -> None:
         _check_wsl_prerequisites()
+        wsl_exe = _resolve_wsl_exe()
+        assert wsl_exe is not None
+        self._wsl_exe = wsl_exe
         self._instance = instance
         self._unc_prefix: str | None = None  # cached after first successful probe
 
@@ -133,7 +172,7 @@ class WslVM:
             WslError: If the distribution exists but is WSL version 1.
         """
         proc = await asyncio.create_subprocess_exec(
-            "wsl.exe",
+            self._wsl_exe,
             "--list",
             "--verbose",
             stdout=asyncio.subprocess.PIPE,
@@ -241,7 +280,7 @@ class WslVM:
         disk_dir.mkdir(parents=True, exist_ok=True)
 
         await self._run_wsl(
-            "wsl.exe",
+            self._wsl_exe,
             "--import",
             self._instance,
             str(disk_dir),
@@ -274,7 +313,7 @@ class WslVM:
         if current != "Running":
             # Trigger start by running a trivial command.
             await self._run_wsl(
-                "wsl.exe",
+                self._wsl_exe,
                 "-d",
                 self._instance,
                 "--",
@@ -323,7 +362,7 @@ class WslVM:
             return
 
         await self._run_wsl(
-            "wsl.exe",
+            self._wsl_exe,
             "--terminate",
             self._instance,
             timeout=60,
@@ -333,7 +372,7 @@ class WslVM:
         """Unregister the WSL distribution and clean up config (best-effort)."""
         with contextlib.suppress(WslError):
             await self._run_wsl(
-                "wsl.exe",
+                self._wsl_exe,
                 "--unregister",
                 self._instance,
             )
@@ -370,7 +409,7 @@ class WslVM:
         """
         inner = f"cd {shlex.quote(cwd)} && {command}" if cwd is not None else command
 
-        exec_args: list[str] = ["wsl.exe", "-d", self._instance]
+        exec_args: list[str] = [self._wsl_exe, "-d", self._instance]
         if user is not None:
             exec_args += ["-u", user]
         exec_args += ["--", "bash"]
@@ -386,6 +425,7 @@ class WslVM:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=_stable_host_cwd(),
         )
 
         try:
@@ -462,6 +502,7 @@ class WslVM:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=_stable_host_cwd(),
         )
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(

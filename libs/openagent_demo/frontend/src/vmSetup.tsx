@@ -250,10 +250,12 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
         }
       } catch { /* best effort */ }
 
-      // Phase 1: check if Lima is installed
+      // Phase 1: VM engine (Lima / WSL)
       let limaInstalled = false;
+      let vmStatusSnapshot: Awaited<ReturnType<typeof getVMStatus>> | null = null;
       try {
         const vs = await getVMStatus();
+        vmStatusSnapshot = vs;
         if (cancelled) return;
         setVmStatus(vs);
         if (!vs.supported) {
@@ -276,7 +278,9 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
 
       if (!limaInstalled) return;
 
-      // Phase 2: check VM instance
+      // Phase 2: VM instance (Lima must be Running; WSL is on-demand — Stopped is OK)
+      const runningLabels = ["Running", "正在运行"];
+      const wslStoppedLabels = ["Stopped", "已停止"];
       let vmReady = false;
       try {
         const bs = await getVMBuildStatus();
@@ -284,7 +288,14 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
         if (bs.status === "running") {
           // Re-attach to an in-progress build
           attachBuild();
-        } else if (bs.vm_state === "Running") {
+        } else if (bs.vm_state && runningLabels.includes(bs.vm_state)) {
+          setPhase2("done");
+          vmReady = true;
+        } else if (
+          vmStatusSnapshot?.backend === "wsl" &&
+          bs.vm_state &&
+          wslStoppedLabels.includes(bs.vm_state)
+        ) {
           setPhase2("done");
           vmReady = true;
         } else if (bs.vm_state === "Stopped") {

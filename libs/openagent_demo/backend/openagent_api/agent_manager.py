@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import os
+import shlex
 import sys
 from typing import Any
 
@@ -64,6 +65,33 @@ class AgentManager:
         setter = getattr(computer, "set_default_cwd", None)
         if callable(setter):
             setter(cwd)
+
+    async def _verify_session_dir_writable(self, session_name: str, guest_dir: str) -> None:
+        """Ensure the cowork session user can write to the selected working dir."""
+        if self._vm_manager is None:
+            return
+        vm = getattr(self._vm_manager, "_vm", None)
+        if vm is None:
+            return
+
+        probe = f"{guest_dir.rstrip('/')}/.openagent_write_probe_{os.getpid()}"
+        cmd = (
+            f"test -d {shlex.quote(guest_dir)} && "
+            f"test -w {shlex.quote(guest_dir)} && "
+            f"touch {shlex.quote(probe)} && "
+            f"rm -f {shlex.quote(probe)}"
+        )
+        result = await vm.shell(cmd, user=session_name)
+        if result.exit_code == 0:
+            return
+
+        detail = (result.stderr or result.stdout or "").strip() or "unknown error"
+        raise RuntimeError(
+            "Selected working directory is mounted but not writable for the cowork session user. "
+            f"guest_dir={guest_dir} session={session_name} detail={detail}. "
+            "Please choose a writable local folder (recommended: D:\\code\\...), "
+            "or adjust Windows folder ACL/WSL mount permissions."
+        )
 
     # ── Computer management ──
 
@@ -123,11 +151,12 @@ class AgentManager:
         if self._vm_manager is None:
             import shutil
 
-            vm_backend_ready = (
-                bool(shutil.which("wsl.exe") or shutil.which("wsl"))
-                if sys.platform == "win32"
-                else bool(shutil.which("limactl"))
-            )
+            if sys.platform == "win32":
+                from openagent.computer.local._wsl import _resolve_wsl_exe
+
+                vm_backend_ready = _resolve_wsl_exe() is not None
+            else:
+                vm_backend_ready = bool(shutil.which("limactl"))
             if not vm_backend_ready:
                 raise RuntimeError(
                     "Cowork mode requires VM setup. "
@@ -158,10 +187,9 @@ class AgentManager:
                     logger.info("Creating new session (mounts=%s)...", session_mounts)
                     computer = await self._vm_manager.computer(mounts=session_mounts)
                     if default_cwd is not None:
-                        self._set_computer_default_cwd(
-                            computer,
-                            default_cwd.format(session=computer.session_name),
-                        )
+                        resolved_cwd = default_cwd.format(session=computer.session_name)
+                        self._set_computer_default_cwd(computer, resolved_cwd)
+                        await self._verify_session_dir_writable(computer.session_name, resolved_cwd)
             except FileNotFoundError:
                 raise RuntimeError(
                     "Cowork mode requires VM setup. "
@@ -433,11 +461,12 @@ class AgentManager:
 
         import shutil
 
-        vm_backend_available = (
-            bool(shutil.which("wsl.exe") or shutil.which("wsl"))
-            if sys.platform == "win32"
-            else bool(shutil.which("limactl"))
-        )
+        if sys.platform == "win32":
+            from openagent.computer.local._wsl import _resolve_wsl_exe
+
+            vm_backend_available = _resolve_wsl_exe() is not None
+        else:
+            vm_backend_available = bool(shutil.which("limactl"))
         if not vm_backend_available:
             return
 
@@ -581,7 +610,9 @@ class AgentManager:
         await self._vm_manager.mount([mount], session=session_name)
         self._session_working_dirs[session_name] = (working_dir, new_target)
         computer = self._computers.get(session_name)
-        self._set_computer_default_cwd(computer, f"/sessions/{session_name}/mnt/{new_target}")
+        resolved_cwd = f"/sessions/{session_name}/mnt/{new_target}"
+        self._set_computer_default_cwd(computer, resolved_cwd)
+        await self._verify_session_dir_writable(session_name, resolved_cwd)
         logger.info("Mounted working dir %s for session %s", working_dir, session_name)
 
         # Remove the stale mount-point directory left behind after unmount.

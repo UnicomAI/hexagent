@@ -63,7 +63,11 @@ export async function updateWarmSession(sessionId: string, updates: { working_di
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),
   });
-  if (!res.ok) throw new Error(`Failed to update session: ${res.statusText}`);
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    const msg = detail?.detail || res.statusText || `HTTP ${res.status}`;
+    throw new Error(`Failed to update session (${res.status}): ${msg}`);
+  }
   return res.json();
 }
 
