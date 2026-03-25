@@ -743,40 +743,6 @@
   z-index: 1;
 }
 
-.welcome-categories {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 16px;
-  animation: inputReveal 600ms cubic-bezier(0.16, 1, 0.3, 1) 700ms both;
-}
-
-.welcome-category {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  font-size: var(--font-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-}
-
-.welcome-category:hover {
-  background: var(--bg-tertiary);
-  border-color: var(--border-hover, var(--border));
-  color: var(--text);
-}
-
-.welcome-category svg {
-  opacity: 0.6;
-}
-
 .welcome-subtitle {
   font-size: var(--font-sm);
   color: var(--text-secondary);

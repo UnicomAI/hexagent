@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Paperclip, ArrowUp, Globe, Presentation, PenLine, GraduationCap, Search, X, FileText, Loader2, CircleAlert } from "lucide-react";
+import { Paperclip, ArrowUp, X, FileText, Loader2, CircleAlert } from "lucide-react";
 import { useAppContext } from "../store";
 import { uploadSessionFile, deleteSessionFile, updateWarmSession } from "../api";
 import { useFileDrop } from "../hooks/useFileDrop";
@@ -371,30 +371,6 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
             </div>
           </div>
         </div>
-        {!isCowork && (
-          <div className="welcome-categories">
-            {[
-              { icon: Globe, label: "Websites" },
-              { icon: Presentation, label: "Slides" },
-              { icon: PenLine, label: "Write" },
-              { icon: GraduationCap, label: "Learn" },
-              { icon: Search, label: "Research" },
-            ].map(({ icon: Icon, label }) => (
-              <button
-                key={label}
-                className="welcome-category"
-                onClick={() => {
-                  const prefix = `Help me with ${label.toLowerCase()}: `;
-                  setValue(prefix);
-                  textareaRef.current?.focus();
-                }}
-              >
-                <Icon size={15} />
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
