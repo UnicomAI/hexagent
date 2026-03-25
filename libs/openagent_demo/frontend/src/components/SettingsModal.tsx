@@ -1739,6 +1739,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
   const allDone = vmUsable && phase3 === "done";
   const anyRunning = phase1 === "running" || phase2 === "running" || phase3 === "running";
   const coreError = phase1 === "error" || phase2 === "error";
+  const phase1NeedsRestart = /restart windows|重启.*windows|重启.*电脑|reboot/i.test(phase1Error || "");
 
   return (
     <div className="settings-section">
@@ -1837,10 +1838,20 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
                   {phase1 === "done" && <span className="vm-phase-badge vm-phase-badge--done">Installed</span>}
                   {phase1 === "running" && phase1Msg && <span className="vm-phase-msg">{phase1Msg}</span>}
                   {phase1 === "pending" && (
-                    <button className="vm-phase-action" type="button" onClick={vm.installLima}>Install</button>
+                    <button className="vm-phase-action" type="button" onClick={vm.installLima}>
+                      {vmBackend === "wsl" ? "Install runtime" : "Install"}
+                    </button>
                   )}
                   {phase1 === "error" && (
-                    <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.installLima}>Retry</button>
+                    phase1NeedsRestart ? (
+                      <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.recheckVmEngine}>
+                        I've restarted, Re-check
+                      </button>
+                    ) : (
+                      <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.installLima}>
+                        {vmBackend === "wsl" ? "Retry install" : "Retry"}
+                      </button>
+                    )
                   )}
                 </div>
                 {phase1 === "error" && phase1Error && (

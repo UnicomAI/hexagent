@@ -5,4 +5,5 @@ contextBridge.exposeInMainWorld("electronAPI", {
   backendPort: ipcRenderer.sendSync("get-backend-port"),
   isElectron: true,
   platform: process.platform,
+  installWslRuntime: () => ipcRenderer.invoke("install-wsl-runtime"),
 });

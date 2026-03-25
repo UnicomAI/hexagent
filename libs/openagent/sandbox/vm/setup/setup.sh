@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# OpenAgent VM Setup — Orchestrator
+# OpenAgent VM Setup -Orchestrator
 # =============================================================================
 # Discovers and runs step scripts in order with progress reporting,
 # resumability (marker files), concurrency protection (flock), and
@@ -21,7 +21,7 @@
 set -uo pipefail
 # No -e: we handle errors per-step.
 
-# ── Constants ────────────────────────────────────────────────────────────────
+# ------ Constants ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STEPS_DIR="${SCRIPT_DIR}/steps"
 MARKER_DIR="/var/lib/openagent/setup"
@@ -29,18 +29,31 @@ LOG_DIR="/var/log/openagent/setup"
 LOCK_FILE="/var/run/openagent-setup.lock"
 LOCK_FD=9
 
-# ── Environment (inherited by steps) ────────────────────────────────────────
+# ------ Environment (inherited by steps) ------------------------------------------------------------------------------------------------------------------------
 export DEBIAN_FRONTEND=noninteractive
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export MARKER_DIR LOG_DIR
+if grep -qi microsoft /proc/version 2>/dev/null; then
+    _OPENAGENT_DEFAULT_CN_MIRRORS=1
+else
+    _OPENAGENT_DEFAULT_CN_MIRRORS=0
+fi
+OPENAGENT_USE_CN_MIRRORS="${OPENAGENT_USE_CN_MIRRORS:-${_OPENAGENT_DEFAULT_CN_MIRRORS}}"
+OPENAGENT_APT_MIRROR="${OPENAGENT_APT_MIRROR:-https://mirrors.ustc.edu.cn/ubuntu}"
+OPENAGENT_APT_PORTS_MIRROR="${OPENAGENT_APT_PORTS_MIRROR:-https://mirrors.ustc.edu.cn/ubuntu-ports}"
+OPENAGENT_PIP_INDEX_URL="${OPENAGENT_PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+OPENAGENT_NPM_REGISTRY="${OPENAGENT_NPM_REGISTRY:-https://registry.npmmirror.com}"
+OPENAGENT_PLAYWRIGHT_DOWNLOAD_HOST="${OPENAGENT_PLAYWRIGHT_DOWNLOAD_HOST:-https://npmmirror.com/mirrors/playwright}"
+export OPENAGENT_USE_CN_MIRRORS OPENAGENT_APT_MIRROR OPENAGENT_APT_PORTS_MIRROR
+export OPENAGENT_PIP_INDEX_URL OPENAGENT_NPM_REGISTRY OPENAGENT_PLAYWRIGHT_DOWNLOAD_HOST
 
-# ── CLI defaults ─────────────────────────────────────────────────────────────
+# ------ CLI defaults ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 FORCE=false
 SINGLE_STEP=""
 LIST_ONLY=false
 RESET=false
 
-# ── CLI parsing ──────────────────────────────────────────────────────────────
+# ------ CLI parsing ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 usage() {
     echo "Usage: sudo bash setup.sh [OPTIONS]"
     echo ""
@@ -63,16 +76,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ── Root check ───────────────────────────────────────────────────────────────
+# ------ Root check ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 if [[ "$(id -u)" -ne 0 ]]; then
     echo "ERROR: Must run as root (sudo)." >&2
     exit 1
 fi
 
-# ── Directory setup ──────────────────────────────────────────────────────────
+# ------ Directory setup ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 mkdir -p "$MARKER_DIR" "$LOG_DIR"
 
-# ── emit() — progress protocol ──────────────────────────────────────────────
+# ------ emit() -progress protocol ------------------------------------------------------------------------------------------------------------------------------------------
 # Writes to fd 3 which points to the original stdout (what the backend reads).
 # All other output (package managers) goes to the log file.
 emit() {
@@ -82,7 +95,7 @@ emit() {
 }
 export -f emit
 
-# ── apt_install — retry wrapper ──────────────────────────────────────────────
+# ------ apt_install -retry wrapper ------------------------------------------------------------------------------------------------------------------------------------------
 apt_install() {
     local max_attempts=5
     local delay=3
@@ -131,21 +144,33 @@ apt_install() {
 }
 export -f apt_install
 
-# ── pip_install — retry wrapper ──────────────────────────────────────────────
+# ------ pip_install -retry wrapper ------------------------------------------------------------------------------------------------------------------------------------------
 pip_install() {
     local max_attempts=5
     local delay=5
     local attempt=1
+    local use_cn_mirrors="${OPENAGENT_USE_CN_MIRRORS:-0}"
     local pip_opts=(
-        --break-system-packages
         --timeout 120
         --retries 3
+        --no-cache-dir
     )
+    if pip3 help install 2>/dev/null | grep -q -- "--break-system-packages"; then
+        pip_opts+=(--break-system-packages)
+    fi
 
     while [[ $attempt -le $max_attempts ]]; do
         echo ">>> pip install attempt $attempt/$max_attempts (${#} packages)"
         if pip3 install "${pip_opts[@]}" "$@"; then
             return 0
+        fi
+        if [[ "$use_cn_mirrors" == "1" ]]; then
+            echo ">>> Mirror install failed, retrying with official PyPI..."
+            if PIP_INDEX_URL="https://pypi.org/simple" \
+               PIP_EXTRA_INDEX_URL="" \
+               pip3 install "${pip_opts[@]}" "$@"; then
+                return 0
+            fi
         fi
         echo ">>> Attempt $attempt failed. Retrying in ${delay}s..."
         sleep $delay
@@ -163,6 +188,14 @@ pip_install() {
             if pip3 install "${pip_opts[@]}" "$pkg" 2>&1; then
                 pkg_ok=true
                 break
+            fi
+            if [[ "$use_cn_mirrors" == "1" ]]; then
+                if PIP_INDEX_URL="https://pypi.org/simple" \
+                   PIP_EXTRA_INDEX_URL="" \
+                   pip3 install "${pip_opts[@]}" "$pkg" 2>&1; then
+                    pkg_ok=true
+                    break
+                fi
             fi
             echo ">>> Failed: $pkg (attempt $pkg_attempt/3)"
             sleep $((pkg_attempt * 3))
@@ -182,11 +215,61 @@ pip_install() {
 }
 export -f pip_install
 
-# ── Marker helpers ───────────────────────────────────────────────────────────
+configure_cn_mirrors() {
+    if [[ "${OPENAGENT_USE_CN_MIRRORS}" != "1" ]]; then
+        return 0
+    fi
+
+    emit _meta progress "Applying China mirrors (APT/PIP/NPM/Playwright)"
+
+    # sed replacement escapes for arbitrary mirror strings (e.g. containing '&' or '|')
+    local apt_mirror_esc apt_ports_mirror_esc
+    apt_mirror_esc="${OPENAGENT_APT_MIRROR//\\/\\\\}"
+    apt_mirror_esc="${apt_mirror_esc//&/\\&}"
+    apt_mirror_esc="${apt_mirror_esc//|/\\|}"
+    apt_ports_mirror_esc="${OPENAGENT_APT_PORTS_MIRROR//\\/\\\\}"
+    apt_ports_mirror_esc="${apt_ports_mirror_esc//&/\\&}"
+    apt_ports_mirror_esc="${apt_ports_mirror_esc//|/\\|}"
+
+    if [[ -f /etc/apt/sources.list ]]; then
+        cp -n /etc/apt/sources.list /etc/apt/sources.list.openagent.bak 2>/dev/null || true
+        sed -Ei \
+            -e "s|https?://(archive|security)\.ubuntu\.com/ubuntu|${apt_mirror_esc}|g" \
+            -e "s|https?://ports\.ubuntu\.com/ubuntu-ports|${apt_ports_mirror_esc}|g" \
+            /etc/apt/sources.list 2>/dev/null || true
+    fi
+
+    if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then
+        cp -n /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources.openagent.bak 2>/dev/null || true
+        sed -Ei \
+            -e "s|^URIs:[[:space:]]*https?://(archive|security)\.ubuntu\.com/ubuntu/?$|URIs: ${apt_mirror_esc}|g" \
+            -e "s|^URIs:[[:space:]]*https?://ports\.ubuntu\.com/ubuntu-ports/?$|URIs: ${apt_ports_mirror_esc}|g" \
+            /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+    fi
+
+    cat >/etc/pip.conf <<EOF
+[global]
+index-url = ${OPENAGENT_PIP_INDEX_URL}
+extra-index-url = https://pypi.org/simple
+timeout = 120
+retries = 5
+EOF
+
+    mkdir -p /etc/profile.d
+    cat >/etc/profile.d/openagent-mirrors.sh <<EOF
+export OPENAGENT_USE_CN_MIRRORS=1
+export PIP_INDEX_URL='${OPENAGENT_PIP_INDEX_URL}'
+export NPM_CONFIG_REGISTRY='${OPENAGENT_NPM_REGISTRY}'
+export PLAYWRIGHT_DOWNLOAD_HOST='${OPENAGENT_PLAYWRIGHT_DOWNLOAD_HOST}'
+EOF
+}
+export -f configure_cn_mirrors
+
+# ------ Marker helpers ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 step_done() { [[ -f "${MARKER_DIR}/$1.done" ]]; }
 mark_done() { date -Iseconds > "${MARKER_DIR}/$1.done"; }
 
-# ── Step discovery ───────────────────────────────────────────────────────────
+# ------ Step discovery ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 discover_steps() {
     for f in "${STEPS_DIR}"/*.sh; do
         [[ -f "$f" ]] || continue
@@ -199,41 +282,41 @@ step_desc() {
     sed -n '2s/^# *//p' "$1"
 }
 
-# ── --reset ──────────────────────────────────────────────────────────────────
+# ------ --reset ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 if [[ "$RESET" == true ]]; then
     rm -f "${MARKER_DIR}"/*.done
     echo "All markers cleared."
     exit 0
 fi
 
-# ── --list ───────────────────────────────────────────────────────────────────
+# ------ --list ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 if [[ "$LIST_ONLY" == true ]]; then
     while IFS= read -r step_file; do
         step_id="$(basename "$step_file" .sh)"
         if step_done "$step_id"; then
             echo "[done]    $step_id  ($(cat "${MARKER_DIR}/${step_id}.done"))"
         else
-            echo "[pending] $step_id  — $(step_desc "$step_file")"
+            echo "[pending] $step_id  -$(step_desc "$step_file")"
         fi
     done < <(discover_steps)
     exit 0
 fi
 
-# ── Concurrency lock ─────────────────────────────────────────────────────────
+# ------ Concurrency lock ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 exec 9>"$LOCK_FILE"
 if ! flock -n $LOCK_FD; then
     echo "ERROR: Another setup instance is running (lockfile: $LOCK_FILE)" >&2
     exit 1
 fi
 
-# ── fd redirection ───────────────────────────────────────────────────────────
-# fd 3 = original stdout → backend reads @@SETUP: lines from here
-# stdout + stderr → log file (all package manager noise)
+# ------ fd redirection ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# fd 3 = original stdout -backend reads @@SETUP: lines from here
+# stdout + stderr -log file (all package manager noise)
 LOGFILE="${LOG_DIR}/setup-$(date +%Y%m%d-%H%M%S).log"
 exec 3>&1
 exec 1>>"$LOGFILE" 2>&1
 
-# ── Signal handling ──────────────────────────────────────────────────────────
+# ------ Signal handling ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 HEARTBEAT_PID=""
 
 cleanup() {
@@ -249,7 +332,7 @@ cancelled() {
 }
 trap cancelled SIGTERM SIGINT
 
-# ── Heartbeat ────────────────────────────────────────────────────────────────
+# ------ Heartbeat ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 start_heartbeat() {
     local step_id="$1"
     (
@@ -269,7 +352,7 @@ stop_heartbeat() {
     fi
 }
 
-# ── Preflight ────────────────────────────────────────────────────────────────
+# ------ Preflight ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 preflight() {
     emit _meta start "Preflight checks"
 
@@ -281,7 +364,9 @@ preflight() {
     esac
     export ARCH
 
-    # Disk space (require ≥10 GB free on /)
+    configure_cn_mirrors
+
+    # Disk space (require >= 10 GB free on /)
     local free_kb
     free_kb=$(df / --output=avail | tail -1 | tr -d ' ')
     if (( free_kb < 10485760 )); then
@@ -292,7 +377,7 @@ preflight() {
     emit _meta done "Preflight OK (arch=$ARCH, free=$((free_kb / 1024))MB)"
 }
 
-# ── run_step ─────────────────────────────────────────────────────────────────
+# ------ run_step ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 run_step() {
     local step_file="$1"
     local step_id
@@ -325,12 +410,12 @@ run_step() {
         mark_done "$step_id"
         emit "$step_id" done "Completed in ${elapsed}s"
     else
-        emit "$step_id" error "Failed (exit $rc) after ${elapsed}s — see $LOGFILE"
+        emit "$step_id" error "Failed (exit $rc) after ${elapsed}s - see $LOGFILE"
         return $rc
     fi
 }
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# ------ Main ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 main() {
     preflight
 
@@ -362,7 +447,7 @@ main() {
     done < <(discover_steps)
 
     if [[ $failed -gt 0 ]]; then
-        emit _meta error "Setup failed — re-run to resume from failed step"
+        emit _meta error "Setup failed - re-run to resume from failed step"
         exit 1
     fi
 

@@ -50,6 +50,7 @@ export interface VMSetupContextValue {
   provLog: string | null;
 
   installLima: () => void;
+  recheckVmEngine: () => void;
   buildVMInstance: () => void;
   startProvision: (force?: boolean) => void;
   stopProvision: () => void;
@@ -105,6 +106,42 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
 
   const notify = (message: string, type: "error" | "info" | "success") => {
     dispatch({ type: "SHOW_NOTIFICATION", payload: { message, type } });
+  };
+
+  const doRecheckVmEngine = async () => {
+    setPhase1("checking");
+    setPhase1Msg("Re-checking runtime status...");
+    setPhase1Error("");
+    try {
+      const vs = await getVMStatus();
+      setVmStatus(vs);
+      dispatch({ type: "SET_VM_STATUS", payload: vs });
+      if (!vs.supported) {
+        setPhase1("error");
+        setPhase1Msg("");
+        setPhase1Error("Not supported on this platform");
+        return;
+      }
+      if (vs.installed) {
+        setPhase1("done");
+        setPhase1Msg("");
+        setPhase1Error("");
+        setPhase2("pending");
+        attachBuild();
+      } else if (vs.reason) {
+        setPhase1("error");
+        setPhase1Msg("");
+        setPhase1Error(vs.reason);
+      } else {
+        setPhase1("pending");
+        setPhase1Msg("");
+        setPhase1Error("");
+      }
+    } catch {
+      setPhase1("error");
+      setPhase1Msg("");
+      setPhase1Error("Could not check VM status");
+    }
   };
 
   // ── Phase 3: Provision ──
@@ -185,6 +222,63 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
   // ── Phase 1: Install Lima ──
 
   const doInstallLima = () => {
+    const inferredBackend = navigator.platform.toUpperCase().includes("WIN") ? "wsl" : "lima";
+    const currentBackend = vmStatus?.backend ?? inferredBackend;
+    const canAssistWslInstall =
+      currentBackend === "wsl" &&
+      typeof window !== "undefined" &&
+      typeof window.electronAPI?.installWslRuntime === "function";
+
+    if (canAssistWslInstall) {
+      setPhase1("running");
+      setPhase1Error("");
+      setPhase1Msg("Installing required Windows runtime (admin permission needed)...");
+
+      window.electronAPI!
+        .installWslRuntime!()
+        .then(async (res) => {
+          if (!res.ok) {
+            const msg = res.message || "Runtime installation failed.";
+            setPhase1("error");
+            setPhase1Error(msg);
+            notify(msg, "error");
+            return;
+          }
+
+          if (res.rebootRequired) {
+            const msg = res.message || "Runtime installed. Please restart Windows before continuing VM setup.";
+            setPhase1("error");
+            setPhase1Msg("");
+            setPhase1Error(msg);
+            notify(msg, "info");
+            return;
+          }
+
+          const vs = await getVMStatus();
+          setVmStatus(vs);
+          dispatch({ type: "SET_VM_STATUS", payload: vs });
+
+          if (vs.installed) {
+            setPhase1("done");
+            setPhase1Msg("");
+            notify("Runtime installed", "success");
+            setPhase2("pending");
+            attachBuild();
+          } else {
+            setPhase1("pending");
+            setPhase1Msg("Runtime install command completed. Click Retry if needed.");
+            notify("Runtime install command completed", "info");
+          }
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          setPhase1("error");
+          setPhase1Error(msg);
+          notify(`Runtime installation failed: ${msg}`, "error");
+        });
+      return;
+    }
+
     setPhase1("running");
     setPhase1Error("");
     setPhase1Msg("Starting installation...");
@@ -266,6 +360,9 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
         if (vs.installed) {
           setPhase1("done");
           limaInstalled = true;
+        } else if (vs.reason) {
+          setPhase1("error");
+          setPhase1Error(vs.reason);
         } else {
           setPhase1("pending");
         }
@@ -351,6 +448,7 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
     phase3, phase3Error,
     provSteps, provStepStatus, provStepMsg, provLog,
     installLima: doInstallLima,
+    recheckVmEngine: doRecheckVmEngine,
     buildVMInstance: attachBuild,
     startProvision: doStartProvision,
     stopProvision: doStopProvision,

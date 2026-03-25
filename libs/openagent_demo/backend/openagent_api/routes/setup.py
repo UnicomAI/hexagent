@@ -14,6 +14,7 @@ import logging
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess as _sp
 import sys
@@ -180,6 +181,10 @@ def _lima_status() -> dict[str, object]:
 
 _WSL_INSTANCE = "openagent"
 _WSL_EXPORT_SOURCE = "Ubuntu"
+_WSL_PREBUILT_CANDIDATES = (
+    "openagent-prebuilt.tar",
+    "openagent.tar",
+)
 
 
 def _wsl_cmd() -> str | None:
@@ -208,6 +213,68 @@ def _decode_wsl_output(raw: bytes) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+def _combine_wsl_output(stdout_b: bytes | None, stderr_b: bytes | None) -> str:
+    """Decode and combine WSL stdout/stderr, preferring non-empty stderr first."""
+    err = _decode_wsl_output(stderr_b or b"").strip()
+    out = _decode_wsl_output(stdout_b or b"").strip()
+    if err and out:
+        return f"{err}\n{out}"
+    return err or out
+
+
+def _looks_like_missing_wsl_disk(msg: str) -> bool:
+    text = msg.lower()
+    return (
+        "error_path_not_found" in text
+        or "mountdisk" in text
+        or "ext4.vhdx" in text
+    )
+
+
+def _wsl2_blocker_reason(text: str) -> str | None:
+    """Return a friendly reason when host cannot run WSL2."""
+    t = (text or "").lower()
+    blockers = (
+        "does not support wsl2",
+        "not support wsl2",
+        "wsl2",
+        "enablevirtualization",
+        "virtual machine platform",
+        "bios",
+        "当前计算机配置不支持 wsl2",
+        "虚拟机平台",
+    )
+    if any(k in t for k in blockers):
+        return (
+            "WSL2 is not available on this PC yet. Please enable "
+            "'Virtual Machine Platform', ensure virtualization is enabled in BIOS, "
+            "then reboot Windows and retry."
+        )
+    return None
+
+
+def _probe_wsl2_readiness() -> tuple[bool, str | None]:
+    """Check whether host is ready for WSL2-based distro import/start."""
+    wsl = _wsl_cmd()
+    if not wsl:
+        return False, "wsl.exe not found"
+    try:
+        proc = _sp.run(
+            [wsl, "--status"],
+            stdout=_sp.PIPE,
+            stderr=_sp.PIPE,
+            timeout=8,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        return False, str(exc)
+
+    combined = _combine_wsl_output(proc.stdout, proc.stderr).strip()
+    reason = _wsl2_blocker_reason(combined)
+    if reason:
+        return False, reason
+    return True, None
+
+
 def _parse_wsl_list(text: str) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
     for line in text.splitlines():
@@ -219,9 +286,13 @@ def _parse_wsl_list(text: str) -> list[dict[str, str]]:
         if stripped.startswith("*"):
             stripped = stripped[1:].strip()
         parts = stripped.split()
-        if len(parts) < 3:
+        if len(parts) >= 3:
+            entries.append({"name": parts[0], "state": parts[1], "version": parts[2]})
             continue
-        entries.append({"name": parts[0], "state": parts[1], "version": parts[2]})
+        # Older WSL builds may only return distro names with `wsl --list`.
+        # Keep them with a synthetic state so downstream logic can still detect existence.
+        if len(parts) == 1 and parts[0].lower() not in {"windows", "subsystem", "linux"}:
+            entries.append({"name": parts[0], "state": "Unknown", "version": ""})
     return entries
 
 
@@ -229,17 +300,27 @@ async def _wsl_list() -> list[dict[str, str]]:
     wsl_exe = _wsl_cmd()
     if not wsl_exe:
         return []
-    proc = await asyncio.create_subprocess_exec(
-        wsl_exe,
-        "--list",
-        "--verbose",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+    # Newer WSL supports `--list --verbose`, while older builds support `-l -v`
+    # or only plain `--list`. Try all variants for best compatibility.
+    variants = (
+        ("--list", "--verbose"),
+        ("-l", "-v"),
+        ("--list",),
     )
-    out_b, _ = await proc.communicate()
-    if proc.returncode != 0:
-        return []
-    return _parse_wsl_list(_decode_wsl_output(out_b or b""))
+    for args in variants:
+        proc = await asyncio.create_subprocess_exec(
+            wsl_exe,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out_b, _err_b = await proc.communicate()
+        if proc.returncode != 0:
+            continue
+        parsed = _parse_wsl_list(_decode_wsl_output(out_b or b""))
+        if parsed:
+            return parsed
+    return []
 
 
 async def _wsl_instance_status() -> str | None:
@@ -248,6 +329,46 @@ async def _wsl_instance_status() -> str | None:
         if entry["name"].lower() == _WSL_INSTANCE.lower():
             return entry["state"]
     return None
+
+
+def _wsl_prebuilt_tar_path() -> Path | None:
+    """Return bundled prebuilt WSL rootfs tar if present."""
+    prebuilt_dir = vm_setup_dir().parent / "wsl" / "prebuilt"
+    for name in _WSL_PREBUILT_CANDIDATES:
+        candidate = prebuilt_dir / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+async def _wsl_probe_start() -> tuple[bool, str]:
+    """Best-effort probe that distro can actually start.
+
+    This catches cases where `wsl -l -v` still lists the distro (Stopped),
+    but its backing VHDX path is missing/corrupted.
+    """
+    wsl_exe = _wsl_cmd()
+    if not wsl_exe:
+        return False, "wsl.exe not found"
+    proc = await asyncio.create_subprocess_exec(
+        wsl_exe,
+        "-d",
+        _WSL_INSTANCE,
+        "--",
+        "echo",
+        "ok",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=20)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return False, "WSL start probe timed out"
+    if (proc.returncode or 0) == 0:
+        return True, ""
+    return False, _combine_wsl_output(stdout_b, stderr_b)
 
 
 # ``wsl -l -v`` uses the Windows display language for the STATE column.
@@ -305,7 +426,49 @@ def _pick_wsl_source_distro(entries: list[dict[str, str]]) -> str | None:
 
 def _wsl_status() -> dict[str, object]:
     wsl = _wsl_cmd()
-    return {"installed": bool(wsl), "path": wsl, "managed": False}
+    if not wsl:
+        return {"installed": False, "path": None, "managed": False}
+
+    ready, reason = _probe_wsl2_readiness()
+    if not ready:
+        return {
+            "installed": False,
+            "path": wsl,
+            "managed": False,
+            "reason": reason or "WSL runtime is not available",
+        }
+
+    # `wsl.exe` may exist even when WSL optional components are not enabled.
+    # Probe command success instead of relying on binary presence.
+    probe_variants = (
+        ("--status",),
+        ("--list", "--verbose"),
+        ("-l", "-v"),
+        ("--list",),
+    )
+    last_err = ""
+    for args in probe_variants:
+        try:
+            proc = _sp.run(
+                [wsl, *args],
+                stdout=_sp.PIPE,
+                stderr=_sp.PIPE,
+                timeout=8,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            last_err = str(exc)
+            continue
+
+        if proc.returncode == 0:
+            return {"installed": True, "path": wsl, "managed": False}
+        last_err = _combine_wsl_output(proc.stdout, proc.stderr).strip() or last_err
+
+    return {
+        "installed": False,
+        "path": wsl,
+        "managed": False,
+        "reason": last_err or "WSL runtime is not available",
+    }
 
 
 def _win_path_to_wsl(path: Path | str) -> str:
@@ -492,6 +655,7 @@ async def get_vm_status() -> dict[str, object]:
 
     vm_ready = False
     instance_status: str | None = None
+    instance_error: str | None = None
     if result.get("installed"):
         try:
             if result.get("backend") == "lima":
@@ -500,10 +664,17 @@ async def get_vm_status() -> dict[str, object]:
             elif result.get("backend") == "wsl":
                 instance_status = await _wsl_instance_status()
                 vm_ready = _wsl_distro_ready_for_cowork(instance_status)
+                if vm_ready:
+                    ok, err = await _wsl_probe_start()
+                    if not ok:
+                        vm_ready = False
+                        instance_error = err or "WSL distro exists but failed to start"
         except Exception:
             pass
 
     result["instance_status"] = instance_status
+    if instance_error:
+        result["instance_error"] = instance_error
     result["vm_ready"] = vm_ready
     return result
 
@@ -772,6 +943,13 @@ class _BuildManager(_ProcessManager):
             self._error = "WSL missing"
             return
 
+        ready, reason = _probe_wsl2_readiness()
+        if not ready:
+            self._emit("error", {"message": reason or "WSL2 runtime is not ready"})
+            self._status = "error"
+            self._error = "WSL2 not ready"
+            return
+
         status = await _wsl_instance_status()
         if _wsl_state_equals(status, _WSL_RUNNING_STATES):
             self._emit("done", {"message": "WSL distro is already running"})
@@ -786,7 +964,7 @@ class _BuildManager(_ProcessManager):
                 stderr=asyncio.subprocess.PIPE,
             )
             self._process = proc
-            _, stderr_b = await self._communicate_with_heartbeat(
+            stdout_b, stderr_b = await self._communicate_with_heartbeat(
                 proc,
                 step="starting",
                 message="Starting existing WSL distro...",
@@ -794,14 +972,87 @@ class _BuildManager(_ProcessManager):
             if proc.returncode == 0:
                 self._emit("done", {"message": "WSL distro started successfully"})
                 self._status = "done"
+                return
             else:
-                err = _decode_wsl_output(stderr_b or b"").strip()
-                self._emit("error", {"message": err or f"WSL start failed (exit {proc.returncode})"})
+                err = _combine_wsl_output(stdout_b, stderr_b)
+                if _looks_like_missing_wsl_disk(err):
+                    self._emit("progress", {"step": "creating", "message": "Detected broken WSL distro disk. Recreating OpenAgent distro..."})
+                    proc_unreg = await asyncio.create_subprocess_exec(
+                        wsl_exe, "--unregister", _WSL_INSTANCE,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    self._process = proc_unreg
+                    u_out_b, u_err_b = await self._communicate_with_heartbeat(
+                        proc_unreg,
+                        step="creating",
+                        message="Removing broken OpenAgent WSL distro...",
+                    )
+                    if proc_unreg.returncode != 0:
+                        u_err = _combine_wsl_output(u_out_b, u_err_b)
+                        self._emit("error", {"message": u_err or f"WSL unregister failed (exit {proc_unreg.returncode})"})
+                        self._status = "error"
+                        self._error = f"exit {proc_unreg.returncode}"
+                        return
+                    # Continue with fresh-create flow below.
+                else:
+                    self._emit("error", {"message": err or f"WSL start failed (exit {proc.returncode})"})
+                    self._status = "error"
+                    self._error = f"exit {proc.returncode}"
+                    return
+
+        prebuilt_tar = _wsl_prebuilt_tar_path()
+        import_dir = data_dir() / "wsl" / _WSL_INSTANCE / "disk"
+
+        # Distro does not exist: prefer bundled prebuilt OpenAgent rootfs.
+        if prebuilt_tar is not None:
+            self._emit("progress", {"step": "creating", "message": "Importing bundled OpenAgent VM image..."})
+            if import_dir.exists():
+                shutil.rmtree(import_dir, ignore_errors=True)
+            import_dir.mkdir(parents=True, exist_ok=True)
+
+            proc_import = await asyncio.create_subprocess_exec(
+                wsl_exe, "--import", _WSL_INSTANCE, str(import_dir), str(prebuilt_tar), "--version", "2",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            self._process = proc_import
+            _, err_b = await self._communicate_with_heartbeat(
+                proc_import,
+                step="creating",
+                message="Importing bundled OpenAgent VM image...",
+                progress_info=lambda: f"(image ~{(prebuilt_tar.stat().st_size / (1024 * 1024)):.1f} MB)",
+            )
+            if proc_import.returncode != 0:
+                err = _decode_wsl_output(err_b or b"").strip()
+                self._emit("error", {"message": err or f"Bundled image import failed (exit {proc_import.returncode})"})
                 self._status = "error"
-                self._error = f"exit {proc.returncode}"
+                self._error = f"exit {proc_import.returncode}"
+                return
+
+            self._emit("progress", {"step": "starting", "message": "Starting imported OpenAgent WSL distro..."})
+            proc_start = await asyncio.create_subprocess_exec(
+                wsl_exe, "-d", _WSL_INSTANCE, "--", "echo", "ok",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            self._process = proc_start
+            out_b, err_b = await self._communicate_with_heartbeat(
+                proc_start,
+                step="starting",
+                message="Starting imported OpenAgent WSL distro...",
+            )
+            if proc_start.returncode == 0:
+                self._emit("done", {"message": "WSL distro imported from bundled image and started successfully"})
+                self._status = "done"
+            else:
+                err = _combine_wsl_output(out_b, err_b)
+                self._emit("error", {"message": err or f"WSL start failed (exit {proc_start.returncode})"})
+                self._status = "error"
+                self._error = f"exit {proc_start.returncode}"
             return
 
-        # Distro does not exist: bootstrap from Ubuntu export.
+        # Fallback: bootstrap from Ubuntu export.
         self._emit("progress", {"step": "creating", "message": "Preparing source distro (Ubuntu)..."})
         entries = await _wsl_list()
         source_distro = _pick_wsl_source_distro(entries)
@@ -841,7 +1092,6 @@ class _BuildManager(_ProcessManager):
         export_root = deps_dir() / "wsl"
         export_root.mkdir(parents=True, exist_ok=True)
         export_tar = export_root / f"{source_distro.lower()}-seed.tar"
-        import_dir = data_dir() / "wsl" / _WSL_INSTANCE / "disk"
         import_dir.mkdir(parents=True, exist_ok=True)
 
         self._emit("progress", {"step": "creating", "message": "Exporting Ubuntu rootfs..."})
@@ -890,7 +1140,7 @@ class _BuildManager(_ProcessManager):
             stderr=asyncio.subprocess.PIPE,
         )
         self._process = proc_start
-        _, err_b = await self._communicate_with_heartbeat(
+        out_b, err_b = await self._communicate_with_heartbeat(
             proc_start,
             step="starting",
             message="Starting OpenAgent WSL distro...",
@@ -899,7 +1149,7 @@ class _BuildManager(_ProcessManager):
             self._emit("done", {"message": "WSL distro created and started successfully"})
             self._status = "done"
         else:
-            err = _decode_wsl_output(err_b or b"").strip()
+            err = _combine_wsl_output(out_b, err_b)
             self._emit("error", {"message": err or f"WSL start failed (exit {proc_start.returncode})"})
             self._status = "error"
             self._error = f"exit {proc_start.returncode}"
@@ -1051,11 +1301,34 @@ class _ProvisionManager(_ProcessManager):
     async def _run_wsl(self, **kwargs: object) -> None:
         force = bool(kwargs.get("force", False))
         instance_status = await _wsl_instance_status()
-        if instance_status != "Running":
-            self._emit("error", {"message": f"WSL distro is not running (status: {instance_status})"})
+        # Keep cowork behavior consistent with /api/setup/vm:
+        # distro may be Stopped but still ready; start it on-demand.
+        if not _wsl_distro_ready_for_cowork(instance_status):
+            self._emit("error", {"message": f"WSL distro is not available (status: {instance_status})"})
             self._status = "error"
-            self._error = "WSL distro not running"
+            self._error = "WSL distro unavailable"
             return
+        if not _wsl_state_equals(instance_status, _WSL_RUNNING_STATES):
+            self._emit("progress", {"step": "starting", "message": "Starting WSL distro for provisioning..."})
+            wsl_exe = _wsl_cmd()
+            if not wsl_exe:
+                self._emit("error", {"message": "wsl.exe not found - cannot provision"})
+                self._status = "error"
+                self._error = "WSL missing"
+                return
+            proc_start = await asyncio.create_subprocess_exec(
+                wsl_exe, "-d", _WSL_INSTANCE, "--", "echo", "ok",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            self._process = proc_start
+            stdout_b, stderr_b = await proc_start.communicate()
+            if proc_start.returncode != 0:
+                err = _combine_wsl_output(stdout_b, stderr_b)
+                self._emit("error", {"message": err or f"WSL start failed (exit {proc_start.returncode})"})
+                self._status = "error"
+                self._error = f"exit {proc_start.returncode}"
+                return
 
         self._emit("progress", {"step": "copying", "message": "Preparing setup files in WSL..."})
         setup_dir = vm_setup_dir()
@@ -1066,9 +1339,11 @@ class _ProvisionManager(_ProcessManager):
             return
 
         setup_wsl = _win_path_to_wsl(setup_dir)
+        setup_wsl_quoted = shlex.quote(setup_wsl)
+        setup_vm_dir_quoted = shlex.quote(_SETUP_VM_DIR)
         rc, _, err = await _wsl_shell(
-            f"sudo rm -rf {_SETUP_VM_DIR} && sudo mkdir -p {_SETUP_VM_DIR} && "
-            f"sudo cp -r {setup_wsl}/. {_SETUP_VM_DIR}/",
+            f"sudo rm -rf {setup_vm_dir_quoted} && sudo mkdir -p {setup_vm_dir_quoted} && "
+            f"sudo cp -r {setup_wsl_quoted}/. {setup_vm_dir_quoted}/",
             timeout=60,
         )
         if rc != 0:

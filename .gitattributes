@@ -1,0 +1,2 @@
+libs/openagent/sandbox/vm/setup/*.sh text eol=lf
+libs/openagent/sandbox/vm/setup/steps/*.sh text eol=lf

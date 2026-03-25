@@ -195,10 +195,76 @@ function killBackend() {
   }
 }
 
+function runCommand(cmd, args) {
+  return new Promise((resolve) => {
+    const p = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    p.stdout?.on("data", (d) => { stdout += d.toString(); });
+    p.stderr?.on("data", (d) => { stderr += d.toString(); });
+    p.on("error", (err) => {
+      resolve({ code: 1, stdout, stderr: `${stderr}\n${err.message}`.trim() });
+    });
+    p.on("close", (code) => {
+      resolve({ code: code ?? 1, stdout, stderr });
+    });
+  });
+}
+
 // ── IPC ──────────────────────────────────────────────────────────────────────
 
 ipcMain.on("get-backend-port", (event) => {
   event.returnValue = backendPort;
+});
+
+ipcMain.handle("install-wsl-runtime", async () => {
+  if (process.platform !== "win32") {
+    return { ok: false, message: "This action is only available on Windows." };
+  }
+
+  // Launch WSL installation with UAC elevation so non-technical users can
+  // complete prerequisites in-app with one click.
+  const psScript = `
+$ErrorActionPreference = 'Stop'
+$proc = Start-Process -FilePath "wsl.exe" -ArgumentList "--install","--no-distribution" -Verb RunAs -Wait -PassThru
+if ($null -eq $proc) { exit 1 }
+exit $proc.ExitCode
+`.trim();
+
+  const res = await runCommand("powershell.exe", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    psScript,
+  ]);
+
+  // WSL optional features often need a reboot before WSL2 import/start works.
+  // We gate follow-up VM instance setup on reboot to avoid first-run import failures.
+  const success = res.code === 0 || res.code === 3010;
+  const rebootRequired = success;
+  if (success) {
+    return {
+      ok: true,
+      rebootRequired,
+      exitCode: res.code,
+      message: "Runtime installation completed. Please restart Windows before continuing VM setup.",
+      stdout: res.stdout,
+      stderr: res.stderr,
+    };
+  }
+
+  const combined = `${res.stderr || ""}\n${res.stdout || ""}`.trim();
+  const cancelled = /canceled|cancelled|拒绝|已取消|denied/i.test(combined);
+  if (cancelled) {
+    return { ok: false, exitCode: res.code, message: "Installation was cancelled." };
+  }
+
+  return {
+    ok: false,
+    exitCode: res.code,
+    message: combined || `Runtime installation failed (exit ${res.code}).`,
+  };
 });
 
 // ── Window ───────────────────────────────────────────────────────────────────
