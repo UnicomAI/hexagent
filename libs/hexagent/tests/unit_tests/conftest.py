@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
+import pytest
 from pydantic import BaseModel
 
 from hexagent.harness.model import ModelProfile
+from hexagent.tasks import TaskRegistry
 from hexagent.tools.base import BaseAgentTool
 from hexagent.types import ToolResult
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 def _stub_model() -> MagicMock:
@@ -48,3 +53,11 @@ def make_tool(name: str, *, instruction: str = "") -> BaseAgentTool[StubParams]:
 def core_tools() -> list[BaseAgentTool[Any]]:
     """Return the six core mock tools (Bash, Read, Edit, Write, Glob, Grep)."""
     return [make_tool(n) for n in ("Bash", "Read", "Edit", "Write", "Glob", "Grep")]
+
+
+@pytest.fixture
+async def task_registry() -> AsyncIterator[TaskRegistry]:
+    """TaskRegistry with automatic cleanup of running tasks."""
+    registry = TaskRegistry()
+    yield registry
+    await registry.cancel_all()

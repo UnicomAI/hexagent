@@ -34,13 +34,11 @@ async def _failing_coro(error_msg: str = "boom", delay: float = 0.0) -> ToolResu
 
 
 class TestSubmit:
-    async def test_creates_running_entry(self) -> None:
-        registry = TaskRegistry()
-        registry.submit("t1", "test", "desc", _success_coro(delay=1.0))
-        entry = registry.get("t1")
+    async def test_creates_running_entry(self, task_registry: TaskRegistry) -> None:
+        task_registry.submit("t1", "test", "desc", _success_coro(delay=1.0))
+        entry = task_registry.get("t1")
         assert entry is not None
         assert entry.status == "running"
-        await registry.cancel_all()
 
     async def test_completes_successfully(self) -> None:
         registry = TaskRegistry()
@@ -59,12 +57,10 @@ class TestSubmit:
         assert entry.result is not None
         assert entry.result.error is not None
 
-    async def test_raises_on_running_duplicate(self) -> None:
-        registry = TaskRegistry()
-        registry.submit("t1", "test", "desc", _success_coro(delay=10.0))
+    async def test_raises_on_running_duplicate(self, task_registry: TaskRegistry) -> None:
+        task_registry.submit("t1", "test", "desc", _success_coro(delay=10.0))
         with pytest.raises(RuntimeError):
-            registry.submit("t1", "test", "desc2", _success_coro())
-        await registry.cancel_all()
+            task_registry.submit("t1", "test", "desc2", _success_coro())
 
     async def test_resets_terminal_entry(self) -> None:
         registry = TaskRegistry()
@@ -178,12 +174,10 @@ class TestWait:
         with pytest.raises(KeyError):
             await registry.wait("nope", timeout_ms=100)
 
-    async def test_timeout_raises_timeout_error(self) -> None:
-        registry = TaskRegistry()
-        registry.submit("t1", "test", "desc", _success_coro(delay=10.0))
+    async def test_timeout_raises_timeout_error(self, task_registry: TaskRegistry) -> None:
+        task_registry.submit("t1", "test", "desc", _success_coro(delay=10.0))
         with pytest.raises(TimeoutError):
-            await registry.wait("t1", timeout_ms=50)
-        await registry.cancel_all()
+            await task_registry.wait("t1", timeout_ms=50)
 
 
 # ---------------------------------------------------------------------------
