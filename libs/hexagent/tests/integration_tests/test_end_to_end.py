@@ -17,6 +17,17 @@ from hexagent.tools.base import BaseAgentTool
 from hexagent.types import ToolResult
 
 
+def _content_contains(content: str | list[dict[str, Any]], needle: str) -> bool:
+    """Check if a ToolMessage content contains a substring.
+
+    Content may be a plain string or a list of content block dicts
+    (e.g. ``[{"type": "text", "text": "..."}]``).
+    """
+    if isinstance(content, str):
+        return needle in content
+    return any(needle in block.get("text", "") for block in content if isinstance(block, dict))
+
+
 class SampleToolParams(BaseModel):
     """Input schema for the sample tool."""
 
@@ -133,7 +144,8 @@ class TestDeepAgentEndToEnd:
             assert len(tool_messages) > 0
 
             # Verify the tool message contains our expected input
-            assert any("test input" in msg.content for msg in tool_messages)
+            # Content may be a string or a list of content blocks
+            assert any(_content_contains(msg.content, "test input") for msg in tool_messages)
 
     async def test_deep_agent_with_fake_llm_bash_tool(self) -> None:
         """Test deepagent with bash tool using a fake LLM model.
@@ -229,9 +241,8 @@ class TestDeepAgentEndToEnd:
             assert len(tool_messages) >= 2
 
             # Verify both inputs were used
-            tool_contents = [msg.content for msg in tool_messages]
-            assert any("first call" in content for content in tool_contents)
-            assert any("second call" in content for content in tool_contents)
+            assert any(_content_contains(msg.content, "first call") for msg in tool_messages)
+            assert any(_content_contains(msg.content, "second call") for msg in tool_messages)
 
     async def test_deep_agent_with_string_model_name(self) -> None:
         """Test that create_agent handles string model names correctly.

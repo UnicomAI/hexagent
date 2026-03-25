@@ -37,6 +37,8 @@ class LimaVM:
         instance: Lima instance name.
     """
 
+    _instance: str
+
     def __init__(self, instance: str) -> None:
         if sys.platform != "darwin":
             msg = f"Lima is a macOS hypervisor — it cannot run on {sys.platform}"

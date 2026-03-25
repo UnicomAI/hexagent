@@ -203,6 +203,10 @@ class LocalVM:
         instance: Lima VM instance name.
     """
 
+    _vm: LimaVM
+    _instance: str
+    _lock: asyncio.Lock
+
     def __init__(self, *, instance: str = "hexagent") -> None:
         """Initialize with a Lima VM instance name."""
         if sys.platform == "darwin":

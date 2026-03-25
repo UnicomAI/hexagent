@@ -53,12 +53,12 @@ def _ensure_proactor_event_loop() -> None:
 
     No-op on non-Windows platforms (guard is in the caller).
     """
-    current_policy = asyncio.get_event_loop_policy()  # type: ignore[deprecated]
+    current_policy = asyncio.get_event_loop_policy()  # type: ignore[deprecated,unused-ignore]
     # WindowsProactorEventLoopPolicy is only available on Windows;
     # access it via getattr to keep the module importable on macOS/Linux.
     proactor_cls = getattr(asyncio, "WindowsProactorEventLoopPolicy", None)
     if proactor_cls is not None and not isinstance(current_policy, proactor_cls):
-        asyncio.set_event_loop_policy(proactor_cls())  # type: ignore[deprecated]
+        asyncio.set_event_loop_policy(proactor_cls())  # type: ignore[deprecated,unused-ignore]
 
 
 def _check_wsl_prerequisites() -> None:

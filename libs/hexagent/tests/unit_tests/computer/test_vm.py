@@ -274,7 +274,12 @@ class TestDownload:
 
         await computer.download("/remote/file.txt", str(dst))
 
-        vm.copy.assert_awaited_once_with("/remote/file.txt", str(dst), host_to_guest=False)
+        # download() stages through a temp file before copying to host
+        vm.copy.assert_awaited_once()
+        call_args = vm.copy.call_args
+        assert call_args[0][0].startswith("/tmp/.download-")
+        assert call_args[0][1] == str(dst)
+        assert call_args[1]["host_to_guest"] is False
 
     async def test_download_creates_parent_dirs_on_host(self, tmp_path: Path) -> None:
         vm = _mock_vm()
