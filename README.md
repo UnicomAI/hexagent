@@ -39,16 +39,16 @@ agent = await create_agent(model="anthropic/claude-sonnet-4-20250514", computer=
 ```
 
 ```
-┌──────────────────────────┐            ┌──────────────────────────┐
+┌───────────────────────────┐            ┌───────────────────────────┐
 │     Agent Runtime         │            │     Agent's Computer      │
 │     (your host)           │   run()    │     (sandboxed)           │
 │                           │ ─────────> │                           │
-│  - LLM API keys           │   start()  │  - Terminal + filesystem   │
+│  - LLM API keys           │   start()  │  - Terminal + filesystem  │
 │  - Agent source code      │   upload() │  - User's project files   │
-│  - Harness config         │   stop()   │  - Installed tools         │
-│  - Middleware & hooks      │            │                           │
-│                           │            │  Cannot access runtime     │
-└──────────────────────────┘            └──────────────────────────┘
+│  - Harness config         │   stop()   │  - Installed tools        │
+│  - Middleware & hooks     │            │                           │
+│                           │            │  Cannot access runtime    │
+└───────────────────────────┘            └───────────────────────────┘
 ```
 
 Three built-in implementations cover every deployment scenario:
@@ -200,28 +200,28 @@ The [`hexagent_demo`](libs/hexagent_demo/) app ships with ready-to-use **Chat** 
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Agent Harness                            │
 │                                                                 │
-│  ┌───────────┐  ┌──────────────┐  ┌───────────┐                │
-│  │  Prompt    │  │  Middleware   │  │   Tools   │                │
-│  │  System    │  │  Pipeline    │  │           │                │
-│  │           │  │              │  │ Bash,Read │                │
-│  │ Fragments │  │ Compaction   │  │ Write,Edit│                │
-│  │ Sections  │  │ Permissions  │  │ Glob,Grep │                │
-│  │ Variables │  │ Reminders    │  │ Web,MCP   │                │
-│  │           │  │ Image Adapt  │  │ Skills    │                │
-│  └───────────┘  └──────────────┘  │ Subagents │                │
-│                                   └───────────┘                │
+│  ┌───────────┐  ┌──────────────┐  ┌───────────┐                 │
+│  │  Prompt   │  │  Middleware  │  │   Tools   │                 │
+│  │  System   │  │  Pipeline    │  │           │                 │
+│  │           │  │              │  │ Bash,Read │                 │
+│  │ Fragments │  │ Compaction   │  │ Write,Edit│                 │
+│  │ Sections  │  │ Permissions  │  │ Glob,Grep │                 │
+│  │ Variables │  │ Reminders    │  │ Web,MCP   │                 │
+│  │           │  │ Image Adapt  │  │ Skills    │                 │
+│  └───────────┘  └──────────────┘  │ Subagents │                 │
+│                                   └───────────┘                 │
 │  ┌───────────┐  ┌──────────────┐  ┌──────────────────────────┐  │
 │  │  Skills   │  │  MCP Client  │  │  Environment Detection   │  │
 │  │  System   │  │  (stdio/sse/ │  │  (pwd, git, platform,    │  │
-│  │           │  │   http)      │  │   shell, timezone)        │  │
+│  │           │  │   http)      │  │   shell, timezone)       │  │
 │  └───────────┘  └──────────────┘  └──────────────────────────┘  │
 └───────────────────────┬─────────────────────────────────────────┘
           ▲             │                       │
           │ LLM         │ Computer Protocol     │ Tool calls
           │ responses   │                       ▼
     ┌──────────┐  ┌─────┴────────────────────────────┐
-    │ Any LLM  │  │ Computer (Local / VM / Cloud)     │
-    │ Provider │  │ Terminal + Filesystem              │
+    │ Any LLM  │  │ Computer (Local / VM / Cloud)    │
+    │ Provider │  │ Terminal + Filesystem            │
     └──────────┘  └──────────────────────────────────┘
 ```
 
