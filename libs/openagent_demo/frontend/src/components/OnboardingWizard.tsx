@@ -139,6 +139,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const vmPhase2Error = vm.phase2Error;
   const vmPhase3 = vm.phase3;
   const vmUsable = vmPhase1 === "done" && vmPhase2 === "done";
+  const vmPhase1NeedsRestart = /restart windows|重启.*windows|重启.*电脑|reboot/i.test(vmPhase1Error || "");
 
   // Load server config and reset name on open
   useEffect(() => {
@@ -822,7 +823,15 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                         <button className="vm-phase-action" type="button" onClick={vm.installLima}>Install</button>
                       )}
                       {vmPhase1 === "error" && (
-                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.installLima}>Retry</button>
+                        vmPhase1NeedsRestart ? (
+                          <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.recheckVmEngine}>
+                            I've restarted, Re-check
+                          </button>
+                        ) : (
+                          <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.installLima}>
+                            Retry
+                          </button>
+                        )
                       )}
                     </div>
                     {vmPhase1 === "error" && vmPhase1Error && (

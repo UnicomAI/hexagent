@@ -15,6 +15,11 @@ export interface Notification {
   type: "error" | "info" | "success";
 }
 
+export interface RestartRequiredModalState {
+  open: boolean;
+  message: string;
+}
+
 export interface AppState {
   conversations: Conversation[];
   activeConversationId: string | null;
@@ -39,6 +44,7 @@ export interface AppState {
   /** Remembers the last active conversation (or null=welcome) per mode. */
   lastActiveByMode: Record<ConversationMode, string | null>;
   notifications: Notification[];
+  restartRequiredModal: RestartRequiredModalState;
   filePreview: { path: string; mimeType: string; conversationId: string } | null;
   filePreviewVisible: boolean;
   /** Saved right-panel state before file preview opened (for restore on close). */
@@ -66,6 +72,7 @@ export const initialState: AppState = {
   })(),
   lastActiveByMode: { chat: null, cowork: null },
   notifications: [],
+  restartRequiredModal: { open: false, message: "" },
   filePreview: null,
   filePreviewVisible: false,
   rightPanelBeforePreview: null,
@@ -104,6 +111,8 @@ export type Action =
   | { type: "SET_SELECTED_MODE"; payload: ConversationMode }
   | { type: "SHOW_NOTIFICATION"; payload: { message: string; type: "error" | "info" | "success" } }
   | { type: "DISMISS_NOTIFICATION"; payload: string }
+  | { type: "SHOW_RESTART_REQUIRED_MODAL"; payload: { message: string } }
+  | { type: "HIDE_RESTART_REQUIRED_MODAL" }
   | { type: "SET_FILE_PREVIEW"; payload: { path: string; mimeType: string; conversationId: string } | null }
   | { type: "SET_FILE_PREVIEW_VISIBLE"; payload: boolean };
 
@@ -770,6 +779,24 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         notifications: state.notifications.filter((n) => n.id !== action.payload),
+      };
+
+    case "SHOW_RESTART_REQUIRED_MODAL":
+      return {
+        ...state,
+        restartRequiredModal: {
+          open: true,
+          message: action.payload.message,
+        },
+      };
+
+    case "HIDE_RESTART_REQUIRED_MODAL":
+      return {
+        ...state,
+        restartRequiredModal: {
+          open: false,
+          message: "",
+        },
       };
 
     case "SET_FILE_PREVIEW": {

@@ -1733,9 +1733,9 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
     }
   };
 
-  // Cowork mode is usable once Lima is installed and VM is running (phases 1+2).
-  // Phase 3 (dependency installation) can run in the background.
-  const vmUsable = phase1 === "done" && phase2 === "done";
+  // Cowork mode should follow backend truth from /api/setup/vm (vm_ready).
+  // Keep phase fallback only when status payload is unavailable.
+  const vmUsable = vmStatus?.vm_ready ?? (phase1 === "done" && phase2 === "done");
   const allDone = vmUsable && phase3 === "done";
   const anyRunning = phase1 === "running" || phase2 === "running" || phase3 === "running";
   const coreError = phase1 === "error" || phase2 === "error";
@@ -1856,6 +1856,26 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
                 </div>
                 {phase1 === "error" && phase1Error && (
                   <p className="vm-phase-error"><CircleAlert size={12} /> {phase1Error}</p>
+                )}
+                {phase1 === "error" && /bios|firmware|vt-x|amd-v|svm|virtualization is disabled|BIOS_VIRT_DISABLED|virtualization/i.test(phase1Error || "") && (
+                  <div className="vm-phase-detail" style={{ marginTop: 8 }}>
+                    <p style={{ margin: "0 0 6px 0" }}>
+                      We cannot enable BIOS virtualization remotely, but you can finish it in 3 steps:
+                    </p>
+                    <ol style={{ margin: 0, paddingLeft: 18 }}>
+                      <li>Restart and enter BIOS/UEFI setup.</li>
+                      <li>Enable virtualization.</li>
+                      <li>Save and reboot Windows, then click Retry.</li>
+                    </ol>
+                    <p style={{ margin: "8px 0 4px 0" }}>Common option names:</p>
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      <li>Intel: Intel Virtualization Technology / VT-x</li>
+                      <li>AMD: SVM Mode / AMD-V</li>
+                    </ul>
+                    <p style={{ margin: "8px 0 0 0" }}>
+                      Common BIOS keys: <code>F2</code>, <code>Del</code>, <code>Esc</code>, <code>F10</code>, <code>F12</code> (varies by brand).
+                    </p>
+                  </div>
                 )}
                 {phase1 === "done" && (
                   <p className="vm-phase-detail">{vmBackendName} is installed and available.</p>

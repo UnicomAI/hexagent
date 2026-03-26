@@ -10,6 +10,7 @@ import type { Tab as SettingsTab } from "./components/SettingsModal";
 import OnboardingWizard from "./components/OnboardingWizard";
 import SearchModal from "./components/SearchModal";
 import Toast from "./components/Toast";
+import RestartRequiredModal from "./components/RestartRequiredModal";
 import VMSetupFloater from "./components/VMSetupFloater";
 import { VMSetupProvider } from "./vmSetup";
 import type { Attachment, ConversationMode, Message } from "./types";
@@ -424,6 +425,11 @@ function App() {
         <Toast
           notifications={state.notifications}
           onDismiss={(id) => dispatch({ type: "DISMISS_NOTIFICATION", payload: id })}
+        />
+        <RestartRequiredModal
+          open={state.restartRequiredModal.open}
+          message={state.restartRequiredModal.message}
+          onOpenSettings={() => openSettings("sandbox")}
         />
       </VMSetupProvider>
     </AppContext.Provider>

@@ -419,6 +419,7 @@ export interface VMStatus {
   managed?: boolean;
   reason?: string;
   instance_status?: string | null;
+  instance_error?: string | null;
   vm_ready?: boolean;
 }
 

@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { PanelRight } from "lucide-react";
 import { useAppContext } from "../store";
+import { getVMStatus } from "../api";
 import WelcomeScreen from "./WelcomeScreen";
 import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
@@ -72,7 +73,15 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
   const isMac = navigator.platform.toUpperCase().includes("MAC");
 
   const handleModeChange = useCallback(
-    (mode: ConversationMode) => {
+    async (mode: ConversationMode) => {
+      if (mode === "cowork") {
+        try {
+          const vs = await getVMStatus();
+          dispatch({ type: "SET_VM_STATUS", payload: vs });
+        } catch {
+          // Best-effort refresh; keep UX responsive.
+        }
+      }
       dispatch({ type: "SET_SELECTED_MODE", payload: mode });
     },
     [dispatch]
