@@ -37,7 +37,7 @@ FRESH_SESSION: Sequence[SectionFn] = [
     sections.doing_tasks,
     sections.executing_actions_with_care,
     sections.tone_and_style,
-    sections.environment,
+    sections.computer_use,
     sections.using_your_tools,
     sections.tool_instructions,
     sections.mcps,
@@ -50,7 +50,7 @@ RESUMED_SESSION: Sequence[SectionFn] = [
     sections.doing_tasks,
     sections.executing_actions_with_care,
     sections.tone_and_style,
-    sections.environment,
+    sections.computer_use,
     sections.using_your_tools,
     sections.tool_instructions,
     sections.mcps,
@@ -58,7 +58,7 @@ RESUMED_SESSION: Sequence[SectionFn] = [
 """Profile for a session resumed from compaction. Same as FRESH for now."""
 
 SUBAGENT_SESSION: Sequence[SectionFn] = [
-    sections.environment,
+    sections.computer_use,
     sections.tool_instructions,
     sections.mcps,
 ]

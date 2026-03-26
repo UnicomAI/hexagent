@@ -64,11 +64,65 @@ def environment(ctx: AgentContext) -> str | None:
     )
 
 
+def _mnt_dirs(working_dir: str) -> tuple[str, str]:
+    """Derive mnt output/upload paths from working_dir.
+
+    In cowork mode (working_dir starts with ``/sessions``), paths are
+    scoped under the session directory. Otherwise they sit at the root.
+
+    Returns:
+        (mnt_outputs_dir, mnt_uploads_dir)
+    """
+    from pathlib import PurePosixPath
+
+    if working_dir.startswith("/sessions"):
+        base = PurePosixPath(working_dir)
+        return str(base / "mnt" / "outputs"), str(base / "mnt" / "uploads")
+    return "/mnt/outputs", "/mnt/uploads"
+
+
+def computer_use(ctx: AgentContext) -> str | None:
+    """Computer use instructions including environment info."""
+    if ctx.environment is None:
+        return None
+    env = ctx.environment
+    mnt_outputs_dir, mnt_uploads_dir = _mnt_dirs(env.working_dir)
+
+    # The template references tool names that may not be registered
+    # (e.g. Skill, PresentToUser). Provide canonical defaults so
+    # substitution never fails on missing tool name vars.
+    tool_vars = {
+        "SKILL_TOOL_NAME": "Skill",
+        "PRESENTTOUSER_TOOL_NAME": "PresentToUser",
+    }
+    tool_vars.update(ctx.tool_name_vars)
+
+    return substitute(
+        load("system_prompt_computer_use"),
+        WORKING_DIR=env.working_dir,
+        PLATFORM=env.platform,
+        SHELL=env.shell,
+        OS_VERSION=env.os_version,
+        TODAY_DATE=env.today_date.strftime("%a %b %d, %Y"),
+        MODEL_NAME=ctx.model_name,
+        MNT_OUTPUTS_DIR=mnt_outputs_dir,
+        MNT_UPLOADS_DIR=mnt_uploads_dir,
+        **tool_vars,
+    )
+
+
 def using_your_tools(ctx: AgentContext) -> str | None:
     """Parallel calling and tool-over-bash preference."""
     if not ctx.tools:
         return None
-    return substitute(load("system_prompt_using_your_tools"), **ctx.tool_name_vars)
+    # Provide canonical defaults for tool names that may not be registered.
+    tool_vars = {
+        "TODOWRITE_TOOL_NAME": "TodoWrite",
+        "AGENT_TOOL_NAME": "Agent",
+        "PRESENTTOUSER_TOOL_NAME": "PresentToUser",
+    }
+    tool_vars.update(ctx.tool_name_vars)
+    return substitute(load("system_prompt_using_your_tools"), **tool_vars)
 
 
 def _format_available_agents(agents: dict[str, AgentDefinition]) -> str:

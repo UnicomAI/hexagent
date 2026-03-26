@@ -10,7 +10,9 @@ from hexagent.harness.model import ModelProfile
 from hexagent.mcp import McpClient
 from hexagent.prompts import FRESH_SESSION, RESUMED_SESSION, SUBAGENT_SESSION, compose
 from hexagent.prompts.sections import (
+    _mnt_dirs,
     agency,
+    computer_use,
     doing_tasks,
     environment,
     executing_actions_with_care,
@@ -23,6 +25,11 @@ from hexagent.prompts.sections import (
 from hexagent.types import AgentContext, EnvironmentContext
 
 from ..conftest import STUB_PROFILE, core_tools, make_tool
+
+
+def _computer_use_tools() -> list:
+    """Core tools plus extras needed by the computer_use section template."""
+    return core_tools() + [make_tool("Skill"), make_tool("PresentToUser")]
 
 
 def _make_mcp_client(name: str, instructions: str = "") -> McpClient:
@@ -192,6 +199,62 @@ class TestEnvironment:
         assert "Sat Feb 14, 2026" in result
 
 
+class TestMntDirs:
+    def test_standalone_mode(self) -> None:
+        outputs, uploads = _mnt_dirs("/home/user")
+        assert outputs == "/mnt/outputs"
+        assert uploads == "/mnt/uploads"
+
+    def test_cowork_mode(self) -> None:
+        outputs, uploads = _mnt_dirs("/sessions/abc123/workspace")
+        assert outputs == "/sessions/abc123/workspace/mnt/outputs"
+        assert uploads == "/sessions/abc123/workspace/mnt/uploads"
+
+    def test_cowork_mode_trailing_slash(self) -> None:
+        outputs, uploads = _mnt_dirs("/sessions/abc123/workspace/")
+        assert outputs == "/sessions/abc123/workspace/mnt/outputs"
+        assert uploads == "/sessions/abc123/workspace/mnt/uploads"
+
+
+class TestComputerUse:
+    def test_returns_none_when_empty(self) -> None:
+        assert computer_use(AgentContext(model=STUB_PROFILE)) is None
+
+    def test_loads_and_substitutes_vars(self) -> None:
+        env = EnvironmentContext(
+            working_dir="/home/user",
+            is_git_repo=True,
+            platform="linux",
+            shell="bash",
+            os_version="Ubuntu 24",
+            today_date=datetime(2026, 2, 14, 10, 30, 0, tzinfo=UTC),
+        )
+        ctx = AgentContext(model=STUB_PROFILE, environment=env, tools=_computer_use_tools())
+        result = computer_use(ctx)
+        assert result is not None
+        assert "Computer Use Instructions" in result
+        assert "linux" in result
+        assert "/mnt/outputs" in result
+        assert "/mnt/uploads" in result
+        assert "${PLATFORM}" not in result
+        assert "${MNT_OUTPUTS_DIR}" not in result
+
+    def test_cowork_mode_paths(self) -> None:
+        env = EnvironmentContext(
+            working_dir="/sessions/abc/workspace",
+            is_git_repo=False,
+            platform="linux",
+            shell="bash",
+            os_version="Ubuntu 24",
+            today_date=datetime(2026, 2, 14, 10, 30, 0, tzinfo=UTC),
+        )
+        ctx = AgentContext(model=STUB_PROFILE, environment=env, tools=_computer_use_tools())
+        result = computer_use(ctx)
+        assert result is not None
+        assert "/sessions/abc/workspace/mnt/outputs" in result
+        assert "/sessions/abc/workspace/mnt/uploads" in result
+
+
 # ---------------------------------------------------------------------------
 # Compose and profiles
 # ---------------------------------------------------------------------------
@@ -258,7 +321,7 @@ class TestSubagentSession:
         assert "## Doing tasks" not in result
         assert "## Executing actions with care" not in result
 
-    def test_includes_environment_and_tools(self) -> None:
+    def test_includes_computer_use_and_tools(self) -> None:
         env = EnvironmentContext(
             working_dir="/tmp",
             is_git_repo=False,
@@ -267,10 +330,11 @@ class TestSubagentSession:
             os_version="Ubuntu 22.04",
             today_date=datetime(2026, 2, 14, 10, 30, 0, tzinfo=UTC),
         )
-        ctx = AgentContext(model=STUB_PROFILE, tools=core_tools() + [make_tool("Agent"), make_tool("TaskOutput")], environment=env)
+        ctx = AgentContext(model=STUB_PROFILE, tools=_computer_use_tools() + [make_tool("Agent"), make_tool("TaskOutput")], environment=env)
         result = compose(SUBAGENT_SESSION, ctx)
         assert "# Tools" in result
         assert "## Bash" in result
+        assert "Computer Use Instructions" in result
         assert "/tmp" in result
 
 
