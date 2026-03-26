@@ -220,3 +220,6 @@ mounts/
 
 # Git worktrees
 .trees/
+
+# Electron build artifact
+libs/openagent_demo/electron/dist.zip
