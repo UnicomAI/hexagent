@@ -8,6 +8,11 @@ Write-Host "==> Installing PyInstaller..."
 Set-Location $BackendDir
 uv pip install pyinstaller
 
+# Ensure the skills directory exists so --add-data doesn't fail
+if (-not (Test-Path "$BackendDir\skills")) {
+    New-Item -ItemType Directory -Path "$BackendDir\skills" | Out-Null
+}
+
 Write-Host "==> Building backend with PyInstaller..."
 uv run pyinstaller `
     --name hexagent_api_server `
