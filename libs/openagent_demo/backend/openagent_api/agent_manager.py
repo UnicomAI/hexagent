@@ -196,14 +196,21 @@ class AgentManager:
                     "Please install and configure it in Settings \u2192 Sandbox."
                 ) from None
             except Exception as exc:
-                # Convert VM infrastructure errors to user-friendly messages
-                msg = str(exc).lower()
-                if "not found" in msg or "does not exist" in msg or "not running" in msg:
+                # Preserve actionable details instead of collapsing all errors
+                # into "VM is not running", which can hide the real cause.
+                detail = str(exc).strip() or exc.__class__.__name__
+                low = detail.lower()
+                if "does not exist" in low and "wsl distro" in low:
+                    raise RuntimeError(
+                        "Cowork mode requires VM setup. "
+                        "Please install and configure it in Settings \u2192 Sandbox."
+                    ) from None
+                if "not running" in low and "session" not in low:
                     raise RuntimeError(
                         "VM is not running. "
                         "Please set it up in Settings \u2192 Sandbox."
                     ) from None
-                raise
+                raise RuntimeError(f"Cowork session setup failed: {detail}") from None
 
             actual_name = computer.session_name
             self._computers[actual_name] = computer

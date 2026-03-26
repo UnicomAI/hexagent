@@ -483,18 +483,21 @@ def _win_path_to_wsl(path: Path | str) -> str:
     return f"/mnt/{drive}{rest}"
 
 
-async def _wsl_shell(cmd: str, *, timeout: float = 60) -> tuple[int, str, str]:
+async def _wsl_shell(
+    cmd: str,
+    *,
+    timeout: float = 60,
+    user: str | None = None,
+) -> tuple[int, str, str]:
     wsl_exe = _wsl_cmd()
     if not wsl_exe:
         return 1, "", "wsl.exe not found"
+    exec_args: list[str] = [wsl_exe, "-d", _WSL_INSTANCE]
+    if user:
+        exec_args.extend(["-u", user])
+    exec_args.extend(["--", "bash", "-lc", cmd])
     proc = await asyncio.create_subprocess_exec(
-        wsl_exe,
-        "-d",
-        _WSL_INSTANCE,
-        "--",
-        "bash",
-        "-lc",
-        cmd,
+        *exec_args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -506,8 +509,8 @@ async def _wsl_shell(cmd: str, *, timeout: float = 60) -> tuple[int, str, str]:
         return 1, "", "Timed out"
     return (
         proc.returncode or 0,
-        (stdout_b or b"").decode("utf-8", errors="replace"),
-        (stderr_b or b"").decode("utf-8", errors="replace"),
+        _decode_wsl_output(stdout_b or b""),
+        _decode_wsl_output(stderr_b or b""),
     )
 
 
@@ -1342,9 +1345,10 @@ class _ProvisionManager(_ProcessManager):
         setup_wsl_quoted = shlex.quote(setup_wsl)
         setup_vm_dir_quoted = shlex.quote(_SETUP_VM_DIR)
         rc, _, err = await _wsl_shell(
-            f"sudo rm -rf {setup_vm_dir_quoted} && sudo mkdir -p {setup_vm_dir_quoted} && "
-            f"sudo cp -r {setup_wsl_quoted}/. {setup_vm_dir_quoted}/",
+            f"rm -rf {setup_vm_dir_quoted} && mkdir -p {setup_vm_dir_quoted} && "
+            f"cp -r {setup_wsl_quoted}/. {setup_vm_dir_quoted}/",
             timeout=60,
+            user="root",
         )
         if rc != 0:
             self._emit("error", {"message": f"Failed to stage setup files in WSL: {err}"})
@@ -1353,7 +1357,7 @@ class _ProvisionManager(_ProcessManager):
             return
 
         self._emit("progress", {"step": "starting", "message": "Starting provisioning..."})
-        cmd = f"sudo bash {_SETUP_VM_DIR}/setup.sh"
+        cmd = f"bash {_SETUP_VM_DIR}/setup.sh"
         if force:
             cmd += " --force"
 
@@ -1365,7 +1369,7 @@ class _ProvisionManager(_ProcessManager):
             return
 
         proc = await asyncio.create_subprocess_exec(
-            wsl_exe, "-d", _WSL_INSTANCE, "--", "bash", "-lc", cmd,
+            wsl_exe, "-d", _WSL_INSTANCE, "-u", "root", "--", "bash", "-lc", cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -1414,7 +1418,7 @@ class _ProvisionManager(_ProcessManager):
         """Read VM-side marker files to determine provision state."""
         if sys.platform == "win32":
             instance_status = await _wsl_instance_status()
-            shell = _wsl_shell
+            shell = lambda cmd: _wsl_shell(cmd, user="root")
         else:
             instance_status = await _lima_instance_status()
             shell = _lima_shell
@@ -1440,7 +1444,7 @@ class _ProvisionManager(_ProcessManager):
 
     async def get_log(self) -> str:
         """Fetch the latest setup log from the VM."""
-        shell = _wsl_shell if sys.platform == "win32" else _lima_shell
+        shell = (lambda cmd, timeout=15: _wsl_shell(cmd, timeout=timeout, user="root")) if sys.platform == "win32" else _lima_shell
         rc, stdout, _ = await shell(
             f"ls -t {_SETUP_LOG_DIR}/setup-*.log 2>/dev/null | head -1 | xargs cat 2>/dev/null | tail -500",
             timeout=15,
