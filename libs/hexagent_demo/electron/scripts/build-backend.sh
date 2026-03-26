@@ -43,6 +43,9 @@ PYINSTALLER_ARGS=(
     hexagent_api/server.py
 )
 
+# Ensure the skills directory exists so --add-data doesn't fail
+mkdir -p "$BACKEND_DIR/skills"
+
 run_pyinstaller() {
     # Build for the current (native) architecture.
     # Uses a dedicated build venv so we never touch the dev .venv.
