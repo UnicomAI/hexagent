@@ -373,6 +373,53 @@ class TestWslVMInit:
 
 
 # ===========================================================================
+# WslVM start retry behavior
+# ===========================================================================
+
+
+class TestWslVMStart:
+    """Tests for WslVM.start()."""
+
+    def _make_vm(self) -> WslVM:
+        with (
+            patch("openagent.computer.local._wsl._PLATFORM", "win32"),
+            patch("shutil.which", return_value="C:\\Windows\\System32\\wsl.exe"),
+        ):
+            return WslVM(instance="test")
+
+    async def test_start_retries_once_on_transient_minus_one_exit(self) -> None:
+        vm = self._make_vm()
+
+        with (
+            patch.object(vm, "status", new_callable=AsyncMock, return_value="Stopped"),
+            patch.object(vm, "_run_wsl", new_callable=AsyncMock) as mock_run_wsl,
+            patch.object(vm, "_apply_bind_mounts", new_callable=AsyncMock) as mock_apply,
+        ):
+            mock_run_wsl.side_effect = [
+                WslError("wsl.exe failed (exit 4294967295): "),
+                "ok",
+            ]
+
+            await vm.start()
+
+            assert mock_run_wsl.await_count == 2
+            mock_apply.assert_awaited_once()
+
+    async def test_start_does_not_retry_on_non_transient_failure(self) -> None:
+        vm = self._make_vm()
+
+        with (
+            patch.object(vm, "status", new_callable=AsyncMock, return_value="Stopped"),
+            patch.object(vm, "_run_wsl", new_callable=AsyncMock, side_effect=WslError("wsl.exe failed (exit 1): boom")),
+            patch.object(vm, "_apply_bind_mounts", new_callable=AsyncMock) as mock_apply,
+            pytest.raises(WslError, match="exit 1"),
+        ):
+            await vm.start()
+
+        mock_apply.assert_not_awaited()
+
+
+# ===========================================================================
 # Status output parsing
 # ===========================================================================
 

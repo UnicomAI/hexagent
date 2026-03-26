@@ -31,7 +31,18 @@ fi
 emit 06_playwright progress "Downloading Chromium binary"
 mirror_host="${OPENAGENT_PLAYWRIGHT_DOWNLOAD_HOST:-}"
 browser_ok=0
+
+# If bundled browsers are already present in the VM image, skip network download.
+if find /opt/pw-browsers -type f \( -name "chrome-headless-shell" -o -name "chrome" \) 2>/dev/null | grep -q .; then
+    emit 06_playwright progress "Bundled Playwright browser detected under /opt/pw-browsers, skipping download"
+    browser_ok=1
+fi
+
 for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    if [[ $browser_ok -eq 1 ]]; then
+        break
+    fi
+
     if [[ "${OPENAGENT_USE_CN_MIRRORS:-0}" == "1" && -n "$mirror_host" ]]; then
         emit 06_playwright progress "browser install attempt $attempt/$max_attempts (mirror)"
         if PLAYWRIGHT_DOWNLOAD_HOST="$mirror_host" \
@@ -45,7 +56,7 @@ for ((attempt = 1; attempt <= max_attempts; attempt++)); do
         emit 06_playwright progress "browser install attempt $attempt/$max_attempts"
     fi
 
-    if PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npx playwright install chromium; then
+    if env -u PLAYWRIGHT_DOWNLOAD_HOST PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npx playwright install chromium; then
         browser_ok=1
         break
     fi

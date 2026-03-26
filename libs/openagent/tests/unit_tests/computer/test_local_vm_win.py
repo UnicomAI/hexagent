@@ -293,7 +293,7 @@ class TestSession:
     async def test_creates_new_session(self) -> None:
         vm = _mock_vm()
         mgr = _make_manager(vm)
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
 
         computer = await mgr.computer()
 
@@ -327,7 +327,7 @@ class TestSession:
     async def test_auto_starts_if_needed(self) -> None:
         vm = _mock_vm(status="Stopped")
         mgr = _make_manager(vm)
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
 
         await mgr.computer()
 
@@ -461,11 +461,11 @@ class TestCreateUser:
     async def test_creates_session_dirs(self) -> None:
         vm = _mock_vm()
         mgr = _make_manager(vm)
-        vm.shell = AsyncMock(side_effect=[_ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_ok(), _ok(), _ok()])
 
         await mgr._create_user("test-user")
 
-        setup_call = vm.shell.call_args_list[1].args[0]
+        setup_call = vm.shell.call_args_list[2].args[0]
         home = "/sessions/test-user"
         for d in SESSION_DIRS:
             assert f"{home}/{d}" in setup_call
@@ -478,6 +478,26 @@ class TestCreateUser:
 
         with pytest.raises(VMError, match="Failed to create session user"):
             await mgr._create_user("test-user")
+
+    async def test_useradd_retries_without_k_flags(self) -> None:
+        vm = _mock_vm()
+        mgr = _make_manager(vm)
+        vm.shell = AsyncMock(
+            side_effect=[
+                _ok(),  # sudo probe
+                _fail(stderr="localized subordinate uid failure"),  # useradd with -K...
+                _ok(),  # fallback useradd without -K...
+                _ok(),  # mkdir/chown
+            ]
+        )
+
+        await mgr._create_user("test-user")
+
+        first_useradd = vm.shell.call_args_list[1].args[0]
+        fallback_useradd = vm.shell.call_args_list[2].args[0]
+        assert "-K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0" in first_useradd
+        assert "-K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0" not in fallback_useradd
+        assert "--no-log-init" in fallback_useradd
 
 
 class TestNameGeneration:
@@ -510,7 +530,7 @@ class TestSessionAtomicity:
         mgr = _make_manager(vm)
         d = tmp_path / "nope"
 
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok(), _ok()])
 
         with pytest.raises(ValueError, match="does not exist"):
             await mgr.computer(mounts=[Mount(source=str(d), target="proj")])

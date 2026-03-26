@@ -602,14 +602,30 @@ class LocalVM:
         qname = shlex.quote(name)
         home = f"/sessions/{name}"
         qhome = shlex.quote(home)
-        result = await self._vm.shell(f"sudo useradd -m -d {qhome} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {qname}")
+        sudo_probe = await self._vm.shell("command -v sudo >/dev/null 2>&1")
+        sudo_prefix = "sudo " if sudo_probe.exit_code == 0 else ""
+
+        create_cmd = (
+            f"{sudo_prefix}useradd -m -d {qhome} -s /bin/bash "
+            f"--no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {qname}"
+        )
+        result = await self._vm.shell(create_cmd)
+        if result.exit_code != 0:
+            # Some Ubuntu/WSL images reject useradd with SUB_UID/GID_COUNT=0.
+            # Retry without those overrides for compatibility. We retry
+            # regardless of locale-specific stderr text.
+            fallback_cmd = (
+                f"{sudo_prefix}useradd -m -d {qhome} -s /bin/bash "
+                f"--no-log-init {qname}"
+            )
+            result = await self._vm.shell(fallback_cmd)
         if result.exit_code != 0:
             msg = f"Failed to create session user '{name}': {result.stderr}"
             raise VMError(msg)
 
         all_dirs = " ".join(shlex.quote(f"{home}/{d}") for d in SESSION_DIRS)
         writable = f"{shlex.quote(f'{home}/{SESSION_TMP_DIR}')} {shlex.quote(f'{home}/{SESSION_OUTPUTS_DIR}')}"
-        result = await self._vm.shell(f"sudo mkdir -p {all_dirs} && sudo chown {qname} {writable}")
+        result = await self._vm.shell(f"{sudo_prefix}mkdir -p {all_dirs} && {sudo_prefix}chown {qname} {writable}")
         if result.exit_code != 0:
             msg = f"Failed to create session directories for '{name}': {result.stderr}"
             raise VMError(msg)

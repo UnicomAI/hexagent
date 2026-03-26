@@ -312,15 +312,27 @@ class WslVM:
 
         if current != "Running":
             # Trigger start by running a trivial command.
-            await self._run_wsl(
-                self._wsl_exe,
-                "-d",
-                self._instance,
-                "--",
-                "echo",
-                "ok",
-                timeout=120,
-            )
+            # Some Windows hosts occasionally return a transient -1/4294967295
+            # from wsl.exe during startup even though a subsequent attempt works.
+            for attempt in range(2):
+                try:
+                    await self._run_wsl(
+                        self._wsl_exe,
+                        "-d",
+                        self._instance,
+                        "--",
+                        "echo",
+                        "ok",
+                        timeout=120,
+                    )
+                    break
+                except WslError as exc:
+                    text = str(exc).lower()
+                    transient = "exit 4294967295" in text or "exit -1" in text
+                    if transient and attempt == 0:
+                        await asyncio.sleep(0.5)
+                        continue
+                    raise
 
         await self._apply_bind_mounts()
 
