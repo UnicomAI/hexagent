@@ -137,14 +137,16 @@ async function spawnBackend() {
       throw new Error(`Backend binary not found: ${binaryPath}`);
     }
 
-    // Remove macOS quarantine flags from backend resources so Gatekeeper
-    // does not block the unsigned binary (error -86) on first launch.
+    // Remove macOS quarantine flags from backend and Lima resources so
+    // Gatekeeper does not block unsigned binaries (error -86) on first launch.
     if (process.platform === "darwin") {
-      const backendDir = path.join(process.resourcesPath, "backend");
-      try {
-        execFileSync("xattr", ["-dr", "com.apple.quarantine", backendDir]);
-      } catch (_) {
-        // Ignore — attribute may not be present
+      for (const subdir of ["backend", "lima"]) {
+        const dir = path.join(process.resourcesPath, subdir);
+        try {
+          execFileSync("xattr", ["-dr", "com.apple.quarantine", dir]);
+        } catch (_) {
+          // Ignore — attribute may not be present or dir may not exist
+        }
       }
     }
 

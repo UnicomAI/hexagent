@@ -1,7 +1,7 @@
 """Environment detection for system prompt assembly.
 
 EnvironmentResolver runs lightweight shell commands against a Computer
-to populate the ``${…}`` placeholders in ``system_prompt_environment.md``.
+to populate an ``EnvironmentContext`` used by prompt section functions.
 """
 
 from __future__ import annotations
