@@ -179,11 +179,11 @@ def _lima_status() -> dict[str, object]:
 # WSL (Windows)
 # ---------------------------------------------------------------------------
 
-_WSL_INSTANCE = "openagent"
+_WSL_INSTANCE = "hexagent"
 _WSL_EXPORT_SOURCE = "Ubuntu"
 _WSL_PREBUILT_CANDIDATES = (
-    "openagent-prebuilt.tar",
-    "openagent.tar",
+    "hexagent-prebuilt.tar",
+    "hexagent.tar",
 )
 
 
@@ -372,7 +372,7 @@ async def _wsl_probe_start() -> tuple[bool, str]:
 
 
 # ``wsl -l -v`` uses the Windows display language for the STATE column.
-# Cowork only needs the ``openagent`` distro to exist; WSL starts it on demand.
+# Cowork only needs the ``hexagent`` distro to exist; WSL starts it on demand.
 _WSL_COWORK_READY_STATES = frozenset(
     {
         "Running",
@@ -855,11 +855,11 @@ class _ProcessManager(abc.ABC):
             self._status = "error"
             self._error = "Cancelled"
             self._emit("error", {"message": "Cancelled"})
-        except Exception as exc:
+        except Exception:
             logger.exception("%s failed", self.__class__.__name__)
             self._status = "error"
-            self._error = str(exc)
-            self._emit("error", {"message": str(exc)})
+            self._error = "Internal error"
+            self._emit("error", {"message": "An internal error occurred — check server logs for details."})
         finally:
             self._new_event.set()
 
@@ -1049,7 +1049,7 @@ class _BuildManager(_ProcessManager):
             else:
                 err = _combine_wsl_output(stdout_b, stderr_b)
                 if _looks_like_missing_wsl_disk(err):
-                    self._emit("progress", {"step": "creating", "message": "Detected broken WSL distro disk. Recreating OpenAgent distro..."})
+                    self._emit("progress", {"step": "creating", "message": "Detected broken WSL distro disk. Recreating HexAgent distro..."})
                     proc_unreg = await asyncio.create_subprocess_exec(
                         wsl_exe, "--unregister", _WSL_INSTANCE,
                         stdout=asyncio.subprocess.PIPE,
@@ -1059,7 +1059,7 @@ class _BuildManager(_ProcessManager):
                     u_out_b, u_err_b = await self._communicate_with_heartbeat(
                         proc_unreg,
                         step="creating",
-                        message="Removing broken OpenAgent WSL distro...",
+                        message="Removing broken HexAgent WSL distro...",
                     )
                     if proc_unreg.returncode != 0:
                         u_err = _combine_wsl_output(u_out_b, u_err_b)
@@ -1077,9 +1077,9 @@ class _BuildManager(_ProcessManager):
         prebuilt_tar = _wsl_prebuilt_tar_path()
         import_dir = data_dir() / "wsl" / _WSL_INSTANCE / "disk"
 
-        # Distro does not exist: prefer bundled prebuilt OpenAgent rootfs.
+        # Distro does not exist: prefer bundled prebuilt HexAgent rootfs.
         if prebuilt_tar is not None:
-            self._emit("progress", {"step": "creating", "message": "Importing bundled OpenAgent VM image..."})
+            self._emit("progress", {"step": "creating", "message": "Importing bundled HexAgent VM image..."})
             if import_dir.exists():
                 shutil.rmtree(import_dir, ignore_errors=True)
             import_dir.mkdir(parents=True, exist_ok=True)
@@ -1093,7 +1093,7 @@ class _BuildManager(_ProcessManager):
             _, err_b = await self._communicate_with_heartbeat(
                 proc_import,
                 step="creating",
-                message="Importing bundled OpenAgent VM image...",
+                message="Importing bundled HexAgent VM image...",
                 progress_info=lambda: f"(image ~{(prebuilt_tar.stat().st_size / (1024 * 1024)):.1f} MB)",
             )
             if proc_import.returncode != 0:
@@ -1103,7 +1103,7 @@ class _BuildManager(_ProcessManager):
                 self._error = f"exit {proc_import.returncode}"
                 return
 
-            self._emit("progress", {"step": "starting", "message": "Starting imported OpenAgent WSL distro..."})
+            self._emit("progress", {"step": "starting", "message": "Starting imported HexAgent WSL distro..."})
             proc_start = await asyncio.create_subprocess_exec(
                 wsl_exe, "-d", _WSL_INSTANCE, "--", "echo", "ok",
                 stdout=asyncio.subprocess.PIPE,
@@ -1113,7 +1113,7 @@ class _BuildManager(_ProcessManager):
             out_b, err_b = await self._communicate_with_heartbeat(
                 proc_start,
                 step="starting",
-                message="Starting imported OpenAgent WSL distro...",
+                message="Starting imported HexAgent WSL distro...",
             )
             if proc_start.returncode == 0:
                 self._emit("done", {"message": "WSL distro imported from bundled image and started successfully"})
@@ -1187,7 +1187,7 @@ class _BuildManager(_ProcessManager):
             self._error = f"exit {proc_export.returncode}"
             return
 
-        self._emit("progress", {"step": "creating", "message": "Importing OpenAgent WSL distro..."})
+        self._emit("progress", {"step": "creating", "message": "Importing HexAgent WSL distro..."})
         proc_import = await asyncio.create_subprocess_exec(
             wsl_exe, "--import", _WSL_INSTANCE, str(import_dir), str(export_tar), "--version", "2",
             stdout=asyncio.subprocess.PIPE,
@@ -1197,7 +1197,7 @@ class _BuildManager(_ProcessManager):
         _, err_b = await self._communicate_with_heartbeat(
             proc_import,
             step="creating",
-            message="Importing OpenAgent WSL distro...",
+            message="Importing HexAgent WSL distro...",
         )
         if proc_import.returncode != 0:
             err = _decode_wsl_output(err_b or b"").strip()
@@ -1206,7 +1206,7 @@ class _BuildManager(_ProcessManager):
             self._error = f"exit {proc_import.returncode}"
             return
 
-        self._emit("progress", {"step": "starting", "message": "Starting OpenAgent WSL distro..."})
+        self._emit("progress", {"step": "starting", "message": "Starting HexAgent WSL distro..."})
         proc_start = await asyncio.create_subprocess_exec(
             wsl_exe, "-d", _WSL_INSTANCE, "--", "echo", "ok",
             stdout=asyncio.subprocess.PIPE,
@@ -1216,7 +1216,7 @@ class _BuildManager(_ProcessManager):
         out_b, err_b = await self._communicate_with_heartbeat(
             proc_start,
             step="starting",
-            message="Starting OpenAgent WSL distro...",
+            message="Starting HexAgent WSL distro...",
         )
         if proc_start.returncode == 0:
             self._emit("done", {"message": "WSL distro created and started successfully"})

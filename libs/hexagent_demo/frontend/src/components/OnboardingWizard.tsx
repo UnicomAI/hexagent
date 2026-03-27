@@ -89,21 +89,16 @@ const ONBOARDING_DRAFT_KEY = "hexagent-onboarding-draft-v1";
 interface OnboardingDraft {
   step?: Step;
   selectedProviderId?: string;
-  apiKey?: string;
   modelId?: string;
   displayName?: string;
   baseUrl?: string;
   sumProviderId?: string;
-  sumApiKey?: string;
   sumModelId?: string;
   sumDisplayName?: string;
   sumBaseUrl?: string;
   sumSameAsMain?: boolean;
   searchProvider?: string;
-  searchKey?: string;
   fetchProvider?: string;
-  fetchKey?: string;
-  e2bKey?: string;
   vmSkipped?: boolean;
 }
 
@@ -197,21 +192,16 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
     if (draft) {
       if (draft.step && STEPS.includes(draft.step)) setStep(draft.step);
       if (draft.selectedProviderId) setSelectedProvider(PROVIDERS.find((p) => p.id === draft.selectedProviderId) ?? null);
-      if (typeof draft.apiKey === "string") setApiKey(draft.apiKey);
       if (typeof draft.modelId === "string") setModelId(draft.modelId);
       if (typeof draft.displayName === "string") setDisplayName(draft.displayName);
       if (typeof draft.baseUrl === "string") setBaseUrl(draft.baseUrl);
       if (draft.sumProviderId) setSumProvider(PROVIDERS.find((p) => p.id === draft.sumProviderId) ?? null);
-      if (typeof draft.sumApiKey === "string") setSumApiKey(draft.sumApiKey);
       if (typeof draft.sumModelId === "string") setSumModelId(draft.sumModelId);
       if (typeof draft.sumDisplayName === "string") setSumDisplayName(draft.sumDisplayName);
       if (typeof draft.sumBaseUrl === "string") setSumBaseUrl(draft.sumBaseUrl);
       if (typeof draft.sumSameAsMain === "boolean") setSumSameAsMain(draft.sumSameAsMain);
       if (typeof draft.searchProvider === "string") setSearchProvider(draft.searchProvider);
-      if (typeof draft.searchKey === "string") setSearchKey(draft.searchKey);
       if (typeof draft.fetchProvider === "string") setFetchProvider(draft.fetchProvider);
-      if (typeof draft.fetchKey === "string") setFetchKey(draft.fetchKey);
-      if (typeof draft.e2bKey === "string") setE2bKey(draft.e2bKey);
       if (typeof draft.vmSkipped === "boolean") setVmSkipped(draft.vmSkipped);
     }
 
@@ -223,42 +213,32 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
     saveOnboardingDraft({
       step,
       selectedProviderId: selectedProvider?.id,
-      apiKey,
       modelId,
       displayName,
       baseUrl,
       sumProviderId: sumProvider?.id,
-      sumApiKey,
       sumModelId,
       sumDisplayName,
       sumBaseUrl,
       sumSameAsMain,
       searchProvider,
-      searchKey,
       fetchProvider,
-      fetchKey,
-      e2bKey,
       vmSkipped,
     });
   }, [
     open,
     step,
     selectedProvider,
-    apiKey,
     modelId,
     displayName,
     baseUrl,
     sumProvider,
-    sumApiKey,
     sumModelId,
     sumDisplayName,
     sumBaseUrl,
     sumSameAsMain,
     searchProvider,
-    searchKey,
     fetchProvider,
-    fetchKey,
-    e2bKey,
     vmSkipped,
   ]);
 
