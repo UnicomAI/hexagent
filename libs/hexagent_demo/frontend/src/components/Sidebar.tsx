@@ -149,7 +149,7 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
       <div className="sidebar-header">
         <div className="sidebar-brand sidebar-fadeable">
           <img className="sidebar-brand-logo" width="25" height="25" src={faviconSvg} alt="HexAgent" />
-          <span className="sidebar-brand-text">HexAgent</span>
+          <span className="sidebar-brand-text">ClawWork</span>
         </div>
         <button
           className="sidebar-icon-wrap sidebar-toggle custom-tooltip-trigger"

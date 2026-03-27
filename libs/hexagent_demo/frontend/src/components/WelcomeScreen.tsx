@@ -272,8 +272,8 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     }, [dispatch]),
   );
 
-  const chatHeading = "HexAgent, ready when you are.";
-  const coworkHeading = "HexAgent, here to get things done.";
+  const chatHeading = "ClawWork, ready when you are.";
+  const coworkHeading = "ClawWork, here to get things done.";
 
   return (
     <div className="welcome-screen" key={mode}>
