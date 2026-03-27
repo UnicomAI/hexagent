@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { PanelRight } from "lucide-react";
 import { useAppContext } from "../store";
+import { useTranslation } from "../i18n";
 import WelcomeScreen from "./WelcomeScreen";
 import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
@@ -18,6 +19,7 @@ interface ChatAreaProps {
 
 export default function ChatArea({ conversation, onSendMessage, onOpenSettings, rightPanel }: ChatAreaProps) {
   const { state, dispatch } = useAppContext();
+  const { t } = useTranslation();
   const [editingTitle, setEditingTitle] = useState(false);
   const chatAreaRef = useRef<HTMLDivElement>(null);
 
@@ -143,9 +145,9 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
               onClick={() => handleModeChange(mode)}
               type="button"
             >
-              {mode === "chat" ? "Chat" : "Cowork"}
+              {mode === "chat" ? t("chat.modeChat") : t("chat.modeCowork")}
               <span className="custom-tooltip">
-                {mode === "chat" ? "Chat" : "Cowork"}
+                {mode === "chat" ? t("chat.modeChat") : t("chat.modeCowork")}
                 <span className="custom-tooltip-shortcut">{isMac ? "⇧⌘" : "Ctrl+Shift+"}{idx + 1}</span>
               </span>
             </button>
@@ -157,7 +159,7 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
             <button
               className="right-panel-toggle"
               onClick={() => dispatch({ type: "SET_RIGHT_PANEL", payload: !(state.rightPanelByConversation[conversation?.id ?? ""] ?? false) })}
-              title="Toggle side panel"
+              title={t("chat.toggleSidePanel")}
             >
               <PanelRight />
             </button>

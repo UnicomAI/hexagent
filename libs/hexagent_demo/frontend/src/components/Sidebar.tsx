@@ -4,6 +4,7 @@ import { Plus, Search, MoreHorizontal, Trash2, Pencil, Settings, PanelLeft } fro
 import { useAppContext } from "../store";
 import { deleteConversation } from "../api";
 import ScrollableText from "./ScrollableText";
+import { useTranslation } from "../i18n";
 
 const isMac = navigator.platform.toUpperCase().includes("MAC");
 
@@ -35,6 +36,7 @@ function getInitial(name: string): string {
 
 export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearch, userName }: SidebarProps) {
   const { state, dispatch } = useAppContext();
+  const { t } = useTranslation();
   const conversationsRef = useRef<HTMLDivElement>(null);
   const clipRef = useRef<HTMLDivElement>(null);
   const prevCollapsed = useRef(state.sidebarCollapsed);
@@ -102,7 +104,7 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
 
   const handleRenameSubmit = useCallback(
     (id: string, title: string) => {
-      dispatch({ type: "UPDATE_CONVERSATION_TITLE", payload: { id, title: title || "Untitled conversation" } });
+      dispatch({ type: "UPDATE_CONVERSATION_TITLE", payload: { id, title: title || t("sidebar.untitledConversation") } });
       setRenamingId(null);
     },
     [dispatch]
@@ -170,7 +172,7 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
         >
           <PanelLeft />
           <span className="custom-tooltip">
-            {state.sidebarCollapsed ? "Open" : "Close"} sidebar
+            {state.sidebarCollapsed ? t("sidebar.openSidebar") : t("sidebar.closeSidebar")}
             <span className="custom-tooltip-shortcut">{isMac ? "⇧⌘S" : "Ctrl+Shift+S"}</span>
           </span>
         </button>
@@ -188,18 +190,18 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
             }}
           >
             <span className="sidebar-icon-wrap"><Plus /></span>
-            <span className="sidebar-action-label sidebar-fadeable">{state.selectedMode === "chat" ? "New chat" : "New task"}</span>
+            <span className="sidebar-action-label sidebar-fadeable">{state.selectedMode === "chat" ? t("sidebar.newChat") : t("sidebar.newTask")}</span>
             <kbd className="sidebar-shortcut">{isMac ? "⇧⌘O" : "Ctrl+Shift+O"}</kbd>
           </button>
           <button className="sidebar-action-btn" onClick={onOpenSearch}>
             <span className="sidebar-icon-wrap"><Search /></span>
-            <span className="sidebar-action-label sidebar-fadeable">Search</span>
+            <span className="sidebar-action-label sidebar-fadeable">{t("sidebar.search")}</span>
             <kbd className="sidebar-shortcut">{isMac ? "⌘K" : "Ctrl+K"}</kbd>
           </button>
         </nav>
 
         <div className="sidebar-divider sidebar-fadeable" />
-        <div className="sidebar-section-label sidebar-fadeable">Recents</div>
+        <div className="sidebar-section-label sidebar-fadeable">{t("sidebar.recents")}</div>
 
         <div className="sidebar-conversations sidebar-fadeable" ref={conversationsRef}>
           {state.conversations.filter((c) => (c.mode || "chat") === state.selectedMode).map((conv) => (
@@ -222,7 +224,7 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
                 />
               ) : (
                 <ScrollableText className="conversation-item-title">
-                  {conv.title || "Untitled conversation"}
+                  {conv.title || t("sidebar.untitledConversation")}
                 </ScrollableText>
               )}
               <button
@@ -240,12 +242,12 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
               <div className="context-menu-inline" style={{ top: contextMenu.anchorTop }}>
                 <button className="context-menu-item" onClick={handleRenameConversation}>
                   <Pencil />
-                  <span>Rename</span>
+                  <span>{t("sidebar.rename")}</span>
                 </button>
                 <div className="context-menu-divider" />
                 <button className="context-menu-item danger" onClick={handleDeleteConversation}>
                   <Trash2 />
-                  <span>Delete</span>
+                  <span>{t("common.delete")}</span>
                 </button>
               </div>
             </>
@@ -253,7 +255,7 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
 
           {state.conversations.filter((c) => (c.mode || "chat") === state.selectedMode).length === 0 && (
             <div style={{ padding: "16px 12px", fontSize: "13px", color: "var(--text-muted)", textAlign: "center" }}>
-              {state.selectedMode === "chat" ? "No chats yet" : "No tasks yet"}
+              {state.selectedMode === "chat" ? t("sidebar.noChats") : t("sidebar.noTasks")}
             </div>
           )}
         </div>
@@ -262,14 +264,14 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
         <div className="sidebar-bottom">
           <button className="sidebar-action-btn" onClick={onOpenSettings}>
             <span className="sidebar-icon-wrap"><Settings /></span>
-            <span className="sidebar-action-label sidebar-fadeable">Settings</span>
+            <span className="sidebar-action-label sidebar-fadeable">{t("sidebar.settings")}</span>
             <kbd className="sidebar-shortcut">{isMac ? "⇧⌘," : "Ctrl+Shift+,"}</kbd>
           </button>
           <div className="sidebar-action-btn sidebar-user-row">
             <span className="sidebar-icon-wrap">
               <span className="sidebar-avatar">{getInitial(userName)}</span>
             </span>
-            <span className="sidebar-action-label sidebar-fadeable">{userName || "User"}</span>
+            <span className="sidebar-action-label sidebar-fadeable">{userName || t("sidebar.user")}</span>
           </div>
         </div>
       </aside>

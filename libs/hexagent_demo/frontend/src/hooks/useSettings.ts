@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
+import type { LanguageSetting } from "../i18n/types";
 
 export interface Settings {
   fullName: string;
   theme: "light" | "dark" | "system";
+  language: LanguageSetting;
 }
 
 const STORAGE_KEY = "hexagent-settings";
@@ -10,6 +12,7 @@ const STORAGE_KEY = "hexagent-settings";
 const DEFAULT_SETTINGS: Settings = {
   fullName: "",
   theme: "system",
+  language: "system",
 };
 
 function loadSettings(): Settings {

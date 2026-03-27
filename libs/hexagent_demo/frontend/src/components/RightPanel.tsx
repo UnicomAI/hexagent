@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useCallback, useEffect, memo } from "react";
 import { ChevronDown } from "lucide-react";
+import { useTranslation } from "../i18n";
 import TodoProgress, { extractTodos } from "../tools/renderers/TodoProgress";
 import PresentFilesResult from "../tools/renderers/PresentFilesResult";
 import type { Conversation, ContentBlock, ToolCall } from "../types";
@@ -12,6 +13,7 @@ interface RightPanelProps {
 }
 
 export default memo(function RightPanel({ visible, conversation, streamingBlocks }: RightPanelProps) {
+  const { t } = useTranslation();
   const [progressOpen, setProgressOpen] = useState(true);
   const [artifactsOpen, setArtifactsOpen] = useState(true);
   const progressBodyRef = useRef<HTMLDivElement>(null);
@@ -117,7 +119,7 @@ export default memo(function RightPanel({ visible, conversation, streamingBlocks
             className="right-panel-section-header"
             onClick={() => setProgressOpen((p) => !p)}
           >
-            <span className="right-panel-section-title">Progress</span>
+            <span className="right-panel-section-title">{t("rightPanel.progress")}</span>
             <span className={`right-panel-section-toggle ${!progressOpen ? "collapsed" : ""}`}>
               <ChevronDown />
             </span>
@@ -143,7 +145,7 @@ export default memo(function RightPanel({ visible, conversation, streamingBlocks
               className="right-panel-section-header"
               onClick={() => setArtifactsOpen((p) => !p)}
             >
-              <span className="right-panel-section-title">Artifacts</span>
+              <span className="right-panel-section-title">{t("rightPanel.artifacts")}</span>
               <span className={`right-panel-section-toggle ${!artifactsOpen ? "collapsed" : ""}`}>
                 <ChevronDown />
               </span>

@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { X, Plus, Trash2, Monitor, Moon, Sun, Unplug, SlidersHorizontal, Cpu, ChevronDown, ChevronRight, Check, Loader2, Eye, EyeOff, GripVertical, Bot, Wrench, Globe, ScrollText, Zap, FolderOpen, FolderPlus, Server, CircleCheck, CircleAlert, Upload, Package, Download, AppWindow, TriangleAlert } from "lucide-react";
 import type { Settings } from "../hooks/useSettings";
+import { useTranslation, LANGUAGES, resolveLocale } from "../i18n";
 import { getServerConfig, updateServerConfig, testMcpConnection, browseFolder, listSkills, uploadSkill, deleteSkill, toggleSkill, installSkill } from "../api";
 import { useAppContext } from "../store";
 import type { ServerConfig, ModelConfig, AgentConfig, McpServerEntry } from "../api";
@@ -28,6 +29,7 @@ interface ConfigTabProps {
 }
 
 export default function SettingsModal({ open, onClose, settings, onSettingsChange, initialTab }: SettingsModalProps) {
+  const { t } = useTranslation();
   const { dispatch } = useAppContext();
   const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? "general");
 
@@ -80,7 +82,7 @@ export default function SettingsModal({ open, onClose, settings, onSettingsChang
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (e: unknown) {
-      setConfigError(e instanceof Error ? e.message : "Save failed");
+      setConfigError(e instanceof Error ? e.message : t("settings.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -155,56 +157,56 @@ export default function SettingsModal({ open, onClose, settings, onSettingsChang
             onClick={() => setActiveTab("general")}
           >
             <SlidersHorizontal className="settings-tab-icon" />
-            General
+            {t("settings.tab.general")}
           </button>
           <button
             className={`settings-tab ${activeTab === "sandbox" ? "active" : ""}`}
             onClick={() => setActiveTab("sandbox")}
           >
             <Monitor className="settings-tab-icon" />
-            Sandbox
+            {t("settings.tab.sandbox")}
           </button>
           <button
             className={`settings-tab ${activeTab === "model" ? "active" : ""}`}
             onClick={() => setActiveTab("model")}
           >
             <Cpu className="settings-tab-icon" />
-            Model
+            {t("settings.tab.model")}
           </button>
           <button
             className={`settings-tab ${activeTab === "tools" ? "active" : ""}`}
             onClick={() => setActiveTab("tools")}
           >
             <Wrench className="settings-tab-icon" />
-            Tool
+            {t("settings.tab.tool")}
           </button>
           <button
             className={`settings-tab ${activeTab === "mcps" ? "active" : ""}`}
             onClick={() => setActiveTab("mcps")}
           >
             <Unplug className="settings-tab-icon" />
-            MCP
+            {t("settings.tab.mcp")}
           </button>
           <button
             className={`settings-tab ${activeTab === "skills" ? "active" : ""}`}
             onClick={() => setActiveTab("skills")}
           >
             <ScrollText className="settings-tab-icon" />
-            Skills
+            {t("settings.tab.skills")}
           </button>
           <button
             className={`settings-tab ${activeTab === "agents" ? "active" : ""}`}
             onClick={() => setActiveTab("agents")}
           >
             <Bot className="settings-tab-icon" />
-            Subagent
+            {t("settings.tab.subagent")}
           </button>
         </div>
 
         <div className="settings-content">
           <div className="settings-content-body">
             <h2 className="settings-content-title">
-              {{ general: "General", model: "Model", tools: "Tool", mcps: "MCP", agents: "Subagent", sandbox: "Sandbox", skills: "Skills" }[activeTab]}
+              {{ general: t("settings.tab.general"), model: t("settings.tab.model"), tools: t("settings.tab.tool"), mcps: t("settings.tab.mcp"), agents: t("settings.tab.subagent"), sandbox: t("settings.tab.sandbox"), skills: t("settings.tab.skills") }[activeTab]}
             </h2>
 
             {activeTab === "general" && (
@@ -218,7 +220,7 @@ export default function SettingsModal({ open, onClose, settings, onSettingsChang
             {activeTab === "skills" && <SkillsTab />}
 
             {needsConfig && !config && !configError && (
-              <div className="settings-section"><p className="settings-hint">Loading configuration...</p></div>
+              <div className="settings-section"><p className="settings-hint">{t("settings.loadingConfig")}</p></div>
             )}
 
             {configError && <div className="model-error">{configError}</div>}
@@ -226,20 +228,20 @@ export default function SettingsModal({ open, onClose, settings, onSettingsChang
             {/* Global save bar for all config tabs */}
             {needsConfig && config && (
               <div className="model-save-bar">
-                {configDirty && !saved && <span className="model-unsaved-hint">Unsaved changes</span>}
+                {configDirty && !saved && <span className="model-unsaved-hint">{t("settings.unsavedChanges")}</span>}
                 <button
                   className={`model-save-btn ${saved ? "saved" : ""}`}
                   onClick={handleSave}
                   disabled={saving || (!configDirty && !saved)}
                 >
                   {saving ? (
-                    <><Loader2 size={14} className="model-save-spinner" /> Applying...</>
+                    <><Loader2 size={14} className="model-save-spinner" /> {t("settings.applying")}</>
                   ) : saved ? (
-                    <><Check size={14} /> Saved</>
+                    <><Check size={14} /> {t("settings.saved")}</>
                   ) : configDirty ? (
-                    "Save & Apply"
+                    t("settings.saveAndApply")
                   ) : (
-                    "No Changes"
+                    t("settings.noChanges")
                   )}
                 </button>
               </div>
@@ -250,19 +252,19 @@ export default function SettingsModal({ open, onClose, settings, onSettingsChang
         {showConfirm && (
           <div className="settings-confirm-overlay" onClick={() => setShowConfirm(false)}>
             <div className="settings-confirm-dialog" onClick={(e) => e.stopPropagation()}>
-              <h3 className="settings-confirm-title">Unsaved changes</h3>
+              <h3 className="settings-confirm-title">{t("settings.unsavedChanges")}</h3>
               <p className="settings-confirm-body">
-                You have unsaved changes that will be lost if you close now.
+                {t("settings.unsavedBody")}
               </p>
               <div className="settings-confirm-actions">
                 <button className="settings-confirm-btn" onClick={() => setShowConfirm(false)}>
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button className="settings-confirm-btn settings-confirm-btn--discard" onClick={animatedDiscard}>
-                  Discard
+                  {t("settings.discard")}
                 </button>
                 <button className="settings-confirm-btn settings-confirm-btn--save" onClick={animatedSaveAndClose}>
-                  Save & Close
+                  {t("settings.saveAndClose")}
                 </button>
               </div>
             </div>
@@ -280,23 +282,26 @@ function GeneralTab({
   settings: Settings;
   onChange: (s: Settings | ((prev: Settings) => Settings)) => void;
 }) {
+  const { t } = useTranslation();
+  const resolvedLocale = resolveLocale(settings.language);
+
   return (
     <div className="settings-rows">
       <div className="settings-row">
-        <div className="settings-row-label">Full Name</div>
+        <div className="settings-row-label">{t("settings.general.fullName")}</div>
         <div className="settings-row-value">
           <input
             className="settings-input"
             type="text"
             value={settings.fullName}
             onChange={(e) => onChange((prev) => ({ ...prev, fullName: e.target.value }))}
-            placeholder="Your name"
+            placeholder={t("settings.general.fullNamePlaceholder")}
           />
         </div>
       </div>
 
       <div className="settings-row">
-        <div className="settings-row-label">Appearance</div>
+        <div className="settings-row-label">{t("settings.general.appearance")}</div>
         <div className="settings-row-value">
           <div className="settings-theme-options">
             {(["light", "dark", "system"] as const).map((theme) => (
@@ -308,9 +313,34 @@ function GeneralTab({
                 {theme === "light" && <Sun className="settings-theme-icon" />}
                 {theme === "dark" && <Moon className="settings-theme-icon" />}
                 {theme === "system" && <Monitor className="settings-theme-icon" />}
-                <span>{theme.charAt(0).toUpperCase() + theme.slice(1)}</span>
+                <span>{t(`settings.general.${theme}` as const)}</span>
               </button>
             ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div className="settings-row-label">{t("settings.general.language")}</div>
+        <div className="settings-row-value">
+          <div className="settings-theme-options">
+            {LANGUAGES.map((lang) => (
+              <button
+                key={lang.code}
+                className={`settings-theme-btn ${settings.language !== "system" && resolvedLocale === lang.code ? "active" : ""}`}
+                onClick={() => onChange((prev) => ({ ...prev, language: lang.code }))}
+              >
+                <Globe className="settings-theme-icon" />
+                <span>{lang.nativeLabel}</span>
+              </button>
+            ))}
+            <button
+              className={`settings-theme-btn ${settings.language === "system" ? "active" : ""}`}
+              onClick={() => onChange((prev) => ({ ...prev, language: "system" }))}
+            >
+              <Monitor className="settings-theme-icon" />
+              <span>{t("settings.general.system")}</span>
+            </button>
           </div>
         </div>
       </div>
@@ -360,6 +390,7 @@ function presetIdFromProvider(provider: string): string {
 // ── Model Tab (compact accordion) ──
 
 function ModelTab({ config, onConfigChange }: ConfigTabProps) {
+  const { t } = useTranslation();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAddPicker, setShowAddPicker] = useState(false);
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
@@ -446,7 +477,7 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
   return (
     <div className="settings-section">
       <p className="settings-hint">
-        Add your AI models below. The first model is the default. Drag to reorder.
+        {t("settings.model.hint")}
       </p>
 
       {/* ── Compact Model List ── */}
@@ -484,8 +515,8 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
                 </div>
                 <div className="ml-row-info">
                   <div className="ml-row-top">
-                    <span className="ml-row-name">{m.display_name || m.model || "Untitled"}</span>
-                    {isDefault && <span className="ml-default-badge">Default</span>}
+                    <span className="ml-row-name">{m.display_name || m.model || t("common.untitled")}</span>
+                    {isDefault && <span className="ml-default-badge">{t("common.default")}</span>}
                   </div>
                   <div className="ml-row-meta">
                     {preset.label}{m.model ? ` · ${m.model}` : ""}
@@ -497,9 +528,9 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
                       className="settings-del"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setDeleteConfirm({ id: m.id, name: m.display_name || m.model || "Untitled" });
+                        setDeleteConfirm({ id: m.id, name: m.display_name || m.model || t("common.untitled") });
                       }}
-                      title="Delete"
+                      title={t("common.delete")}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -514,7 +545,7 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
                 <div className="ml-edit-inner">
                   {/* Provider pills */}
                   <div className="mc-field">
-                    <label className="mc-label">Provider</label>
+                    <label className="mc-label">{t("common.provider")}</label>
                     <div className="mc-pills">
                       {PROVIDER_PRESETS.map((p) => (
                         <button
@@ -542,16 +573,16 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
 
                   <div className="mc-row">
                     <div className="mc-field" style={{ flex: 1 }}>
-                      <label className="mc-label">Display Name</label>
+                      <label className="mc-label">{t("common.displayName")}</label>
                       <input
                         className="mc-input"
                         value={m.display_name}
                         onChange={(e) => updateModel(m.id, { display_name: e.target.value })}
-                        placeholder="e.g. My GPT-4"
+                        placeholder={t("settings.model.myModel")}
                       />
                     </div>
                     <div className="mc-field" style={{ flex: 1 }}>
-                      <label className="mc-label">Model ID</label>
+                      <label className="mc-label">{t("common.modelId")}</label>
                       <input
                         className="mc-input"
                         value={m.model}
@@ -562,7 +593,7 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
                   </div>
 
                   <div className="mc-field">
-                    <label className="mc-label">API Key</label>
+                    <label className="mc-label">{t("common.apiKey")}</label>
                     <div className="mc-key-wrap">
                       <input
                         className="mc-input mc-input--key"
@@ -584,7 +615,7 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
 
                   {/* Base URL */}
                   <div className="mc-field">
-                    <label className="mc-label">Base URL</label>
+                    <label className="mc-label">{t("common.baseUrl")}</label>
                     <input
                       className="mc-input"
                       value={m.base_url}
@@ -597,7 +628,7 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
                   <div className="mc-separator" />
                   <div className="mc-row">
                     <div className="mc-field" style={{ maxWidth: 200 }}>
-                      <label className="mc-label">Context Window</label>
+                      <label className="mc-label">{t("settings.model.contextWindow")}</label>
                       <input
                         className="mc-input"
                         value={m.context_window || ""}
@@ -650,12 +681,12 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
               </button>
             ))}
           </div>
-          <button className="add-picker-cancel" onClick={() => setShowAddPicker(false)}>Cancel</button>
+          <button className="add-picker-cancel" onClick={() => setShowAddPicker(false)}>{t("common.cancel")}</button>
         </div>
       ) : (
         <div className="model-actions">
           <button className="model-add-btn" onClick={() => setShowAddPicker(true)}>
-            <Plus size={16} /> Add Model
+            <Plus size={16} /> {t("settings.model.addModel")}
           </button>
         </div>
       )}
@@ -672,7 +703,7 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
             <CustomSelect
               value={config.fast_model_id}
               options={[
-                { value: "", label: "Default" },
+                { value: "", label: t("common.default") },
                 ...config.models.map((m) => ({ value: m.id, label: m.display_name })),
               ]}
               onChange={(v) => onConfigChange((prev) => ({ ...prev, fast_model_id: v }))}
@@ -687,14 +718,14 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
           <div className="settings-confirm-dialog" onClick={(e) => e.stopPropagation()}>
             <h3 className="settings-confirm-title">Delete &ldquo;<span className="settings-confirm-name">{deleteConfirm.name}</span>&rdquo;?</h3>
             <p className="settings-confirm-body">
-              This will permanently remove the model configuration. This action cannot be undone.
+              {t("settings.model.deleteWarning")}
             </p>
             <div className="settings-confirm-actions">
               <button className="settings-confirm-btn" onClick={() => setDeleteConfirm(null)}>
-                Cancel
+                {t("common.cancel")}
               </button>
               <button className="settings-confirm-btn settings-confirm-btn--discard" onClick={() => { deleteModel(deleteConfirm.id); setDeleteConfirm(null); }}>
-                Delete
+                {t("common.delete")}
               </button>
             </div>
           </div>
@@ -842,6 +873,7 @@ function KeyValueEditor({
 // ── MCP Tab ──
 
 function McpTab({ config, onConfigChange }: ConfigTabProps) {
+  const { t } = useTranslation();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
   const [showAddPicker, setShowAddPicker] = useState(false);
@@ -1024,7 +1056,7 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
   return (
     <div className="settings-section">
       <p className="settings-hint">
-        Configure MCP servers that the agent can connect to. Changes take effect on next agent restart.
+        {t("settings.mcp.title")}
       </p>
 
       {/* Server list */}
@@ -1038,7 +1070,7 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
               <div className="ml-row" onClick={() => setExpandedId(expanded ? null : server.id)}>
                 <div className="ml-row-info">
                   <div className="ml-row-top">
-                    <span className="ml-row-name">{server.name || "Untitled server"}</span>
+                    <span className="ml-row-name">{server.name || t("common.untitled")}</span>
                     <span className="mcp-type-badge">{server.type.toUpperCase()}</span>
                     {validatingIds.has(server.id) ? (
                       <span className="mcp-status-indicator mcp-status-testing">
@@ -1079,9 +1111,9 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
                     className="settings-del"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setDeleteConfirm({ id: server.id, name: server.name || "Untitled" });
+                      setDeleteConfirm({ id: server.id, name: server.name || t("common.untitled") });
                     }}
-                    title="Delete"
+                    title={t("common.delete")}
                   >
                     <Trash2 size={14} />
                   </button>
@@ -1095,7 +1127,7 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
                   <div className="ml-edit-inner">
                     {/* Type pills */}
                     <div className="mc-field">
-                      <label className="mc-label">Type</label>
+                      <label className="mc-label">{t("settings.mcp.type")}</label>
                       <div className="mc-pills">
                         <button
                           className={`mc-pill ${server.type === "http" ? "mc-pill--active" : ""}`}
@@ -1115,7 +1147,7 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
                     </div>
 
                     <div className="mc-field">
-                      <label className="mc-label">Name</label>
+                      <label className="mc-label">{t("settings.mcp.name")}</label>
                       <input
                         className="mc-input"
                         value={server.name}
@@ -1127,7 +1159,7 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
                     {server.type === "http" && (
                       <>
                         <div className="mc-field">
-                          <label className="mc-label">URL</label>
+                          <label className="mc-label">{t("settings.mcp.url")}</label>
                           <input
                             className="mc-input"
                             value={server.url}
@@ -1136,7 +1168,7 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
                           />
                         </div>
                         <KeyValueEditor
-                          label="Headers"
+                          label={t("settings.mcp.headers")}
                           value={server.headers}
                           onChange={(val) => updateServer(server.id, { headers: val })}
                           keyPlaceholder="Header-Name"
@@ -1149,7 +1181,7 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
                       <>
                         <div className="mc-row">
                           <div className="mc-field" style={{ flex: 1 }}>
-                            <label className="mc-label">Command</label>
+                            <label className="mc-label">{t("settings.mcp.command")}</label>
                             <input
                               className="mc-input"
                               value={server.command}
@@ -1158,7 +1190,7 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
                             />
                           </div>
                           <div className="mc-field" style={{ flex: 2 }}>
-                            <label className="mc-label">Arguments (space-separated)</label>
+                            <label className="mc-label">{t("settings.mcp.arguments")}</label>
                             <input
                               className="mc-input"
                               value={server.args}
@@ -1168,7 +1200,7 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
                           </div>
                         </div>
                         <KeyValueEditor
-                          label="Environment Variables"
+                          label={t("settings.mcp.envVars")}
                           value={server.env}
                           onChange={(val) => updateServer(server.id, { env: val })}
                           keyPlaceholder="VARIABLE_NAME"
@@ -1201,12 +1233,12 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
             <button className="add-picker-btn" onClick={() => addServer("http")}>HTTP</button>
             <button className="add-picker-btn" onClick={() => addServer("stdio")}>Stdio</button>
           </div>
-          <button className="add-picker-cancel" onClick={() => setShowAddPicker(false)}>Cancel</button>
+          <button className="add-picker-cancel" onClick={() => setShowAddPicker(false)}>{t("common.cancel")}</button>
         </div>
       ) : (
         <div className="model-actions">
           <button className="model-add-btn" onClick={() => setShowAddPicker(true)}>
-            <Plus size={16} /> Add MCP Server
+            <Plus size={16} /> {t("settings.mcp.addServer")}
           </button>
         </div>
       )}
@@ -1215,16 +1247,16 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
       {deleteConfirm && (
         <div className="settings-confirm-overlay" onClick={() => setDeleteConfirm(null)}>
           <div className="settings-confirm-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3 className="settings-confirm-title">Delete &ldquo;<span className="settings-confirm-name">{deleteConfirm.name}</span>&rdquo;?</h3>
+            <h3 className="settings-confirm-title">{t("common.delete")} &ldquo;<span className="settings-confirm-name">{deleteConfirm.name}</span>&rdquo;?</h3>
             <p className="settings-confirm-body">
-              This will permanently remove the MCP server. This action cannot be undone.
+              {t("settings.model.deleteWarning")}
             </p>
             <div className="settings-confirm-actions">
               <button className="settings-confirm-btn" onClick={() => setDeleteConfirm(null)}>
-                Cancel
+                {t("common.cancel")}
               </button>
               <button className="settings-confirm-btn settings-confirm-btn--discard" onClick={() => { deleteServer(deleteConfirm.id); setDeleteConfirm(null); }}>
-                Delete
+                {t("common.delete")}
               </button>
             </div>
           </div>
@@ -1249,6 +1281,7 @@ const FETCH_PROVIDERS = [
 ];
 
 function ToolsTab({ config, onConfigChange }: ConfigTabProps) {
+  const { t } = useTranslation();
   const [showSearchKey, setShowSearchKey] = useState(!config.tools.search_api_key);
   const [showFetchKey, setShowFetchKey] = useState(!config.tools.fetch_api_key);
   // Per-provider key cache: { tavily: "key1", brave: "key2", jina: "key3", ... }
@@ -1302,12 +1335,11 @@ function ToolsTab({ config, onConfigChange }: ConfigTabProps) {
       <div className="tools-group">
         <div className="tools-group-header">
           <Globe size={14} className="tools-group-icon" />
-          <span className="tools-group-title">Web Search</span>
-          <span className="tools-group-desc">Search the web for information</span>
+          <span className="tools-group-title">{t("settings.tools.searchProvider")}</span>
         </div>
         <div className="tools-group-body">
           <div className="mc-field">
-            <label className="mc-label">Provider</label>
+            <label className="mc-label">{t("common.provider")}</label>
             <div className="mc-pills">
               {SEARCH_PROVIDERS.map((p) => (
                 <button
@@ -1323,7 +1355,7 @@ function ToolsTab({ config, onConfigChange }: ConfigTabProps) {
           </div>
           {tools.search_provider && (
             <div className="mc-field">
-              <label className="mc-label">API Key <span className="tools-key-required">Required</span></label>
+              <label className="mc-label">{t("settings.tools.searchApiKey")} <span className="tools-key-required">Required</span></label>
               <div className="mc-key-wrap">
                 <input
                   className="mc-input mc-input--key"
@@ -1354,12 +1386,11 @@ function ToolsTab({ config, onConfigChange }: ConfigTabProps) {
       <div className="tools-group">
         <div className="tools-group-header">
           <AppWindow size={14} className="tools-group-icon" />
-          <span className="tools-group-title">Web Fetch</span>
-          <span className="tools-group-desc">Fetch and extract web page content</span>
+          <span className="tools-group-title">{t("settings.tools.fetchProvider")}</span>
         </div>
         <div className="tools-group-body">
           <div className="mc-field">
-            <label className="mc-label">Provider</label>
+            <label className="mc-label">{t("common.provider")}</label>
             <div className="mc-pills">
               {FETCH_PROVIDERS.map((p) => (
                 <button
@@ -1376,7 +1407,7 @@ function ToolsTab({ config, onConfigChange }: ConfigTabProps) {
           {tools.fetch_provider && (
             <div className="mc-field">
               <label className="mc-label">
-                API Key
+                {t("settings.tools.fetchApiKey")}
                 {tools.fetch_provider === "jina"
                   ? <span className="tools-key-hint">Optional — increases rate limit</span>
                   : <span className="tools-key-required">Required</span>
@@ -1471,6 +1502,7 @@ function CustomSelect({
 // ── Subagent Tab ──
 
 function SubagentTab({ config, onConfigChange }: ConfigTabProps) {
+  const { t } = useTranslation();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
   // Local string state for each agent's tools input to avoid comma-eating on keystroke
@@ -1520,7 +1552,7 @@ function SubagentTab({ config, onConfigChange }: ConfigTabProps) {
   return (
     <div className="settings-section">
       <p className="settings-hint">
-        Define specialized subagents that the main agent can delegate tasks to.
+        {t("settings.agent.title")}
       </p>
 
       <div className="ml-list">
@@ -1532,10 +1564,10 @@ function SubagentTab({ config, onConfigChange }: ConfigTabProps) {
               <div className="ml-row" onClick={() => setExpandedId(expanded ? null : agent.id)}>
                 <div className="ml-row-info">
                   <div className="ml-row-top">
-                    <span className="ml-row-name">{agent.name || "Untitled agent"}</span>
+                    <span className="ml-row-name">{agent.name || t("common.untitled")}</span>
                   </div>
                   <div className="ml-row-meta">
-                    {agent.description || "No description"}
+                    {agent.description || t("settings.agent.description")}
                   </div>
                 </div>
                 <div className="ml-row-actions">
@@ -1551,9 +1583,9 @@ function SubagentTab({ config, onConfigChange }: ConfigTabProps) {
                     className="settings-del"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setDeleteConfirm({ id: agent.id, name: agent.name || "Untitled" });
+                      setDeleteConfirm({ id: agent.id, name: agent.name || t("common.untitled") });
                     }}
-                    title="Delete"
+                    title={t("common.delete")}
                   >
                     <Trash2 size={14} />
                   </button>
@@ -1566,23 +1598,23 @@ function SubagentTab({ config, onConfigChange }: ConfigTabProps) {
                   <div className="ml-edit-inner">
                     <div className="mc-row">
                       <div className="mc-field" style={{ flex: 1 }}>
-                        <label className="mc-label">Name</label>
+                        <label className="mc-label">{t("settings.agent.name")}</label>
                         <input
                           className="mc-input"
                           value={agent.name}
                           onChange={(e) => updateAgent(agent.id, { name: e.target.value })}
-                          placeholder="e.g. code-reviewer"
+                          placeholder={t("settings.agent.namePlaceholder")}
                         />
                       </div>
                       <div className="mc-field" style={{ flex: 1 }}>
-                        <label className="mc-label">Model</label>
+                        <label className="mc-label">{t("settings.tab.model")}</label>
                         <CustomSelect
                           value={agent.model_id}
                           options={[
-                            { value: "", label: "Default" },
+                            { value: "", label: t("common.default") },
                             ...models.map((m) => ({
                               value: m.id,
-                              label: m.display_name || m.model || "Untitled",
+                              label: m.display_name || m.model || t("common.untitled"),
                             })),
                           ]}
                           onChange={(val) => updateAgent(agent.id, { model_id: val })}
@@ -1591,17 +1623,17 @@ function SubagentTab({ config, onConfigChange }: ConfigTabProps) {
                     </div>
 
                     <div className="mc-field">
-                      <label className="mc-label">Description</label>
+                      <label className="mc-label">{t("settings.agent.description")}</label>
                       <input
                         className="mc-input"
                         value={agent.description}
                         onChange={(e) => updateAgent(agent.id, { description: e.target.value })}
-                        placeholder="What this agent does (shown to the main agent)"
+                        placeholder={t("settings.agent.descPlaceholder")}
                       />
                     </div>
 
                     <div className="mc-field">
-                      <label className="mc-label">Tools (comma or newline separated)</label>
+                      <label className="mc-label">{t("settings.agent.tools")}</label>
                       <textarea
                         className="mc-input"
                         value={toolsText[agent.id] ?? agent.tools.join(", ")}
@@ -1624,19 +1656,19 @@ function SubagentTab({ config, onConfigChange }: ConfigTabProps) {
                           const parsed = raw.split(/[,\n]/).map((t) => t.trim()).filter(Boolean);
                           setToolsText((prev) => ({ ...prev, [agent.id]: parsed.join(", ") }));
                         }}
-                        placeholder="e.g. Read, Grep, Glob (empty = all tools)"
+                        placeholder={t("settings.agent.toolsPlaceholder")}
                         rows={2}
                         style={{ resize: "vertical", fontFamily: "inherit" }}
                       />
                     </div>
 
                     <div className="mc-field">
-                      <label className="mc-label">System Prompt</label>
+                      <label className="mc-label">{t("settings.agent.instructions")}</label>
                       <textarea
                         className="mc-input"
                         value={agent.system_prompt}
                         onChange={(e) => updateAgent(agent.id, { system_prompt: e.target.value })}
-                        placeholder="Custom instructions for this agent..."
+                        placeholder={t("settings.agent.instructions")}
                         rows={4}
                         style={{ resize: "vertical", fontFamily: "inherit" }}
                       />
@@ -1651,7 +1683,7 @@ function SubagentTab({ config, onConfigChange }: ConfigTabProps) {
 
       <div className="model-actions">
         <button className="model-add-btn" onClick={addAgent}>
-          <Plus size={16} /> Add Subagent
+          <Plus size={16} /> {t("settings.agent.addAgent")}
         </button>
       </div>
 
@@ -1659,16 +1691,16 @@ function SubagentTab({ config, onConfigChange }: ConfigTabProps) {
       {deleteConfirm && (
         <div className="settings-confirm-overlay" onClick={() => setDeleteConfirm(null)}>
           <div className="settings-confirm-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3 className="settings-confirm-title">Delete &ldquo;<span className="settings-confirm-name">{deleteConfirm.name}</span>&rdquo;?</h3>
+            <h3 className="settings-confirm-title">{t("common.delete")} &ldquo;<span className="settings-confirm-name">{deleteConfirm.name}</span>&rdquo;?</h3>
             <p className="settings-confirm-body">
-              This will permanently remove the agent. This action cannot be undone.
+              {t("settings.model.deleteWarning")}
             </p>
             <div className="settings-confirm-actions">
               <button className="settings-confirm-btn" onClick={() => setDeleteConfirm(null)}>
-                Cancel
+                {t("common.cancel")}
               </button>
               <button className="settings-confirm-btn settings-confirm-btn--discard" onClick={() => { deleteAgent(deleteConfirm.id); setDeleteConfirm(null); }}>
-                Delete
+                {t("common.delete")}
               </button>
             </div>
           </div>
@@ -1681,6 +1713,7 @@ function SubagentTab({ config, onConfigChange }: ConfigTabProps) {
 // ── Sandbox Tab ──
 
 function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
+  const { t } = useTranslation();
   const vm = useVMSetup();
   const [showKey, setShowKey] = useState(!config.sandbox.e2b_api_key);
   const [folders, setFolders] = useState<RecentFolder[]>(() => loadRecentFolders());
@@ -1730,20 +1763,20 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
           <div className="sb-card-icon"><Server size={18} /></div>
           <div className="sb-card-title-group">
             <div className="sb-card-title-row">
-              <span className="sb-card-title">E2B Sandbox</span>
-              <span className="sb-card-badge sb-card-badge--chat">Chat mode</span>
+              <span className="sb-card-title">{t("settings.sandbox.e2bTitle")}</span>
+              <span className="sb-card-badge sb-card-badge--chat">{t("settings.sandbox.chatMode")}</span>
             </div>
-            <span className="sb-card-desc">Cloud sandbox — runs agent code remotely via E2B</span>
+            <span className="sb-card-desc">{t("settings.sandbox.e2bDesc")}</span>
           </div>
           <span className={`sb-card-status ${e2bConfigured ? "sb-card-status--ok" : "sb-card-status--warn"}`}>
             {e2bConfigured
-              ? <><CircleCheck size={14} /> Configured</>
-              : <><CircleAlert size={14} /> Not configured</>}
+              ? <><CircleCheck size={14} /> {t("common.configured")}</>
+              : <><CircleAlert size={14} /> {t("settings.sandbox.notConfigured")}</>}
           </span>
         </div>
         <div className="sb-card-body">
           <div className="mc-field">
-            <label className="mc-label">API Key</label>
+            <label className="mc-label">{t("common.apiKey")}</label>
             <div className="mc-key-wrap">
               <input
                 className="mc-input mc-input--key"
@@ -1780,31 +1813,31 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
           <div className="sb-card-icon"><Monitor size={18} /></div>
           <div className="sb-card-title-group">
             <div className="sb-card-title-row">
-              <span className="sb-card-title">Virtual Machine</span>
-              <span className="sb-card-badge sb-card-badge--cowork">Cowork mode</span>
-              <span className="sb-card-badge sb-card-badge--platform">macOS only</span>
+              <span className="sb-card-title">{t("settings.sandbox.vmTitle")}</span>
+              <span className="sb-card-badge sb-card-badge--cowork">{t("settings.sandbox.coworkMode")}</span>
+              <span className="sb-card-badge sb-card-badge--platform">{t("settings.sandbox.macOnly")}</span>
             </div>
-            <span className="sb-card-desc">Local VM sandbox — runs agent code securely on your machine</span>
+            <span className="sb-card-desc">{t("settings.sandbox.vmDesc")}</span>
           </div>
           {vmStatus === null ? (
-            <span className="sb-card-status"><Loader2 size={14} className="spin" /> Checking...</span>
+            <span className="sb-card-status"><Loader2 size={14} className="spin" /> {t("settings.sandbox.checking")}</span>
           ) : vmUsable ? (
-            <span className="sb-card-status sb-card-status--ok"><CircleCheck size={14} /> Ready</span>
+            <span className="sb-card-status sb-card-status--ok"><CircleCheck size={14} /> {t("common.ready")}</span>
           ) : anyRunning && !vmUsable ? (
-            <span className="sb-card-status"><Loader2 size={14} className="spin" /> Setting up...</span>
+            <span className="sb-card-status"><Loader2 size={14} className="spin" /> {t("settings.sandbox.settingUp")}</span>
           ) : coreError ? (
-            <span className="sb-card-status sb-card-status--warn"><CircleAlert size={14} /> Error</span>
+            <span className="sb-card-status sb-card-status--warn"><CircleAlert size={14} /> {t("settings.sandbox.error")}</span>
           ) : !vmStatus.supported ? (
-            <span className="sb-card-status sb-card-status--warn"><CircleAlert size={14} /> Not supported</span>
+            <span className="sb-card-status sb-card-status--warn"><CircleAlert size={14} /> {t("settings.sandbox.notSupported")}</span>
           ) : (
-            <span className="sb-card-status sb-card-status--warn"><CircleAlert size={14} /> Setup needed</span>
+            <span className="sb-card-status sb-card-status--warn"><CircleAlert size={14} /> {t("settings.sandbox.setupNeeded")}</span>
           )}
         </div>
         <div className="sb-card-body">
           {/* ── All done: clean summary ── */}
           {vmStatus && vmStatus.supported && allDone && (
             <p className="vm-ready-summary">
-              <CircleCheck size={13} className="vm-phase-icon--done" /> VM is running and fully set up.
+              <CircleCheck size={13} className="vm-phase-icon--done" /> {t("settings.sandbox.vmRunning")}
             </p>
           )}
 
@@ -1815,14 +1848,14 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
               <div className={`vm-phase ${phase1 === "running" ? "vm-phase--active" : ""}`}>
                 <div className="vm-phase-header">
                   {phaseIcon(phase1)}
-                  <span className="vm-phase-label">VM Engine</span>
-                  {phase1 === "done" && <span className="vm-phase-badge vm-phase-badge--done">Installed</span>}
+                  <span className="vm-phase-label">{t("settings.sandbox.vmEngine")}</span>
+                  {phase1 === "done" && <span className="vm-phase-badge vm-phase-badge--done">{t("settings.sandbox.installed")}</span>}
                   {phase1 === "running" && phase1Msg && <span className="vm-phase-msg">{phase1Msg}</span>}
                   {phase1 === "pending" && (
-                    <button className="vm-phase-action" type="button" onClick={vm.installLima}>Install</button>
+                    <button className="vm-phase-action" type="button" onClick={vm.installLima}>{t("common.install")}</button>
                   )}
                   {phase1 === "error" && (
-                    <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.installLima}>Retry</button>
+                    <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.installLima}>{t("common.retry")}</button>
                   )}
                 </div>
                 {phase1 === "error" && phase1Error && (
@@ -1834,14 +1867,14 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
               <div className={`vm-phase ${phase2 === "running" ? "vm-phase--active" : ""}`}>
                 <div className="vm-phase-header">
                   {phaseIcon(phase2)}
-                  <span className="vm-phase-label">VM Instance</span>
-                  {phase2 === "done" && <span className="vm-phase-badge vm-phase-badge--done">Ready</span>}
+                  <span className="vm-phase-label">{t("settings.sandbox.vmInstance")}</span>
+                  {phase2 === "done" && <span className="vm-phase-badge vm-phase-badge--done">{t("common.ready")}</span>}
                   {phase2 === "running" && phase2Msg && <span className="vm-phase-msg">{phase2Msg}</span>}
                   {phase2 === "pending" && phase1 === "done" && (
-                    <button className="vm-phase-action" type="button" onClick={vm.buildVMInstance}>Install</button>
+                    <button className="vm-phase-action" type="button" onClick={vm.buildVMInstance}>{t("common.install")}</button>
                   )}
                   {phase2 === "error" && (
-                    <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.buildVMInstance}>Retry</button>
+                    <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.buildVMInstance}>{t("common.retry")}</button>
                   )}
                 </div>
                 {phase2 === "error" && phase2Error && (
@@ -1853,18 +1886,18 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
               <div className={`vm-phase ${phase3 === "running" ? "vm-phase--active" : ""}`}>
                 <div className="vm-phase-header">
                   {phaseIcon(phase3)}
-                  <span className="vm-phase-label">VM System Dependencies</span>
-                  {phase3 === "done" && <span className="vm-phase-badge vm-phase-badge--done">Complete</span>}
+                  <span className="vm-phase-label">{t("settings.sandbox.vmDeps")}</span>
+                  {phase3 === "done" && <span className="vm-phase-badge vm-phase-badge--done">{t("settings.sandbox.complete")}</span>}
                   {phase3 === "pending" && vmUsable && (
-                    <button className="vm-phase-action" type="button" onClick={() => vm.startProvision()}>Install in background</button>
+                    <button className="vm-phase-action" type="button" onClick={() => vm.startProvision()}>{t("settings.sandbox.installBackground")}</button>
                   )}
                   {phase3 === "running" && (
-                    <button className="vm-phase-action vm-phase-action--stop" type="button" onClick={vm.stopProvision}>Stop</button>
+                    <button className="vm-phase-action vm-phase-action--stop" type="button" onClick={vm.stopProvision}>{t("settings.sandbox.stop")}</button>
                   )}
                   {phase3 === "error" && (
                     <>
-                      <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={() => vm.startProvision()}>Retry</button>
-                      <button className="vm-phase-action vm-phase-action--secondary" type="button" onClick={vm.viewLog}>Log</button>
+                      <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={() => vm.startProvision()}>{t("common.retry")}</button>
+                      <button className="vm-phase-action vm-phase-action--secondary" type="button" onClick={vm.viewLog}>{t("settings.sandbox.log")}</button>
                     </>
                   )}
                 </div>
@@ -1905,13 +1938,13 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
 
           {/* Not supported message */}
           {vmStatus && !vmStatus.supported && (
-            <p className="vm-install-hint">VM backend is not available on this platform.</p>
+            <p className="vm-install-hint">{t("settings.sandbox.notSupportedMsg")}</p>
           )}
 
           {/* Folder list — shown once VM is usable (phases 1+2 done) */}
           {vmUsable && (
             <div className="vm-folder-list">
-              <label className="mc-label" style={{ marginBottom: 2 }}>Recent folders</label>
+              <label className="mc-label" style={{ marginBottom: 2 }}>{t("settings.sandbox.recentFolders")}</label>
               {folders.map((folder) => (
                 <div key={folder.path} className="vm-folder-row">
                   <FolderOpen size={14} className="vm-folder-icon" />
@@ -1919,15 +1952,15 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
                   <CustomSelect
                     value={folder.alwaysAllowed ? "allow" : "ask"}
                     options={[
-                      { value: "allow", label: "Allow" },
-                      { value: "ask", label: "Ask" },
+                      { value: "allow", label: t("common.allow") },
+                      { value: "ask", label: t("settings.sandbox.ask") },
                     ]}
                     onChange={() => toggleFolderPermission(folder.path)}
                   />
                   <button
                     className="settings-del vm-folder-remove"
                     onClick={() => removeFolder(folder.path)}
-                    title="Remove folder"
+                    title={t("settings.sandbox.removeFolder")}
                   >
                     <Trash2 size={13} />
                   </button>
@@ -1949,7 +1982,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
                 }}
               >
                 <FolderPlus size={14} />
-                <span>Add a folder</span>
+                <span>{t("settings.sandbox.addFolder")}</span>
               </button>
             </div>
           )}
@@ -1962,6 +1995,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
 // ── Skills Tab ──
 
 function SkillsTab() {
+  const { t } = useTranslation();
   const [publicSkills, setPublicSkills] = useState<string[]>([]);
   const [privateSkills, setPrivateSkills] = useState<string[]>([]);
   const [exampleSkills, setExampleSkills] = useState<string[]>([]);
@@ -1982,7 +2016,7 @@ function SkillsTab() {
       setExampleSkills(data.examples ?? []);
       setDisabledSkills(new Set(data.disabled));
     } catch (e: unknown) {
-      showError(e instanceof Error ? e.message : "Failed to load skills");
+      showError(e instanceof Error ? e.message : t("settings.skills.loadFailed"));
     }
   }, []);
 
@@ -1990,7 +2024,7 @@ function SkillsTab() {
 
   const doUpload = async (file: File) => {
     if (!file.name.endsWith(".zip") && !file.name.endsWith(".skill")) {
-      showError("Only .zip and .skill files are accepted.");
+      showError(t("settings.skills.onlyZip"));
       return;
     }
     setUploading(true);
@@ -1998,7 +2032,7 @@ function SkillsTab() {
       await uploadSkill(file);
       await loadSkills();
     } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : "Upload failed");
+      showError(err instanceof Error ? err.message : t("settings.skills.uploadFailed"));
     } finally {
       setUploading(false);
     }
@@ -2066,7 +2100,7 @@ function SkillsTab() {
   return (
     <div className="settings-section">
       <p className="settings-hint">
-        Skills are reusable instruction sets that guide Agent on specific tasks — like creating documents, presentations, or spreadsheets.
+        {t("settings.skills.title")}
       </p>
 
       {/* Error popup dialog */}
@@ -2091,18 +2125,18 @@ function SkillsTab() {
       {deleteConfirm && (
         <div className="settings-confirm-overlay" onClick={() => setDeleteConfirm(null)}>
           <div className="settings-confirm-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3 className="settings-confirm-title">Remove &ldquo;<span className="settings-confirm-name">{deleteConfirm.name}</span>&rdquo;?</h3>
+            <h3 className="settings-confirm-title">{t("settings.skills.removeSkill")} &ldquo;<span className="settings-confirm-name">{deleteConfirm.name}</span>&rdquo;?</h3>
             <p className="settings-confirm-body">
               {deleteConfirm.builtin
                 ? "This skill will be moved to Examples. You can always install it back later."
-                : "This will permanently remove the skill. This action cannot be undone."}
+                : t("settings.model.deleteWarning")}
             </p>
             <div className="settings-confirm-actions">
               <button className="settings-confirm-btn" onClick={() => setDeleteConfirm(null)}>
-                Cancel
+                {t("common.cancel")}
               </button>
               <button className="settings-confirm-btn settings-confirm-btn--discard" onClick={confirmDelete}>
-                Remove
+                {t("settings.skills.removeSkill")}
               </button>
             </div>
           </div>
@@ -2124,10 +2158,10 @@ function SkillsTab() {
                   <button
                     className="skills-item-install"
                     onClick={() => handleInstall(name)}
-                    title="Install skill"
+                    title={t("settings.skills.installSkill")}
                   >
                     <Download size={13} />
-                    <span>Install</span>
+                    <span>{t("common.install")}</span>
                   </button>
                 </div>
               ))
@@ -2148,12 +2182,12 @@ function SkillsTab() {
                 <button
                   className={`skills-toggle ${disabledSkills.has(name) ? "" : "skills-toggle--on"}`}
                   onClick={() => handleToggle(name, disabledSkills.has(name))}
-                  title={disabledSkills.has(name) ? "Enable skill" : "Disable skill"}
+                  title={disabledSkills.has(name) ? t("settings.skills.enableSkill") : t("settings.skills.disableSkill")}
                 />
                 <button
                   className="settings-del"
-                  onClick={() => { deleteSkill(name).then(() => loadSkills()).catch((err: unknown) => showError(err instanceof Error ? err.message : "Delete failed")); }}
-                  title="Remove skill"
+                  onClick={() => { deleteSkill(name).then(() => loadSkills()).catch((err: unknown) => showError(err instanceof Error ? err.message : t("common.delete"))); }}
+                  title={t("settings.skills.removeSkill")}
                 >
                   <Trash2 size={13} />
                 </button>
@@ -2174,19 +2208,19 @@ function SkillsTab() {
               <button
                 className={`skills-toggle ${disabledSkills.has(name) ? "" : "skills-toggle--on"}`}
                 onClick={() => handleToggle(name, disabledSkills.has(name))}
-                title={disabledSkills.has(name) ? "Enable skill" : "Disable skill"}
+                title={disabledSkills.has(name) ? t("settings.skills.enableSkill") : t("settings.skills.disableSkill")}
               />
               <button
                 className="settings-del"
                 onClick={() => setDeleteConfirm({ name, builtin: false })}
-                title="Remove skill"
+                title={t("settings.skills.removeSkill")}
               >
                 <Trash2 size={13} />
               </button>
             </div>
           ))}
           {privateSkills.length === 0 && (
-            <p className="settings-hint skills-empty">No custom skills installed.</p>
+            <p className="settings-hint skills-empty">{t("settings.skills.noSkills")}</p>
           )}
         </div>
       </div>

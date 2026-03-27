@@ -6,6 +6,7 @@ import { useFileDrop } from "../hooks/useFileDrop";
 import ModelPicker from "./ModelPicker";
 import FolderPicker from "./FolderPicker";
 import InputSettingsMenu from "./InputSettingsMenu";
+import { useTranslation } from "../i18n";
 import type { Attachment, ConversationMode } from "../types";
 
 interface PendingFile {
@@ -24,6 +25,7 @@ interface WelcomeScreenProps {
 
 export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: WelcomeScreenProps) {
   const { state, dispatch } = useAppContext();
+  const { t } = useTranslation();
   const warmSessionId = state.warmSessionId;
   const isCowork = mode === "cowork";
   const noModels = !state.serverConfig?.models?.length;
@@ -34,15 +36,15 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
   const e2bHintTimer = useRef<ReturnType<typeof setTimeout>>(null);
 
   const chatPlaceholders = [
-    "Imagine it, I'll make it happen...",
-    "What's your idea?",
-    "Describe the impossible...",
-    "Start with an idea...",
+    t("welcome.chatPlaceholder1"),
+    t("welcome.chatPlaceholder2"),
+    t("welcome.chatPlaceholder3"),
+    t("welcome.chatPlaceholder4"),
   ];
   const coworkPlaceholders = [
-    "How can I help you today?",
-    "Describe the task you'd like to accomplish...",
-    "What should we work on together?",
+    t("welcome.coworkPlaceholder1"),
+    t("welcome.coworkPlaceholder2"),
+    t("welcome.coworkPlaceholder3"),
   ];
   const placeholders = isCowork ? coworkPlaceholders : chatPlaceholders;
 
@@ -156,7 +158,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     // Check for name collision
     const collision = pendingFilesRef.current.some((f) => f.name === file.name && f.status !== "failed");
     if (collision) {
-      const error = `"${file.name}" already attached. Rename the file and try again.`;
+      const error = t("welcome.alreadyAttached", { filename: file.name });
       setPendingFiles((prev) => [...prev, { id, name: file.name, status: "failed" as const, error }]);
       dispatch({ type: "SHOW_NOTIFICATION", payload: { message: error, type: "error" } });
       return;
@@ -177,7 +179,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
         );
         dispatch({
           type: "SHOW_NOTIFICATION",
-          payload: { message: `Failed to upload ${file.name}: ${message}`, type: "error" },
+          payload: { message: t("welcome.uploadFailed", { filename: file.name, error: message }), type: "error" },
         });
       });
   }, [warmSessionId, dispatch, sandboxBlocked, flashE2bHint]);
@@ -197,7 +199,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     if (warmSessionId && folder) {
       // Mount the folder in the warm session
       updateWarmSession(warmSessionId, { working_dir: folder }).catch(() => {
-        dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to mount folder", type: "error" } });
+        dispatch({ type: "SHOW_NOTIFICATION", payload: { message: t("welcome.mountFailed"), type: "error" } });
       });
     }
     // If warmSessionId isn't ready yet, the effect below will flush when it arrives
@@ -207,7 +209,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
   useEffect(() => {
     if (warmSessionId && selectedFolder) {
       updateWarmSession(warmSessionId, { working_dir: selectedFolder }).catch(() => {
-        dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to mount folder", type: "error" } });
+        dispatch({ type: "SHOW_NOTIFICATION", payload: { message: t("welcome.mountFailed"), type: "error" } });
       });
     }
     // Only trigger when warmSessionId changes (not on every folder change —
@@ -249,13 +251,13 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     }, [dispatch]),
   );
 
-  const chatHeading = "HexAgent, ready when you are.";
-  const coworkHeading = "HexAgent, here to get things done.";
+  const chatHeading = t("welcome.chatHeadingWords");
+  const coworkHeading = t("welcome.coworkHeadingWords");
 
   return (
     <div className="welcome-screen" key={mode}>
       <h1 className={`welcome-heading ${isCowork ? "welcome-heading--cowork" : ""}`}>
-        {(isCowork ? coworkHeading : chatHeading).split(" ").map((word, i, arr) => {
+        {(isCowork ? coworkHeading : chatHeading).split("|").map((word, i, arr) => {
           if (isCowork) {
             return (
               <span key={i} style={{ animationDelay: `${i * 80}ms` }}>
@@ -333,7 +335,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
               />
               <button
                 className="input-tool-btn"
-                title="Attach file"
+                title={t("welcome.attachFile")}
                 onClick={() => { if (sandboxBlocked || !warmSessionId) { flashE2bHint(); return; } fileRef.current?.click(); }}
               >
                 <Paperclip />
@@ -355,15 +357,15 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
                   className="input-send"
                   onClick={handleSubmit}
                   disabled={(!value.trim() && doneFiles.length === 0) || anyUploading || noModels || sandboxBlocked}
-                  title={noModels ? "Configure a model in Settings first" : sandboxBlocked ? "Sandbox setup required" : "Send message"}
+                  title={noModels ? t("welcome.configureModel") : sandboxBlocked ? t("welcome.sandboxRequired") : t("welcome.sendMessage")}
                 >
                   <ArrowUp />
                 </button>
                 {sandboxBlocked && (
                   <div className={`e2b-hint${value.trim() || e2bHintFlash ? " e2b-hint-visible" : ""}`}>
-                    {missingE2bKey ? "E2B API key required" : "VM setup required"} —{" "}
+                    {missingE2bKey ? t("welcome.e2bRequired") : t("welcome.vmRequired")} —{" "}
                     <button className="e2b-hint-link" onClick={() => onOpenSettings("sandbox")}>
-                      Set up in Settings
+                      {t("welcome.setupInSettings")}
                     </button>
                   </div>
                 )}

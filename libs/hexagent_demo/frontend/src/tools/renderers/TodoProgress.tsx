@@ -6,6 +6,7 @@
  */
 
 import { Check, Loader } from "lucide-react";
+import { useTranslation } from "../../i18n";
 
 export interface TodoItem {
   content: string;
@@ -18,6 +19,7 @@ interface TodoProgressProps {
 }
 
 export default function TodoProgress({ todos }: TodoProgressProps) {
+  const { t } = useTranslation();
   return (
     <div className="todo-progress">
       {todos ? (
@@ -38,7 +40,7 @@ export default function TodoProgress({ todos }: TodoProgressProps) {
           </div>
         ))
       ) : (
-        <p className="todo-empty">No tasks tracked yet. The agent will update progress here as it works.</p>
+        <p className="todo-empty">{t("todoProgress.empty")}</p>
       )}
     </div>
   );

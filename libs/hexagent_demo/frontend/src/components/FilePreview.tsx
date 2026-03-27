@@ -12,6 +12,7 @@ import * as UTIF from "utif2";
 import { useSyntaxTheme } from "../hooks/useSyntaxTheme";
 import { X, Download, Copy, Check, File, Eye, CodeXml, Loader2 } from "lucide-react";
 import { useAppContext } from "../store";
+import { useTranslation } from "../i18n";
 import Markdown from "./Markdown";
 
 const LazyPdfViewer = lazy(() => import("./PdfViewer"));
@@ -300,12 +301,13 @@ function useTiffUrl(url: string) {
 // ---------------------------------------------------------------------------
 
 function ViewToggle({ onToggle }: { onToggle: () => void }) {
+  const { t } = useTranslation();
   return (
     <div className="file-preview-view-toggle">
-      <button className="file-preview-toggle-btn" onClick={onToggle} title="Preview">
+      <button className="file-preview-toggle-btn" onClick={onToggle} title={t("filePreview.preview")}>
         <Eye size={14} />
       </button>
-      <button className="file-preview-toggle-btn" onClick={onToggle} title="Code">
+      <button className="file-preview-toggle-btn" onClick={onToggle} title={t("filePreview.viewSource")}>
         <CodeXml size={14} />
       </button>
     </div>
@@ -657,6 +659,7 @@ function HtmlPreview({
   url: string;
   onContentLoaded?: (content: string) => void;
 }) {
+  const { t } = useTranslation();
   const { content, error, loading } = useTextContent(url);
 
   useEffect(() => {
@@ -671,7 +674,7 @@ function HtmlPreview({
         <iframe
           className="file-preview-iframe"
           srcDoc={content}
-          title="HTML preview"
+          title={t("filePreview.htmlPreview")}
           sandbox="allow-same-origin allow-scripts"
         />
       </div>
@@ -966,6 +969,7 @@ const COPYABLE_CATEGORIES = new Set<Category>([
 const MIN_WIDTH = 400;
 const MIN_CHAT_WIDTH = 400;
 export default function FilePreview({ visible }: { visible: boolean }) {
+  const { t } = useTranslation();
   const { state, dispatch } = useAppContext();
   const preview = state.filePreview;
   const viewModeRef = useRef<"preview" | "code">("preview");
@@ -1347,7 +1351,7 @@ export default function FilePreview({ visible }: { visible: boolean }) {
               <button
                 className="file-preview-action-btn"
                 onClick={handleCopy}
-                title={copied ? "Copied!" : "Copy"}
+                title={copied ? t("common.copied") : t("filePreview.copy")}
                 disabled={!textContent}
               >
                 {copied ? <Check size={16} /> : <Copy size={16} />}
@@ -1356,14 +1360,14 @@ export default function FilePreview({ visible }: { visible: boolean }) {
             <button
               className="file-preview-action-btn"
               onClick={handleDownload}
-              title="Download"
+              title={t("filePreview.download")}
             >
               <Download size={16} />
             </button>
             <button
               className="file-preview-action-btn"
               onClick={handleClose}
-              title="Close"
+              title={t("common.close")}
             >
               <X size={16} />
             </button>

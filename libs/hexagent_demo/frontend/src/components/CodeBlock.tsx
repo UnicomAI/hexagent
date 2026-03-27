@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { Copy, Check } from "lucide-react";
+import { useTranslation } from "../i18n";
 import { useSyntaxTheme } from "../hooks/useSyntaxTheme";
 
 interface CodeBlockProps {
@@ -11,6 +12,7 @@ interface CodeBlockProps {
 }
 
 export default function CodeBlock({ language, children, extraActions }: CodeBlockProps) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
@@ -44,7 +46,7 @@ export default function CodeBlock({ language, children, extraActions }: CodeBloc
           <button
             className="code-block-action-btn"
             onClick={handleCopy}
-            title="Copy code"
+            title={t("codeBlock.copyCode")}
           >
             {copied ? <Check /> : <Copy />}
           </button>

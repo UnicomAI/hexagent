@@ -10,6 +10,7 @@ import type { ServerConfig, ModelConfig } from "../api";
 import type { Settings } from "../hooks/useSettings";
 import { useAppContext } from "../store";
 import { useVMSetup } from "../vmSetup";
+import { useTranslation } from "../i18n";
 
 interface OnboardingWizardProps {
   open: boolean;
@@ -88,6 +89,7 @@ function stepIndex(s: Step): number {
 
 export default function OnboardingWizard({ open, onComplete, settings, onSettingsChange }: OnboardingWizardProps) {
   const { dispatch } = useAppContext();
+  const { t } = useTranslation();
   const [step, setStep] = useState<Step>("welcome");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -170,7 +172,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const handleFinish = async () => {
     if (!config) return;
     if (!selectedProvider || !apiKey.trim() || !modelId.trim()) {
-      setError("Please go back and configure your AI model first");
+      setError(t("onboarding.configureFirst"));
       return;
     }
     setSaving(true);
@@ -227,7 +229,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
       dispatch({ type: "SET_SERVER_CONFIG", payload: saved });
       onComplete();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to save configuration");
+      setError(e instanceof Error ? e.message : t("onboarding.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -252,44 +254,47 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
               <img className="setup-welcome-logo" width="40" height="40" src={faviconSvg} alt="" />
               <h2 className="setup-welcome-title">HexAgent</h2>
             </div>
-            <p className="setup-welcome-tagline">Powered by HexAgent harness</p>
+            <p className="setup-welcome-tagline">{t("onboarding.poweredBy")}</p>
 
             <div className="setup-welcome-form">
               <div className="setup-field">
-                <label className="setup-label">What should HexAgent call you?</label>
+                <label className="setup-label">{t("onboarding.whatToCall")}</label>
                 <input
                   className="setup-input setup-welcome-input"
                   type="text"
                   value={settings.fullName}
                   onChange={(e) => onSettingsChange((prev) => ({ ...prev, fullName: e.target.value }))}
-                  placeholder="Your name"
+                  placeholder={t("settings.general.fullNamePlaceholder")}
                   autoComplete="off"
                   autoFocus
                 />
               </div>
 
               <div className="setup-field">
-                <label className="setup-label">Theme</label>
+                <label className="setup-label">{t("onboarding.theme")}</label>
                 <div className="setup-theme-options">
-                  {(["light", "dark", "system"] as const).map((theme) => (
-                    <button
-                      key={theme}
-                      className={`setup-theme-btn ${settings.theme === theme ? "setup-theme-btn--active" : ""}`}
-                      type="button"
-                      onClick={() => onSettingsChange((prev) => ({ ...prev, theme }))}
-                    >
-                      {theme === "light" && <Sun size={14} />}
-                      {theme === "dark" && <Moon size={14} />}
-                      {theme === "system" && <Monitor size={14} />}
-                      <span>{theme.charAt(0).toUpperCase() + theme.slice(1)}</span>
-                    </button>
-                  ))}
+                  {(["light", "dark", "system"] as const).map((theme) => {
+                    const themeLabels = { light: t("settings.general.light"), dark: t("settings.general.dark"), system: t("settings.general.system") };
+                    return (
+                      <button
+                        key={theme}
+                        className={`setup-theme-btn ${settings.theme === theme ? "setup-theme-btn--active" : ""}`}
+                        type="button"
+                        onClick={() => onSettingsChange((prev) => ({ ...prev, theme }))}
+                      >
+                        {theme === "light" && <Sun size={14} />}
+                        {theme === "dark" && <Moon size={14} />}
+                        {theme === "system" && <Monitor size={14} />}
+                        <span>{themeLabels[theme]}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
 
             <button className="setup-btn setup-btn--primary setup-welcome-cta" onClick={goNext}>
-              Get Started <ArrowRight size={14} />
+              {t("onboarding.getStarted")} <ArrowRight size={14} />
             </button>
           </div>
         )}
@@ -300,8 +305,8 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             <div className="setup-step-header">
               <Sparkles size={20} className="setup-step-icon" />
               <div>
-                <h2 className="setup-title">AI Model</h2>
-                <p className="setup-subtitle">Choose your AI provider to get started</p>
+                <h2 className="setup-title">{t("onboarding.aiModel")}</h2>
+                <p className="setup-subtitle">{t("onboarding.chooseProvider")}</p>
               </div>
             </div>
 
@@ -325,11 +330,11 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             </div>
 
             <p className="setup-footer">
-              You can add more models later in Settings.
+              {t("onboarding.addMoreLater")}
             </p>
 
             <div className="setup-actions">
-              <button className="setup-btn setup-btn--ghost" onClick={goBack}>Back</button>
+              <button className="setup-btn setup-btn--ghost" onClick={goBack}>{t("common.back")}</button>
             </div>
           </div>
         )}
@@ -340,8 +345,8 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             <div className="setup-step-header">
               <Sparkles size={20} className="setup-step-icon" />
               <div>
-                <h2 className="setup-title">Configure {selectedProvider.label}</h2>
-                <p className="setup-subtitle">Enter your API credentials</p>
+                <h2 className="setup-title">{t("onboarding.configure", { provider: selectedProvider.label })}</h2>
+                <p className="setup-subtitle">{t("onboarding.enterCredentials")}</p>
               </div>
             </div>
 
@@ -349,7 +354,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
 
             <div className="setup-form">
               <div className="setup-field">
-                <label className="setup-label">API Key</label>
+                <label className="setup-label">{t("common.apiKey")}</label>
                 <div className="setup-key-wrap">
                   <input
                     className="setup-input setup-input--key"
@@ -370,7 +375,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
               </div>
 
               <div className="setup-field">
-                <label className="setup-label">Model ID</label>
+                <label className="setup-label">{t("common.modelId")}</label>
                 <input
                   className="setup-input"
                   value={modelId}
@@ -388,7 +393,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
               {isCustomProvider && (
                 <>
                   <div className="setup-field">
-                    <label className="setup-label">Base URL</label>
+                    <label className="setup-label">{t("common.baseUrl")}</label>
                     <input
                       className="setup-input"
                       value={baseUrl}
@@ -397,12 +402,12 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                     />
                   </div>
                   <div className="setup-field">
-                    <label className="setup-label">Display Name</label>
+                    <label className="setup-label">{t("common.displayName")}</label>
                     <input
                       className="setup-input"
                       value={displayName}
                       onChange={(e) => setDisplayName(e.target.value)}
-                      placeholder={autoDisplayName(modelId) || "My Model"}
+                      placeholder={autoDisplayName(modelId) || t("settings.model.myModel")}
                     />
                   </div>
                 </>
@@ -417,13 +422,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                     type="button"
                   >
                     {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    Advanced
+                    {t("common.advanced")}
                   </button>
 
                   {showAdvanced && (
                     <div className="setup-advanced">
                       <div className="setup-field">
-                        <label className="setup-label">Base URL</label>
+                        <label className="setup-label">{t("common.baseUrl")}</label>
                         <input
                           className="setup-input"
                           value={baseUrl}
@@ -432,12 +437,12 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                         />
                       </div>
                       <div className="setup-field">
-                        <label className="setup-label">Display Name</label>
+                        <label className="setup-label">{t("common.displayName")}</label>
                         <input
                           className="setup-input"
                           value={displayName}
                           onChange={(e) => setDisplayName(e.target.value)}
-                          placeholder={autoDisplayName(modelId) || "My Model"}
+                          placeholder={autoDisplayName(modelId) || t("settings.model.myModel")}
                         />
                       </div>
                     </div>
@@ -447,13 +452,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             </div>
 
             <div className="setup-actions">
-              <button className="setup-btn setup-btn--ghost" onClick={() => setStep("provider")}>Back</button>
+              <button className="setup-btn setup-btn--ghost" onClick={() => setStep("provider")}>{t("common.back")}</button>
               <button
                 className="setup-btn setup-btn--primary"
                 onClick={goNext}
                 disabled={!canProceedFromModel}
               >
-                Next <ArrowRight size={14} />
+                {t("common.next")} <ArrowRight size={14} />
               </button>
             </div>
           </div>
@@ -465,9 +470,9 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             <div className="setup-step-header">
               <ScrollText size={20} className="setup-step-icon" />
               <div>
-                <h2 className="setup-title">Summarizer model</h2>
+                <h2 className="setup-title">{t("onboarding.summarizer")}</h2>
                 <p className="setup-subtitle">
-                  A fast model for web page summarization. Can be the same as your main model or a cheaper/faster one.
+                  {t("onboarding.summarizerDesc")}
                 </p>
               </div>
             </div>
@@ -481,14 +486,14 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                   onClick={() => setSumSameAsMain(true)}
                   type="button"
                 >
-                  Same as main model
+                  {t("onboarding.sameAsMain")}
                 </button>
                 <button
                   className={`setup-pill ${!sumSameAsMain ? "setup-pill--active" : ""}`}
                   onClick={() => setSumSameAsMain(false)}
                   type="button"
                 >
-                  Different model
+                  {t("onboarding.differentModel")}
                 </button>
               </div>
             </div>
@@ -496,7 +501,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             {!sumSameAsMain && (
               <div className="setup-form">
                 <div className="setup-field">
-                  <label className="setup-label">Provider</label>
+                  <label className="setup-label">{t("common.provider")}</label>
                   <div className="setup-pill-group">
                     {PROVIDERS.map((p) => (
                       <button
@@ -518,7 +523,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 {sumProvider && (
                   <>
                     <div className="setup-field">
-                      <label className="setup-label">API Key</label>
+                      <label className="setup-label">{t("common.apiKey")}</label>
                       <div className="setup-key-wrap">
                         <input
                           className="setup-input setup-input--key"
@@ -538,7 +543,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                     </div>
 
                     <div className="setup-field">
-                      <label className="setup-label">Model ID</label>
+                      <label className="setup-label">{t("common.modelId")}</label>
                       <input
                         className="setup-input"
                         value={sumModelId}
@@ -556,7 +561,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                     {sumProvider.id === "custom" && (
                       <>
                         <div className="setup-field">
-                          <label className="setup-label">Base URL</label>
+                          <label className="setup-label">{t("common.baseUrl")}</label>
                           <input
                             className="setup-input"
                             value={sumBaseUrl}
@@ -565,12 +570,12 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                           />
                         </div>
                         <div className="setup-field">
-                          <label className="setup-label">Display Name</label>
+                          <label className="setup-label">{t("common.displayName")}</label>
                           <input
                             className="setup-input"
                             value={sumDisplayName}
                             onChange={(e) => setSumDisplayName(e.target.value)}
-                            placeholder={autoDisplayName(sumModelId) || "Fast Model"}
+                            placeholder={autoDisplayName(sumModelId) || t("onboarding.fastModel")}
                           />
                         </div>
                       </>
@@ -585,13 +590,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                           type="button"
                         >
                           {sumShowAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                          Advanced
+                          {t("common.advanced")}
                         </button>
 
                         {sumShowAdvanced && (
                           <div className="setup-advanced">
                             <div className="setup-field">
-                              <label className="setup-label">Base URL</label>
+                              <label className="setup-label">{t("common.baseUrl")}</label>
                               <input
                                 className="setup-input"
                                 value={sumBaseUrl}
@@ -600,12 +605,12 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                               />
                             </div>
                             <div className="setup-field">
-                              <label className="setup-label">Display Name</label>
+                              <label className="setup-label">{t("common.displayName")}</label>
                               <input
                                 className="setup-input"
                                 value={sumDisplayName}
                                 onChange={(e) => setSumDisplayName(e.target.value)}
-                                placeholder={autoDisplayName(sumModelId) || "Fast Model"}
+                                placeholder={autoDisplayName(sumModelId) || t("onboarding.fastModel")}
                               />
                             </div>
                           </div>
@@ -618,9 +623,9 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             )}
 
             <div className="setup-actions">
-              <button className="setup-btn setup-btn--ghost" onClick={goBack}>Back</button>
+              <button className="setup-btn setup-btn--ghost" onClick={goBack}>{t("common.back")}</button>
               <button className="setup-btn setup-btn--primary" onClick={goNext}>
-                Next <ArrowRight size={14} />
+                {t("common.next")} <ArrowRight size={14} />
               </button>
             </div>
           </div>
@@ -632,9 +637,9 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             <div className="setup-step-header">
               <Globe size={20} className="setup-step-icon" />
               <div>
-                <h2 className="setup-title">Web search & fetch</h2>
+                <h2 className="setup-title">{t("onboarding.webTools")}</h2>
                 <p className="setup-subtitle">
-                  Let the agent search the web and read pages. Optional — you can configure these later.
+                  {t("onboarding.webToolsDesc")}
                 </p>
               </div>
             </div>
@@ -646,13 +651,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
               <div className="setup-tool-group">
                 <div className="setup-tool-header">
                   <Globe size={14} />
-                  <span>Web Search</span>
+                  <span>{t("onboarding.webSearch")}</span>
                 </div>
                 <div className="setup-field">
-                  <label className="setup-label">Provider</label>
+                  <label className="setup-label">{t("common.provider")}</label>
                   <div className="setup-pill-group">
                     {[
-                      { id: "", label: "None" },
+                      { id: "", label: t("common.none") },
                       { id: "tavily", label: "Tavily" },
                       { id: "brave", label: "Brave" },
                     ].map((p) => (
@@ -669,14 +674,14 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 </div>
                 {searchProvider && (
                   <div className="setup-field">
-                    <label className="setup-label">API Key</label>
+                    <label className="setup-label">{t("common.apiKey")}</label>
                     <div className="setup-key-wrap">
                       <input
                         className="setup-input setup-input--key"
                         type={showSearchKey ? "text" : "password"}
                         value={searchKey}
                         onChange={(e) => setSearchKey(e.target.value)}
-                        placeholder={`${searchProvider} API key`}
+                        placeholder={t("onboarding.searchApiKeyPlaceholder", { provider: searchProvider })}
                       />
                       <button className="setup-key-toggle" onClick={() => setShowSearchKey(!showSearchKey)} type="button">
                         {showSearchKey ? <Eye size={14} /> : <EyeOff size={14} />}
@@ -692,13 +697,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
               <div className="setup-tool-group">
                 <div className="setup-tool-header">
                   <ScrollText size={14} />
-                  <span>Web Fetch</span>
+                  <span>{t("onboarding.webFetch")}</span>
                 </div>
                 <div className="setup-field">
-                  <label className="setup-label">Provider</label>
+                  <label className="setup-label">{t("common.provider")}</label>
                   <div className="setup-pill-group">
                     {[
-                      { id: "", label: "None" },
+                      { id: "", label: t("common.none") },
                       { id: "jina", label: "Jina" },
                       { id: "firecrawl", label: "Firecrawl" },
                     ].map((p) => (
@@ -715,14 +720,14 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 </div>
                 {fetchProvider && (
                   <div className="setup-field">
-                    <label className="setup-label">API Key</label>
+                    <label className="setup-label">{t("common.apiKey")}</label>
                     <div className="setup-key-wrap">
                       <input
                         className="setup-input setup-input--key"
                         type={showFetchKey ? "text" : "password"}
                         value={fetchKey}
                         onChange={(e) => setFetchKey(e.target.value)}
-                        placeholder={`${fetchProvider} API key`}
+                        placeholder={t("onboarding.fetchApiKeyPlaceholder", { provider: fetchProvider })}
                       />
                       <button className="setup-key-toggle" onClick={() => setShowFetchKey(!showFetchKey)} type="button">
                         {showFetchKey ? <Eye size={14} /> : <EyeOff size={14} />}
@@ -734,9 +739,9 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             </div>
 
             <div className="setup-actions">
-              <button className="setup-btn setup-btn--ghost" onClick={goBack}>Back</button>
+              <button className="setup-btn setup-btn--ghost" onClick={goBack}>{t("common.back")}</button>
               <button className="setup-btn setup-btn--primary" onClick={goNext}>
-                Next <ArrowRight size={14} />
+                {t("common.next")} <ArrowRight size={14} />
               </button>
             </div>
           </div>
@@ -748,9 +753,9 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             <div className="setup-step-header">
               <Server size={20} className="setup-step-icon" />
               <div>
-                <h2 className="setup-title">Compute environments</h2>
+                <h2 className="setup-title">{t("onboarding.compute")}</h2>
                 <p className="setup-subtitle">
-                  HexAgent uses sandboxed environments to run code safely. E2B is required for Chat mode.
+                  {t("onboarding.computeDesc")}
                 </p>
               </div>
             </div>
@@ -763,15 +768,15 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 <div className="setup-compute-header">
                   <Server size={16} />
                   <div className="setup-compute-info">
-                    <span className="setup-compute-name">E2B Sandbox</span>
-                    <span className="setup-compute-badge">Chat mode</span>
+                    <span className="setup-compute-name">{t("onboarding.e2bSandbox")}</span>
+                    <span className="setup-compute-badge">{t("onboarding.e2bBadge")}</span>
                   </div>
                 </div>
                 <p className="setup-compute-desc">
-                  Cloud sandbox for safe code execution (required). Get a free key at <a href="https://e2b.dev" target="_blank" rel="noreferrer">e2b.dev</a>
+                  {t("onboarding.e2bDesc")} Get a free key at <a href="https://e2b.dev" target="_blank" rel="noreferrer">e2b.dev</a>
                 </p>
                 <div className="setup-field">
-                  <label className="setup-label">API Key</label>
+                  <label className="setup-label">{t("common.apiKey")}</label>
                   <div className="setup-key-wrap">
                     <input
                       className="setup-input setup-input--key"
@@ -792,18 +797,18 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 <div className="setup-compute-header">
                   <Monitor size={16} />
                   <div className="setup-compute-info">
-                    <span className="setup-compute-name">Virtual Machine</span>
-                    <span className="setup-compute-badge">Cowork mode</span>
+                    <span className="setup-compute-name">{t("onboarding.vmTitle")}</span>
+                    <span className="setup-compute-badge">{t("onboarding.vmBadge")}</span>
                   </div>
                 </div>
                 <p className="setup-compute-desc">
-                  Local Linux VM for cowork sessions. You can skip this and set it up later in Settings.
+                  {t("onboarding.vmDesc")}
                 </p>
 
                 {vmSupported === false && (
                   <div className="setup-compute-status">
                     <span className="setup-compute-status-dot" />
-                    Not supported on this platform
+                    {t("onboarding.vmNotSupported")}
                   </div>
                 )}
 
@@ -815,14 +820,14 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                        vmPhase1 === "running" ? <Loader2 size={13} className="spin" /> :
                        vmPhase1 === "error" ? <CircleAlert size={13} className="setup-vm-icon--error" /> :
                        <span className="setup-vm-dot" />}
-                      <span className="setup-vm-label">VM Engine</span>
-                      {vmPhase1 === "done" && <span className="setup-vm-badge">Installed</span>}
+                      <span className="setup-vm-label">{t("onboarding.vmEngine")}</span>
+                      {vmPhase1 === "done" && <span className="setup-vm-badge">{t("onboarding.vmInstalled")}</span>}
                       {vmPhase1 === "running" && vmPhase1Msg && <span className="setup-vm-msg">{vmPhase1Msg}</span>}
                       {vmPhase1 === "pending" && (
-                        <button className="vm-phase-action" type="button" onClick={vm.installLima}>Install</button>
+                        <button className="vm-phase-action" type="button" onClick={vm.installLima}>{t("common.install")}</button>
                       )}
                       {vmPhase1 === "error" && (
-                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.installLima}>Retry</button>
+                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.installLima}>{t("common.retry")}</button>
                       )}
                     </div>
                     {vmPhase1 === "error" && vmPhase1Error && (
@@ -835,14 +840,14 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                        vmPhase2 === "running" ? <Loader2 size={13} className="spin" /> :
                        vmPhase2 === "error" ? <CircleAlert size={13} className="setup-vm-icon--error" /> :
                        <span className="setup-vm-dot" />}
-                      <span className="setup-vm-label">VM Instance</span>
-                      {vmPhase2 === "done" && <span className="setup-vm-badge">Ready</span>}
+                      <span className="setup-vm-label">{t("onboarding.vmInstance")}</span>
+                      {vmPhase2 === "done" && <span className="setup-vm-badge">{t("onboarding.vmReady")}</span>}
                       {vmPhase2 === "running" && vmPhase2Msg && <span className="setup-vm-msg">{vmPhase2Msg}</span>}
                       {vmPhase2 === "pending" && vmPhase1 === "done" && (
-                        <button className="vm-phase-action" type="button" onClick={vm.buildVMInstance}>Install</button>
+                        <button className="vm-phase-action" type="button" onClick={vm.buildVMInstance}>{t("common.install")}</button>
                       )}
                       {vmPhase2 === "error" && (
-                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.buildVMInstance}>Retry</button>
+                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.buildVMInstance}>{t("common.retry")}</button>
                       )}
                     </div>
                     {vmPhase2 === "error" && vmPhase2Error && (
@@ -855,20 +860,20 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                        vmPhase3 === "running" ? <Loader2 size={13} className="spin" /> :
                        vmPhase3 === "error" ? <CircleAlert size={13} className="setup-vm-icon--error" /> :
                        <span className="setup-vm-dot" />}
-                      <span className="setup-vm-label">VM System Dependencies</span>
-                      {vmPhase3 === "done" && <span className="setup-vm-badge">Complete</span>}
-                      {vmPhase3 === "running" && <span className="setup-vm-msg">Installing...</span>}
+                      <span className="setup-vm-label">{t("onboarding.vmDeps")}</span>
+                      {vmPhase3 === "done" && <span className="setup-vm-badge">{t("onboarding.vmComplete")}</span>}
+                      {vmPhase3 === "running" && <span className="setup-vm-msg">{t("onboarding.vmInstalling")}</span>}
                       {vmPhase3 === "pending" && vmUsable && (
-                        <button className="vm-phase-action" type="button" onClick={() => vm.startProvision()}>Install in background</button>
+                        <button className="vm-phase-action" type="button" onClick={() => vm.startProvision()}>{t("onboarding.installInBackground")}</button>
                       )}
                       {vmPhase3 === "error" && (
-                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={() => vm.startProvision()}>Retry</button>
+                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={() => vm.startProvision()}>{t("common.retry")}</button>
                       )}
                     </div>
 
                     {vmUsable && vmPhase3 !== "done" && (
                       <p className="setup-vm-hint">
-                        System dependencies install in the background — you can continue using HexAgent while it runs.
+                        {t("onboarding.vmDepsHint")}
                       </p>
                     )}
                   </div>
@@ -878,14 +883,14 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                   <>
                     <div className="setup-compute-status">
                       <span className="setup-compute-status-dot" />
-                      Skipped — you can set this up later in Settings
+                      {t("onboarding.vmSkipped")}
                     </div>
                     <button
                       className="setup-btn--link"
                       type="button"
                       onClick={() => { setVmSkipped(false); setShowSkipConfirm(false); }}
                     >
-                      Set up Cowork
+                      {t("onboarding.setupCowork")}
                     </button>
                   </>
                 )}
@@ -896,26 +901,26 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             {showSkipConfirm && (
               <div className="setup-skip-overlay" onClick={() => setShowSkipConfirm(false)}>
                 <div className="setup-skip-popup" onClick={(e) => e.stopPropagation()}>
-                  <p className="setup-skip-title">Are you sure you want to skip?</p>
+                  <p className="setup-skip-title">{t("onboarding.skipConfirmTitle")}</p>
                   <ul className="setup-skip-list">
                     {!e2bKey.trim() && (
-                      <li>Without an <strong>E2B API key</strong>, Chat mode will not be available.</li>
+                      <li dangerouslySetInnerHTML={{ __html: t("onboarding.skipNoE2b") }} />
                     )}
                     {vmSupported && !vmUsable && !vmSkipped && (
-                      <li>Without a <strong>Virtual Machine</strong>, Cowork mode will not be available.</li>
+                      <li dangerouslySetInnerHTML={{ __html: t("onboarding.skipNoVm") }} />
                     )}
                     {vmUsable && vmPhase3 !== "done" && vmPhase3 !== "running" && (
-                      <li><strong>VM System Dependencies</strong> are not installed. Cowork mode will work but the agent may lack some tools. You can install them later in Settings (runs in the background).</li>
+                      <li dangerouslySetInnerHTML={{ __html: t("onboarding.skipNoDeps") }} />
                     )}
                   </ul>
-                  <p className="setup-skip-note">You can configure these later in Settings.</p>
+                  <p className="setup-skip-note">{t("onboarding.skipNote")}</p>
                   <div className="setup-skip-actions">
                     <button
                       className="setup-btn setup-btn--ghost"
                       type="button"
                       onClick={() => setShowSkipConfirm(false)}
                     >
-                      Go back
+                      {t("onboarding.goBack")}
                     </button>
                     <button
                       className="setup-btn setup-btn--danger"
@@ -926,7 +931,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                         goNext();
                       }}
                     >
-                      Skip anyway
+                      {t("onboarding.skipAnyway")}
                     </button>
                   </div>
                 </div>
@@ -937,28 +942,23 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             {showDepsPrompt && (
               <div className="setup-skip-overlay" onClick={() => setShowDepsPrompt(false)}>
                 <div className="setup-skip-popup" onClick={(e) => e.stopPropagation()}>
-                  <p className="setup-skip-title setup-skip-title--recommend">Install system dependencies?</p>
-                  <p className="setup-deps-desc">
-                    Installing VM system dependencies is <strong>strongly recommended</strong>. It gives the agent access
-                    to tools like Python, Node.js, LaTeX, LibreOffice, and more.
-                  </p>
-                  <p className="setup-deps-desc">
-                    The installation runs in the background — you can start using HexAgent immediately.
-                  </p>
+                  <p className="setup-skip-title setup-skip-title--recommend">{t("onboarding.depsPromptTitle")}</p>
+                  <p className="setup-deps-desc" dangerouslySetInnerHTML={{ __html: t("onboarding.depsDesc1") }} />
+                  <p className="setup-deps-desc" dangerouslySetInnerHTML={{ __html: t("onboarding.depsDesc2") }} />
                   <div className="setup-skip-actions">
                     <button
                       className="setup-btn setup-btn--ghost"
                       type="button"
                       onClick={() => { setShowDepsPrompt(false); goNext(); }}
                     >
-                      Continue without
+                      {t("onboarding.continueWithout")}
                     </button>
                     <button
                       className="setup-btn setup-btn--primary"
                       type="button"
                       onClick={() => { vm.startProvision(); setShowDepsPrompt(false); goNext(); }}
                     >
-                      Install & Continue
+                      {t("onboarding.installAndContinue")}
                     </button>
                   </div>
                 </div>
@@ -977,7 +977,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
               };
               return (
                 <div className="setup-actions">
-                  <button className="setup-btn setup-btn--ghost" onClick={goBack}>Back</button>
+                  <button className="setup-btn setup-btn--ghost" onClick={goBack}>{t("common.back")}</button>
                   <div className="setup-actions-right">
                     {!canProceed && !showSkipConfirm && (
                       <button
@@ -985,7 +985,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                         type="button"
                         onClick={() => setShowSkipConfirm(true)}
                       >
-                        Skip
+                        {t("common.skip")}
                       </button>
                     )}
                     <button
@@ -993,7 +993,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                       onClick={handleNext}
                       disabled={!canProceed || anyVmRunning}
                     >
-                      Next <ArrowRight size={14} />
+                      {t("common.next")} <ArrowRight size={14} />
                     </button>
                   </div>
                 </div>
@@ -1008,9 +1008,9 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             <div className="setup-done-icon">
               <Check size={32} strokeWidth={2.5} />
             </div>
-            <h2 className="setup-title setup-title--center">You&rsquo;re all set!</h2>
+            <h2 className="setup-title setup-title--center">{t("onboarding.allSet")}</h2>
             <p className="setup-subtitle setup-subtitle--center">
-              Here&rsquo;s what you configured:
+              {t("onboarding.summary")}
             </p>
 
             {error && <div className="setup-error">{error}</div>}
@@ -1018,62 +1018,62 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             <div className="setup-summary">
               <div className="setup-summary-row">
                 <Sparkles size={14} />
-                <span className="setup-summary-label">AI Model</span>
+                <span className="setup-summary-label">{t("onboarding.summaryModel")}</span>
                 <span className="setup-summary-value">
                   {displayName || autoDisplayName(modelId) || modelId}
                 </span>
               </div>
               <div className="setup-summary-row">
                 <ScrollText size={14} />
-                <span className="setup-summary-label">Summarizer</span>
+                <span className="setup-summary-label">{t("onboarding.summarySummarizer")}</span>
                 <span className="setup-summary-value">
                   {sumSameAsMain
-                    ? "Same as main"
-                    : (sumDisplayName || autoDisplayName(sumModelId) || "Not configured")}
+                    ? t("onboarding.sameAsMainShort")
+                    : (sumDisplayName || autoDisplayName(sumModelId) || t("onboarding.notConfigured"))}
                 </span>
               </div>
               <div className="setup-summary-row">
                 <Globe size={14} />
-                <span className="setup-summary-label">Web Search</span>
+                <span className="setup-summary-label">{t("onboarding.summarySearch")}</span>
                 <span className="setup-summary-value">
-                  {searchProvider ? searchProvider.charAt(0).toUpperCase() + searchProvider.slice(1) : "Skipped"}
+                  {searchProvider ? searchProvider.charAt(0).toUpperCase() + searchProvider.slice(1) : t("common.skipped")}
                 </span>
               </div>
               <div className="setup-summary-row">
                 <ScrollText size={14} />
-                <span className="setup-summary-label">Web Fetch</span>
+                <span className="setup-summary-label">{t("onboarding.summaryFetch")}</span>
                 <span className="setup-summary-value">
-                  {fetchProvider ? fetchProvider.charAt(0).toUpperCase() + fetchProvider.slice(1) : "Skipped"}
+                  {fetchProvider ? fetchProvider.charAt(0).toUpperCase() + fetchProvider.slice(1) : t("common.skipped")}
                 </span>
               </div>
               <div className="setup-summary-row">
                 <Server size={14} />
-                <span className="setup-summary-label">E2B Sandbox</span>
+                <span className="setup-summary-label">{t("onboarding.summaryE2b")}</span>
                 <span className="setup-summary-value">
-                  {e2bKey ? "Configured" : "Skipped"}
+                  {e2bKey ? t("common.configured") : t("common.skipped")}
                 </span>
               </div>
               <div className="setup-summary-row">
                 <Monitor size={14} />
-                <span className="setup-summary-label">Virtual Machine</span>
+                <span className="setup-summary-label">{t("onboarding.summaryVm")}</span>
                 <span className="setup-summary-value">
-                  {vmSkipped ? "Skipped" : vmUsable ? "Ready" : "Not set up"}
+                  {vmSkipped ? t("common.skipped") : vmUsable ? t("common.ready") : t("onboarding.notSetUp")}
                 </span>
               </div>
             </div>
 
             <p className="setup-footer">
-              You can change any of these later in Settings.
+              {t("onboarding.changeLater")}
             </p>
 
             <div className="setup-actions setup-actions--center">
-              <button className="setup-btn setup-btn--ghost" onClick={goBack}>Back</button>
+              <button className="setup-btn setup-btn--ghost" onClick={goBack}>{t("common.back")}</button>
               <button
                 className="setup-btn setup-btn--primary setup-btn--finish"
                 onClick={handleFinish}
                 disabled={saving}
               >
-                {saving ? "Saving..." : "Start using HexAgent"}
+                {saving ? t("onboarding.saving") : t("onboarding.startUsing")}
               </button>
             </div>
           </div>

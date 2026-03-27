@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, Bot, Check } from "lucide-react";
+import { useTranslation } from "../i18n";
 import Markdown from "./Markdown";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolIcon from "./ToolIcon";
@@ -11,6 +12,7 @@ interface SubagentBlockProps {
 }
 
 export default function SubagentBlock({ subagent, isStreaming }: SubagentBlockProps) {
+  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
 
   const description =
@@ -37,11 +39,11 @@ export default function SubagentBlock({ subagent, isStreaming }: SubagentBlockPr
           <span className="subagent-description">{description}</span>
         </div>
         <div className="subagent-header-right">
-          {isActive && <span className="subagent-status-badge active">Running</span>}
+          {isActive && <span className="subagent-status-badge active">{t("subagent.running")}</span>}
           {isComplete && (
             <span className="subagent-status-badge complete">
               <Check className="subagent-done-check" />
-              Done
+              {t("subagent.done")}
             </span>
           )}
           <ChevronDown
@@ -54,7 +56,7 @@ export default function SubagentBlock({ subagent, isStreaming }: SubagentBlockPr
         <div className="subagent-body">
           {prompt && (
             <div className="subagent-prompt">
-              <span className="subagent-prompt-label">Prompt</span>
+              <span className="subagent-prompt-label">{t("subagent.prompt")}</span>
               <div className="subagent-prompt-text">{prompt.length > 200 ? prompt.slice(0, 200) + "..." : prompt}</div>
             </div>
           )}

@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Search, X } from "lucide-react";
 import { useAppContext } from "../store";
+import { useTranslation } from "../i18n";
+import type { TranslationKeys } from "../i18n";
 import type { Conversation } from "../types";
 
 interface SearchModalProps {
@@ -17,21 +19,22 @@ function messagePreview(conv: Conversation): string {
 }
 
 /** Format a relative time string. */
-function relativeTime(dateStr: string): string {
+function relativeTime(dateStr: string, t: (key: TranslationKeys, params?: Record<string, string | number>) => string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
   const diff = now - then;
   const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1) return t("search.justNow");
+  if (mins < 60) return t("search.minutesAgo", { count: mins });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t("search.hoursAgo", { count: hours });
   const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
+  if (days < 30) return t("search.daysAgo", { count: days });
   return new Date(dateStr).toLocaleDateString();
 }
 
 export default function SearchModal({ open, onClose }: SearchModalProps) {
+  const { t } = useTranslation();
   const { state, dispatch } = useAppContext();
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -139,7 +142,7 @@ export default function SearchModal({ open, onClose }: SearchModalProps) {
           <input
             ref={inputRef}
             className="search-input"
-            placeholder="Search conversations..."
+            placeholder={t("search.placeholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -151,7 +154,7 @@ export default function SearchModal({ open, onClose }: SearchModalProps) {
         <div className="search-results" ref={listRef}>
           {results.length === 0 && (
             <div className="search-empty">
-              {query.trim() ? "No matching conversations" : "No conversations yet"}
+              {query.trim() ? t("search.noMatching") : t("search.noConversations")}
             </div>
           )}
           {results.map((conv, i) => {
@@ -170,17 +173,17 @@ export default function SearchModal({ open, onClose }: SearchModalProps) {
                 }}
               >
                 <span className={`search-result-badge search-result-badge--${mode}`}>
-                  {mode === "chat" ? "Chat" : "Cowork"}
+                  {mode === "chat" ? t("chat.modeChat") : t("chat.modeCowork")}
                 </span>
                 <div className="search-result-content">
                   <span className="search-result-title">
-                    {conv.title || "Untitled conversation"}
+                    {conv.title || t("sidebar.untitledConversation")}
                   </span>
                   {messagePreview(conv) && (
                     <span className="search-result-preview">{messagePreview(conv)}</span>
                   )}
                 </div>
-                <span className="search-result-time">{relativeTime(conv.updated_at)}</span>
+                <span className="search-result-time">{relativeTime(conv.updated_at, t)}</span>
               </button>
             );
           })}

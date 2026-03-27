@@ -6,6 +6,7 @@
  */
 
 import { Loader2, ChevronRight } from "lucide-react";
+import { useTranslation } from "../i18n";
 import { useVMSetup } from "../vmSetup";
 
 interface VMSetupFloaterProps {
@@ -14,6 +15,7 @@ interface VMSetupFloaterProps {
 }
 
 export default function VMSetupFloater({ settingsOpen, onOpenSettings }: VMSetupFloaterProps) {
+  const { t } = useTranslation();
   const vm = useVMSetup();
 
   const anyRunning =
@@ -22,22 +24,22 @@ export default function VMSetupFloater({ settingsOpen, onOpenSettings }: VMSetup
   if (!anyRunning || settingsOpen) return null;
 
   // Determine current phase info for display
-  let title = "Setting up VM";
+  let title = t("vmFloater.settingUp");
   let msg = "";
   if (vm.phase1 === "running") {
-    title = "Installing VM Engine";
+    title = t("vmFloater.installingEngine");
     msg = vm.phase1Msg;
   } else if (vm.phase2 === "running") {
-    title = "Building VM Instance";
+    title = t("vmFloater.buildingInstance");
     msg = vm.phase2Msg;
   } else if (vm.phase3 === "running") {
-    title = "Installing Dependencies";
+    title = t("vmFloater.installingDeps");
     const runningStep = vm.provSteps.find((s) => vm.provStepStatus[s.id] === "running");
     msg = runningStep ? vm.provStepMsg[runningStep.id] || runningStep.label : "";
   }
 
   return (
-    <div className="vm-floater" onClick={onOpenSettings} title="Click to view details">
+    <div className="vm-floater" onClick={onOpenSettings} title={t("vmFloater.clickDetails")}>
       <Loader2 size={16} className="vm-floater-icon spin" />
       <div className="vm-floater-text">
         <span className="vm-floater-title">{title}</span>

@@ -1,5 +1,6 @@
 import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "react";
 import { ChevronRight, Check, X, ExternalLink } from "lucide-react";
+import { useTranslation } from "../i18n";
 import {
   getToolIcon,
   getToolLabel,
@@ -23,6 +24,7 @@ interface ToolCallBlockProps {
 }
 
 export default function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const userToggled = useRef(false);
   const argsBoxRef = useRef<HTMLDivElement>(null);
@@ -43,7 +45,7 @@ export default function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
 
   const label = toolCall.name
     ? getToolLabel(toolCall.name, toolCall.input, toolCall.argsText)
-    : "Tool";
+    : t("tool.tool");
   const FallbackIcon = getToolIcon(toolCall.name);
   const iconDomain = getIconDomain(toolCall.name, toolCall.input, toolCall.argsText);
   const iconFallback = getIconFallback(toolCall.name, toolCall.input, toolCall.argsText);
@@ -173,8 +175,8 @@ export default function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
           {showExternalLink && <ExternalLink size={12} className="fold-external-link" />}
         </span>
         <span className="fold-meta">
-          {isStreaming && <span className="tool-status is-streaming">Streaming<AnimatedDots /></span>}
-          {isRunning && <span className="tool-status is-running">Running<AnimatedDots /></span>}
+          {isStreaming && <span className="tool-status is-streaming">{t("tool.streaming")}<AnimatedDots /></span>}
+          {isRunning && <span className="tool-status is-running">{t("tool.running")}<AnimatedDots /></span>}
           {isDone && (
             customStatus ? (
               <span className={`tool-status ${customStatus.className}`}>
@@ -184,7 +186,7 @@ export default function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
             ) : (
               <span className="tool-status is-done">
                 <Check size={13} />
-                Done
+                {t("tool.done")}
               </span>
             )
           )}
@@ -209,7 +211,7 @@ export default function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
                   <>
                     {inputContent ? (
                       <div className={`tool-box${isStreaming ? " is-streaming" : ""}`} ref={argsBoxRef}>
-                        <div className="tool-box-label">Request</div>
+                        <div className="tool-box-label">{t("common.request")}</div>
                         <SyntaxHighlighter
                           language={inputContent.language}
                           style={isDarkTheme() ? oneDark : oneLight}
@@ -224,7 +226,7 @@ export default function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
                       </div>
                     ) : argsContent ? (
                       <div className={`tool-box${isStreaming ? " is-streaming" : ""}`} ref={argsBoxRef}>
-                        <div className="tool-box-label">Request</div>
+                        <div className="tool-box-label">{t("common.request")}</div>
                         <SyntaxHighlighter
                           language="json"
                           style={isDarkTheme() ? oneDark : oneLight}
@@ -240,11 +242,11 @@ export default function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
                     ) : null}
                     {revealOutput && isDone && (
                       <div className="tool-box">
-                        <div className="tool-box-label">Response</div>
+                        <div className="tool-box-label">{t("common.response")}</div>
                         <pre className="tool-pre">
                           {cleanOutput
                             ? <code>{cleanOutput}</code>
-                            : <code className="tool-output-empty">(empty)</code>
+                            : <code className="tool-output-empty">{t("common.empty")}</code>
                           }
                         </pre>
                       </div>

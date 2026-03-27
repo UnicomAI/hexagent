@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import { ChevronRight } from "lucide-react";
+import { useTranslation } from "../i18n";
 import Markdown from "./Markdown";
 
 interface ThinkingBlockProps {
@@ -19,16 +20,17 @@ function formatDuration(startedAt: number, endedAt: number): string {
 }
 
 export default function ThinkingBlock({ text, startedAt, endedAt }: ThinkingBlockProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const userToggled = useRef(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
   const isActive = !endedAt && !!startedAt;
   const label = isActive
-    ? "Thinking ..."
+    ? t("thinking.active")
     : startedAt
-      ? `Thought for ${formatDuration(startedAt, endedAt!)}`
-      : "Thought process";
+      ? t("thinking.done", { duration: formatDuration(startedAt, endedAt!) })
+      : t("thinking.label");
 
   // Auto-expand while thinking
   useEffect(() => {

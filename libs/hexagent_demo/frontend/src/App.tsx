@@ -2,6 +2,7 @@ import { useReducer, useEffect, useCallback, useRef, useState } from "react";
 import { AppContext, initialState, reducer } from "./store";
 import { listConversations, createConversation, createWarmSession, deleteWarmSession, sendMessage, getServerConfig, getVMStatus } from "./api";
 import { useSettings } from "./hooks/useSettings";
+import { I18nProvider, resolveLocale } from "./i18n";
 import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
 import RightPanel from "./components/RightPanel";
@@ -19,6 +20,7 @@ function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const abortRef = useRef<AbortController | null>(null);
   const { settings, setSettings } = useSettings();
+  const locale = resolveLocale(settings.language);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -56,6 +58,11 @@ function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  // Sync HTML lang attribute with resolved locale
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
 
   const [initialLoadDone, setInitialLoadDone] = useState(false);
 
@@ -368,6 +375,7 @@ function App() {
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>
+      <I18nProvider locale={locale}>
       <VMSetupProvider>
         <div className="app">
           <Sidebar
@@ -419,6 +427,7 @@ function App() {
           onDismiss={(id) => dispatch({ type: "DISMISS_NOTIFICATION", payload: id })}
         />
       </VMSetupProvider>
+      </I18nProvider>
     </AppContext.Provider>
   );
 }

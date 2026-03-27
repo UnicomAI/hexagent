@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { useAppContext } from "../store";
+import { useTranslation } from "../i18n";
 import { updateConversation } from "../api";
 
 
 export default function ModelPicker({ dropUp }: { dropUp?: boolean }) {
+  const { t } = useTranslation();
   const { state, dispatch } = useAppContext();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -13,7 +15,7 @@ export default function ModelPicker({ dropUp }: { dropUp?: boolean }) {
   const activeConv = state.conversations.find((c) => c.id === state.activeConversationId);
   const currentModelId = activeConv?.model_id || state.selectedModelId;
   const currentModel = models.find((m) => m.id === currentModelId);
-  const label = currentModel?.display_name || currentModel?.model || "Select model";
+  const label = currentModel?.display_name || currentModel?.model || t("modelPicker.select");
 
   useEffect(() => {
     if (!open) return;
@@ -66,7 +68,7 @@ export default function ModelPicker({ dropUp }: { dropUp?: boolean }) {
   if (models.length === 0) {
     return (
       <div className="mp">
-        <span className="mp-trigger mp-trigger--empty">No model configured</span>
+        <span className="mp-trigger mp-trigger--empty">{t("modelPicker.noModel")}</span>
       </div>
     );
   }
@@ -99,7 +101,7 @@ export default function ModelPicker({ dropUp }: { dropUp?: boolean }) {
                   }}
                 >
                   <div className="mp-option-content">
-                    <span className="dd-item-label">{m.display_name || m.model || "Untitled"}</span>
+                    <span className="dd-item-label">{m.display_name || m.model || t("common.untitled")}</span>
                     {m.model && <span className="mp-option-provider">{m.model}</span>}
                   </div>
                   <div className="dd-item-check">

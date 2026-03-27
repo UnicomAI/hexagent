@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, forwardRef } from "react";
 import { Copy, Check, FileText } from "lucide-react";
+import { useTranslation } from "../i18n";
 import Markdown from "./Markdown";
 import ToolCallBlock from "./ToolCallBlock";
 import SubagentBlock from "./SubagentBlock";
@@ -15,6 +16,7 @@ interface MessageBubbleProps {
 }
 
 const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(function MessageBubble({ message, streamingBlocks, isStreaming, isLastAssistant }, ref) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
@@ -79,7 +81,7 @@ const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(function Me
       {showActions && (
         <div className={`message-actions ${isUser ? "user" : "assistant"} ${isLastAssistant ? "always-visible" : ""}`}>
           {isUser && <span className="message-time">{timeStr}</span>}
-          <button className="message-action-btn" onClick={handleCopy} title="Copy message">
+          <button className="message-action-btn" onClick={handleCopy} title={t("common.copyMessage")}>
             {copied ? <Check /> : <Copy />}
           </button>
         </div>
