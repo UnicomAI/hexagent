@@ -1,6 +1,6 @@
 import { useReducer, useEffect, useCallback, useRef, useState } from "react";
 import { AppContext, initialState, reducer } from "./store";
-import { listConversations, createConversation, createWarmSession, deleteWarmSession, sendMessage, getServerConfig, getVMStatus } from "./api";
+import { listConversations, createConversation, createWarmSession, deleteWarmSession, sendMessage, getServerConfig, getVMStatus, type ServerConfig } from "./api";
 import { useSettings } from "./hooks/useSettings";
 import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
@@ -19,6 +19,8 @@ import "./App.css";
 function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const abortMapRef = useRef<Map<string, AbortController>>(new Map());
+  const serverConfigRef = useRef<ServerConfig | null>(null);
+  serverConfigRef.current = state.serverConfig;
   const { settings, setSettings } = useSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
@@ -78,13 +80,22 @@ function App() {
         }
       })
       .catch(() => {});
+    let loadedConfig: ServerConfig | null = null;
     const cfgP = getServerConfig()
       .then((cfg) => {
+        loadedConfig = cfg;
         dispatch({ type: "SET_SERVER_CONFIG", payload: cfg });
         if (cfg.models.length === 0) setSetupNeeded(true);
       })
       .catch(() => {});
-    Promise.all([convP, cfgP]).then(() => setInitialLoadDone(true));
+    Promise.all([convP, cfgP]).then(() => {
+      // If URL requested chat mode but E2B is not configured, redirect to cowork
+      const urlMode = window.location.pathname.match(/^\/(chat|cowork)/)?.[1];
+      if (urlMode === "chat" && !(loadedConfig?.sandbox?.chat_enabled && loadedConfig?.sandbox?.e2b_api_key)) {
+        dispatch({ type: "SET_SELECTED_MODE", payload: "cowork" as ConversationMode });
+      }
+      setInitialLoadDone(true);
+    });
     getVMStatus()
       .then((vs) => dispatch({ type: "SET_VM_STATUS", payload: vs }))
       .catch(() => {});
@@ -143,7 +154,12 @@ function App() {
     const handler = () => {
       const m = window.location.pathname.match(/^\/(chat|cowork)(?:\/(.+))?/);
       if (m) {
-        dispatch({ type: "SET_SELECTED_MODE", payload: m[1] as ConversationMode });
+        let mode = m[1] as ConversationMode;
+        if (mode === "chat" && !(serverConfigRef.current?.sandbox?.chat_enabled && serverConfigRef.current?.sandbox?.e2b_api_key)) {
+          mode = "cowork";
+          window.history.replaceState(null, "", "/cowork");
+        }
+        dispatch({ type: "SET_SELECTED_MODE", payload: mode });
         dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: m[2] ?? null });
       } else {
         dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: null });

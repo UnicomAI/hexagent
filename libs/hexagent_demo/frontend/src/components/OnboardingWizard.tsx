@@ -158,8 +158,6 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [showFetchKey, setShowFetchKey] = useState(false);
 
   // ── Step 4: Compute ──
-  const [e2bKey, setE2bKey] = useState("");
-  const [showE2bKey, setShowE2bKey] = useState(false);
 
   // VM setup — shared with Settings via VMSetupProvider (single source of truth)
   const vm = useVMSetup();
@@ -313,7 +311,8 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           fetch_api_key: fetchKey,
         },
         sandbox: {
-          e2b_api_key: e2bKey,
+          e2b_api_key: "",
+          chat_enabled: false,
         },
       };
 
@@ -845,7 +844,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
               <div>
                 <h2 className="setup-title">Compute environments</h2>
                 <p className="setup-subtitle">
-                  ClawWork uses sandboxed environments to run code safely. E2B is required for Chat mode.
+                  ClawWork uses sandboxed environments to run code safely.
                 </p>
               </div>
             </div>
@@ -853,42 +852,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             {error && <div className="setup-error">{error}</div>}
 
             <div className="setup-form">
-              {/* E2B for Chat mode */}
-              <div className="setup-compute-card">
-                <div className="setup-compute-header">
-                  <Server size={16} />
-                  <div className="setup-compute-info">
-                    <span className="setup-compute-name">E2B Sandbox</span>
-                    <span className="setup-compute-badge">Chat mode</span>
-                  </div>
-                </div>
-                <p className="setup-compute-desc">
-                  Cloud sandbox for safe code execution (required). Get a free key at <a href="https://e2b.dev" target="_blank" rel="noreferrer">e2b.dev</a>
-                </p>
-                <div className="setup-field">
-                  <label className="setup-label">API Key</label>
-                  <div className="setup-key-wrap">
-                    <input
-                      className="setup-input setup-input--key"
-                      type={showE2bKey ? "text" : "password"}
-                      value={e2bKey}
-                      onChange={(e) => setE2bKey(e.target.value)}
-                      placeholder="e2b_..."
-                    />
-                    <button className="setup-key-toggle" onClick={() => setShowE2bKey(!showE2bKey)} type="button">
-                      {showE2bKey ? <Eye size={14} /> : <EyeOff size={14} />}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
               {/* VM for Cowork mode */}
               <div className="setup-compute-card">
                 <div className="setup-compute-header">
                   <Monitor size={16} />
                   <div className="setup-compute-info">
                     <span className="setup-compute-name">Virtual Machine</span>
-                    <span className="setup-compute-badge">Cowork mode</span>
+                    <span className="setup-compute-badge">Required</span>
                   </div>
                 </div>
                 <p className="setup-compute-desc">
@@ -1001,6 +971,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                   </>
                 )}
               </div>
+
             </div>
 
             {/* Skip confirmation popup */}
@@ -1009,9 +980,6 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 <div className="setup-skip-popup" onClick={(e) => e.stopPropagation()}>
                   <p className="setup-skip-title">Are you sure you want to skip?</p>
                   <ul className="setup-skip-list">
-                    {!e2bKey.trim() && (
-                      <li>Without an <strong>E2B API key</strong>, Chat mode will not be available.</li>
-                    )}
                     {vmSupported && !vmUsable && !vmSkipped && (
                       <li>Without a <strong>Virtual Machine</strong>, Cowork mode will not be available.</li>
                     )}
@@ -1077,9 +1045,8 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             )}
 
             {(() => {
-              const hasE2b = !!e2bKey.trim();
               const vmReady = vmUsable || vmSkipped || vmSupported === false;
-              const canProceed = hasE2b && vmReady;
+              const canProceed = vmReady;
               const anyVmRunning = vmPhase1 === "running" || vmPhase2 === "running" || vmPhase3 === "running";
               const needsDepsPrompt = canProceed && vmUsable && vmPhase3 !== "done" && vmPhase3 !== "running";
               const handleNext = () => {
@@ -1155,13 +1122,6 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 <span className="setup-summary-label">Web Fetch</span>
                 <span className="setup-summary-value">
                   {fetchProvider ? fetchProvider.charAt(0).toUpperCase() + fetchProvider.slice(1) : "Skipped"}
-                </span>
-              </div>
-              <div className="setup-summary-row">
-                <Server size={14} />
-                <span className="setup-summary-label">E2B Sandbox</span>
-                <span className="setup-summary-value">
-                  {e2bKey ? "Configured" : "Skipped"}
                 </span>
               </div>
               <div className="setup-summary-row">

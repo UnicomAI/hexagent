@@ -300,6 +300,7 @@ export interface ToolsConfig {
 
 export interface SandboxConfig {
   e2b_api_key: string;
+  chat_enabled: boolean;
 }
 
 export interface McpServerEntry {
@@ -328,7 +329,7 @@ export async function getServerConfig(): Promise<ServerConfig> {
   const res = await fetch(`${API_BASE}/api/config`);
   if (!res.ok) throw new Error(`Failed to get config: ${res.statusText}`);
   const data = await res.json();
-  return { agents: [], tools: { search_provider: "", search_api_key: "", fetch_provider: "jina", fetch_api_key: "" }, sandbox: { e2b_api_key: "" }, mcp_servers: [], ...data };
+  return { agents: [], tools: { search_provider: "", search_api_key: "", fetch_provider: "jina", fetch_api_key: "" }, sandbox: { e2b_api_key: "", chat_enabled: false }, mcp_servers: [], ...data };
 }
 
 export async function updateServerConfig(config: ServerConfig): Promise<ServerConfig> {
