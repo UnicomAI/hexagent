@@ -100,8 +100,8 @@ def _ensure_proactor_event_loop() -> None:
         asyncio.set_event_loop_policy(proactor_cls())  # type: ignore[deprecated,unused-ignore]
 
 
-def _check_wsl_prerequisites() -> None:
-    """Verify we are on Windows with WSL available.
+def _check_wsl_prerequisites() -> str:
+    """Verify we are on Windows with WSL available and return the wsl.exe path.
 
     Also ensures the ``ProactorEventLoop`` policy is active.  On Windows,
     uvicorn (and some other frameworks) force ``SelectorEventLoop``, which
@@ -110,6 +110,9 @@ def _check_wsl_prerequisites() -> None:
     instantiates ``WslVM`` gets it automatically, regardless of the
     application entry point.
 
+    Returns:
+        Absolute path to ``wsl.exe``.
+
     Raises:
         UnsupportedPlatformError: If not on Windows.
         MissingDependencyError: If ``wsl.exe`` is not found.
@@ -117,13 +120,15 @@ def _check_wsl_prerequisites() -> None:
     if _PLATFORM != "win32":
         msg = f"WSL is a Windows subsystem — it cannot run on {_PLATFORM}"
         raise UnsupportedPlatformError(msg)
-    if _resolve_wsl_exe() is None:
+    wsl_exe = _resolve_wsl_exe()
+    if wsl_exe is None:
         msg = "wsl.exe not found. Install WSL2: https://learn.microsoft.com/windows/wsl/install"
         raise MissingDependencyError(msg)
 
     # Ensure ProactorEventLoop is used so create_subprocess_exec works.
     # SelectorEventLoop (uvicorn's default on Windows) does not support it.
     _ensure_proactor_event_loop()
+    return wsl_exe
 
 
 class WslVM:
@@ -134,10 +139,7 @@ class WslVM:
     """
 
     def __init__(self, instance: str) -> None:
-        _check_wsl_prerequisites()
-        wsl_exe = _resolve_wsl_exe()
-        assert wsl_exe is not None  # noqa: S101
-        self._wsl_exe = wsl_exe
+        self._wsl_exe = _check_wsl_prerequisites()
         self._instance = instance
         self._unc_prefix: str | None = None  # cached after first successful probe
 
@@ -577,7 +579,7 @@ class WslVM:
             # Windows ACLs allow writes. chown maps ownership to the session Linux user so
             # mkdir/Write behave consistently.
             sess = _session_user_from_guest_mount_path(m.guest_path)
-            skip_chown = os.environ.get("OPENAGENT_WSL_SKIP_SESSION_MOUNT_CHOWN", "").strip().lower() in (
+            skip_chown = os.environ.get("HEXAGENT_WSL_SKIP_SESSION_MOUNT_CHOWN", "").strip().lower() in (
                 "1",
                 "true",
                 "yes",

@@ -74,7 +74,7 @@ class AgentManager:
         if vm is None:
             return
 
-        probe = f"{guest_dir.rstrip('/')}/.openagent_write_probe_{os.getpid()}"
+        probe = f"{guest_dir.rstrip('/')}/.hexagent_write_probe_{os.getpid()}"
         cmd = (
             f"test -d {shlex.quote(guest_dir)} && "
             f"test -w {shlex.quote(guest_dir)} && "
@@ -210,7 +210,7 @@ class AgentManager:
                         "VM is not running. "
                         "Please set it up in Settings \u2192 Sandbox."
                     ) from None
-                raise RuntimeError(f"Cowork session setup failed: {detail}") from None
+                raise RuntimeError(f"Cowork session setup failed: {detail}") from exc
 
             actual_name = computer.session_name
             self._computers[actual_name] = computer
