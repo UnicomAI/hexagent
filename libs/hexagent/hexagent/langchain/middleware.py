@@ -147,7 +147,7 @@ def _extract_tool_images(messages: Sequence[BaseMessage]) -> list[BaseMessage] |
         changed = True
 
         # Replace ToolMessage content: text blocks only, or a placeholder string.
-        tool_content: str | list[str | dict[str, Any]] = text_blocks if text_blocks else "[see image below]"
+        tool_content: str | list[str | dict[str, Any]] = text_blocks or "[see image below]"
         result[-1] = ToolMessage(
             content=tool_content,
             tool_call_id=msg.tool_call_id,

@@ -11,6 +11,7 @@ Main components:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +20,8 @@ from hexagent.types import AgentContext, SubagentResult
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from langgraph.types import Checkpointer
 
     from hexagent.harness.definition import AgentDefinition
     from hexagent.harness.environment import EnvironmentResolver
@@ -123,7 +126,7 @@ class LangChainSubagentRunner:
         """Look up an agent definition by type name."""
         return self._definitions.get(subagent_type)
 
-    async def run(
+    async def run(  # noqa: PLR0912, PLR0915
         self,
         definition: AgentDefinition | None,
         prompt: str,
