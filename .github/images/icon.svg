@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="65.8 45 268.4 310">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="65.8 45 268.4 310" shape-rendering="crispEdges">
 <style>
   @media (prefers-color-scheme: light) {
     .s1 { fill: #82A4CC; }

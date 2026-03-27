@@ -1,0 +1,19 @@
+"""HexAgent package.
+
+HexAgent is an Agent SDK (supporting OpenAI-compatible LLMs) similar to
+Anthropic's Claude Agent SDK.
+
+Core Philosophy: Give agents a CLI-based computer, allowing them to work
+like humans do.
+"""
+
+from hexagent.harness.definition import AgentDefinition
+from hexagent.harness.model import ModelProfile
+from hexagent.langchain import Agent, create_agent
+
+__all__ = [
+    "Agent",
+    "AgentDefinition",
+    "ModelProfile",
+    "create_agent",
+]
