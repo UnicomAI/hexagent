@@ -45,5 +45,5 @@ skills/private/
 skills-inactive/
 
 # Bundled example/public skills (license restrictions)
-skills/examples/
-skills/public/
+# skills/examples/
+# skills/public/

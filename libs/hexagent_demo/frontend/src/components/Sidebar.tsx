@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import faviconSvg from "../assets/favicon.svg";
+import brandLogo from "../assets/brand-logo.png";
 import { Plus, Search, MoreHorizontal, Trash2, Pencil, Settings, PanelLeft } from "lucide-react";
 import { useAppContext } from "../store";
 import { deleteConversation } from "../api";
@@ -148,8 +148,8 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
           (outside the sliding aside). On wide screens it's static inside the clip. */}
       <div className="sidebar-header">
         <div className="sidebar-brand sidebar-fadeable">
-          <img className="sidebar-brand-logo" width="25" height="25" src={faviconSvg} alt="HexAgent" />
-          <span className="sidebar-brand-text">HexAgent</span>
+          <img className="sidebar-brand-logo" width="25" height="25" src={brandLogo} alt="ClawWork" />
+          <span className="sidebar-brand-text">ClawWork</span>
         </div>
         <button
           className="sidebar-icon-wrap sidebar-toggle custom-tooltip-trigger"

@@ -29,7 +29,7 @@ import { useAppContext } from "./store";
 
 const WSL_MANUAL_INSTALL_CMD = "wsl --install --no-distribution";
 const IS_WINDOWS = navigator.platform.toUpperCase().includes("WIN");
-const RESTART_REQUIRED_PATTERN = /restart windows|restart your computer|reboot|重启|重新启动/i;
+const RESTART_REQUIRED_PATTERN = /restart windows|restart your computer|reboot/i;
 
 function buildWslInstallRecoveryMessage(detail?: string): string {
   const base =
@@ -446,8 +446,8 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
       if (!limaInstalled) return;
 
       // Phase 2: VM instance (Lima must be Running; WSL is on-demand — Stopped is OK)
-      const runningLabels = ["Running", "正在运行"];
-      const wslStoppedLabels = ["Stopped", "已停止"];
+      const runningLabels = ["Running"];
+      const wslStoppedLabels = ["Stopped"];
       let vmReady = vmStatusSnapshot?.vm_ready === true;
       if (vmReady) {
         setPhase2("done");

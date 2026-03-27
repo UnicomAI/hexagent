@@ -1740,68 +1740,19 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
   const allDone = vmUsable && phase3 === "done";
   const anyRunning = phase1 === "running" || phase2 === "running" || phase3 === "running";
   const coreError = phase1 === "error" || phase2 === "error";
-  const phase1NeedsRestart = /restart windows|重启.*windows|重启.*电脑|reboot/i.test(phase1Error || "");
+  const phase1NeedsRestart = /restart windows|restart your computer|reboot/i.test(phase1Error || "");
+
+  const chatEnabled = !!config.sandbox.chat_enabled;
 
   return (
     <div className="settings-section">
-      {/* ── E2B Sandbox (Chat mode) ── */}
-      <div className="sb-card">
-        <div className="sb-card-header">
-          <div className="sb-card-icon"><Server size={18} /></div>
-          <div className="sb-card-title-group">
-            <div className="sb-card-title-row">
-              <span className="sb-card-title">E2B Sandbox</span>
-              <span className="sb-card-badge sb-card-badge--chat">Chat mode</span>
-            </div>
-            <span className="sb-card-desc">Cloud sandbox — runs agent code remotely via E2B</span>
-          </div>
-          <span className={`sb-card-status ${e2bConfigured ? "sb-card-status--ok" : "sb-card-status--warn"}`}>
-            {e2bConfigured
-              ? <><CircleCheck size={14} /> Configured</>
-              : <><CircleAlert size={14} /> Not configured</>}
-          </span>
-        </div>
-        <div className="sb-card-body">
-          <div className="mc-field">
-            <label className="mc-label">API Key</label>
-            <div className="mc-key-wrap">
-              <input
-                className="mc-input mc-input--key"
-                type={showKey ? "text" : "password"}
-                autoComplete="off"
-                data-1p-ignore
-                data-lpignore="true"
-                data-form-type="other"
-                placeholder="e2b_..."
-                value={config.sandbox.e2b_api_key}
-                onChange={(e) => {
-                  onConfigChange((prev) => ({
-                    ...prev,
-                    sandbox: { ...prev.sandbox, e2b_api_key: e.target.value },
-                  }));
-                }}
-              />
-              <button
-                className="mc-key-toggle"
-                type="button"
-                onClick={() => setShowKey(!showKey)}
-                title={showKey ? "Hide" : "Show"}
-              >
-                {showKey ? <Eye size={14} /> : <EyeOff size={14} />}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Virtual Machine (Cowork mode) ── */}
+      {/* ── Virtual Machine ── */}
       <div className="sb-card">
         <div className="sb-card-header">
           <div className="sb-card-icon"><Monitor size={18} /></div>
           <div className="sb-card-title-group">
             <div className="sb-card-title-row">
               <span className="sb-card-title">Virtual Machine</span>
-              <span className="sb-card-badge sb-card-badge--cowork">Cowork mode</span>
               <span className="sb-card-badge sb-card-badge--platform">{vmPlatformLabel}</span>
             </div>
             <span className="sb-card-desc">Local VM sandbox — runs agent code securely on your machine</span>
@@ -2015,6 +1966,72 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
             </div>
           )}
         </div>
+      </div>
+
+      {/* ── Chat Mode (legacy) ── */}
+      <div className="sb-card">
+        <div className="sb-card-header">
+          <div className="sb-card-icon"><Server size={18} /></div>
+          <div className="sb-card-title-group">
+            <div className="sb-card-title-row">
+              <span className="sb-card-title">Chat Mode</span>
+              <span className="sb-card-badge sb-card-badge--chat">Optional</span>
+            </div>
+            <span className="sb-card-desc">Cloud sandbox via E2B — runs agent code remotely</span>
+          </div>
+          <label className="sb-toggle">
+            <input
+              type="checkbox"
+              checked={chatEnabled}
+              onChange={(e) => {
+                onConfigChange((prev) => ({
+                  ...prev,
+                  sandbox: { ...prev.sandbox, chat_enabled: e.target.checked },
+                }));
+              }}
+            />
+            <span className="sb-toggle-slider" />
+          </label>
+        </div>
+        {chatEnabled && (
+          <div className="sb-card-body">
+            <div className="mc-field">
+              <label className="mc-label">E2B API Key</label>
+              <p className="mc-hint">Get a free key at <a href="https://e2b.dev" target="_blank" rel="noreferrer">e2b.dev</a></p>
+              <div className="mc-key-wrap">
+                <input
+                  className="mc-input mc-input--key"
+                  type={showKey ? "text" : "password"}
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-form-type="other"
+                  placeholder="e2b_..."
+                  value={config.sandbox.e2b_api_key}
+                  onChange={(e) => {
+                    onConfigChange((prev) => ({
+                      ...prev,
+                      sandbox: { ...prev.sandbox, e2b_api_key: e.target.value },
+                    }));
+                  }}
+                />
+                <button
+                  className="mc-key-toggle"
+                  type="button"
+                  onClick={() => setShowKey(!showKey)}
+                  title={showKey ? "Hide" : "Show"}
+                >
+                  {showKey ? <Eye size={14} /> : <EyeOff size={14} />}
+                </button>
+              </div>
+            </div>
+            {!e2bConfigured && (
+              <p className="mc-hint" style={{ marginTop: 8, color: "var(--text-warning)" }}>
+                An E2B API key is required to use Chat mode.
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

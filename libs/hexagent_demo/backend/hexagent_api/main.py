@@ -76,6 +76,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     cleanup_task = asyncio.create_task(_cleanup_expired_sessions())
     yield
     cleanup_task.cancel()
+    from hexagent_api.stream_manager import stream_manager
+    logger.info("Cancelling active streams...")
+    stream_manager.cancel_all()
     logger.info("Shutting down agent manager...")
     await agent_manager.stop()
     logger.info("Agent manager shut down.")

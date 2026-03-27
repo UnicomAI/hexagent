@@ -158,8 +158,6 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [showFetchKey, setShowFetchKey] = useState(false);
 
   // ── Step 4: Compute ──
-  const [e2bKey, setE2bKey] = useState("");
-  const [showE2bKey, setShowE2bKey] = useState(false);
 
   // VM setup — shared with Settings via VMSetupProvider (single source of truth)
   const vm = useVMSetup();
@@ -177,7 +175,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const vmPhase2Error = vm.phase2Error;
   const vmPhase3 = vm.phase3;
   const vmUsable = vmPhase1 === "done" && vmPhase2 === "done";
-  const vmPhase1NeedsRestart = /restart windows|重启.*windows|重启.*电脑|reboot/i.test(vmPhase1Error || "");
+  const vmPhase1NeedsRestart = /restart windows|restart your computer|reboot/i.test(vmPhase1Error || "");
 
   // Load server config and restore onboarding draft on open
   useEffect(() => {
@@ -313,7 +311,8 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           fetch_api_key: fetchKey,
         },
         sandbox: {
-          e2b_api_key: e2bKey,
+          e2b_api_key: "",
+          chat_enabled: false,
         },
       };
 
@@ -345,13 +344,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           <div className="setup-step setup-welcome">
             <div className="setup-welcome-brand">
               <img className="setup-welcome-logo" width="40" height="40" src={faviconSvg} alt="" />
-              <h2 className="setup-welcome-title">HexAgent</h2>
+              <h2 className="setup-welcome-title">ClawWork</h2>
             </div>
-            <p className="setup-welcome-tagline">Powered by HexAgent harness</p>
+            <p className="setup-welcome-tagline">Powered by ClawWork harness</p>
 
             <div className="setup-welcome-form">
               <div className="setup-field">
-                <label className="setup-label">What should HexAgent call you?</label>
+                <label className="setup-label">What should ClawWork call you?</label>
                 <input
                   className="setup-input setup-welcome-input"
                   type="text"
@@ -845,7 +844,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
               <div>
                 <h2 className="setup-title">Compute environments</h2>
                 <p className="setup-subtitle">
-                  HexAgent uses sandboxed environments to run code safely. E2B is required for Chat mode.
+                  ClawWork uses sandboxed environments to run code safely.
                 </p>
               </div>
             </div>
@@ -853,42 +852,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             {error && <div className="setup-error">{error}</div>}
 
             <div className="setup-form">
-              {/* E2B for Chat mode */}
-              <div className="setup-compute-card">
-                <div className="setup-compute-header">
-                  <Server size={16} />
-                  <div className="setup-compute-info">
-                    <span className="setup-compute-name">E2B Sandbox</span>
-                    <span className="setup-compute-badge">Chat mode</span>
-                  </div>
-                </div>
-                <p className="setup-compute-desc">
-                  Cloud sandbox for safe code execution (required). Get a free key at <a href="https://e2b.dev" target="_blank" rel="noreferrer">e2b.dev</a>
-                </p>
-                <div className="setup-field">
-                  <label className="setup-label">API Key</label>
-                  <div className="setup-key-wrap">
-                    <input
-                      className="setup-input setup-input--key"
-                      type={showE2bKey ? "text" : "password"}
-                      value={e2bKey}
-                      onChange={(e) => setE2bKey(e.target.value)}
-                      placeholder="e2b_..."
-                    />
-                    <button className="setup-key-toggle" onClick={() => setShowE2bKey(!showE2bKey)} type="button">
-                      {showE2bKey ? <Eye size={14} /> : <EyeOff size={14} />}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
               {/* VM for Cowork mode */}
               <div className="setup-compute-card">
                 <div className="setup-compute-header">
                   <Monitor size={16} />
                   <div className="setup-compute-info">
                     <span className="setup-compute-name">Virtual Machine</span>
-                    <span className="setup-compute-badge">Cowork mode</span>
+                    <span className="setup-compute-badge">Required</span>
                   </div>
                 </div>
                 <p className="setup-compute-desc">
@@ -979,7 +949,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
 
                     {vmUsable && vmPhase3 !== "done" && (
                       <p className="setup-vm-hint">
-                        System dependencies install in the background — you can continue using HexAgent while it runs.
+                        System dependencies install in the background — you can continue using ClawWork while it runs.
                       </p>
                     )}
                   </div>
@@ -1001,6 +971,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                   </>
                 )}
               </div>
+
             </div>
 
             {/* Skip confirmation popup */}
@@ -1009,9 +980,6 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 <div className="setup-skip-popup" onClick={(e) => e.stopPropagation()}>
                   <p className="setup-skip-title">Are you sure you want to skip?</p>
                   <ul className="setup-skip-list">
-                    {!e2bKey.trim() && (
-                      <li>Without an <strong>E2B API key</strong>, Chat mode will not be available.</li>
-                    )}
                     {vmSupported && !vmUsable && !vmSkipped && (
                       <li>Without a <strong>Virtual Machine</strong>, Cowork mode will not be available.</li>
                     )}
@@ -1054,7 +1022,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                     to tools like Python, Node.js, LaTeX, LibreOffice, and more.
                   </p>
                   <p className="setup-deps-desc">
-                    The installation runs in the background — you can start using HexAgent immediately.
+                    The installation runs in the background — you can start using ClawWork immediately.
                   </p>
                   <div className="setup-skip-actions">
                     <button
@@ -1077,9 +1045,8 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             )}
 
             {(() => {
-              const hasE2b = !!e2bKey.trim();
               const vmReady = vmUsable || vmSkipped || vmSupported === false;
-              const canProceed = hasE2b && vmReady;
+              const canProceed = vmReady;
               const anyVmRunning = vmPhase1 === "running" || vmPhase2 === "running" || vmPhase3 === "running";
               const needsDepsPrompt = canProceed && vmUsable && vmPhase3 !== "done" && vmPhase3 !== "running";
               const handleNext = () => {
@@ -1158,13 +1125,6 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 </span>
               </div>
               <div className="setup-summary-row">
-                <Server size={14} />
-                <span className="setup-summary-label">E2B Sandbox</span>
-                <span className="setup-summary-value">
-                  {e2bKey ? "Configured" : "Skipped"}
-                </span>
-              </div>
-              <div className="setup-summary-row">
                 <Monitor size={14} />
                 <span className="setup-summary-label">Virtual Machine</span>
                 <span className="setup-summary-value">
@@ -1184,7 +1144,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 onClick={handleFinish}
                 disabled={saving}
               >
-                {saving ? "Saving..." : "Start using HexAgent"}
+                {saving ? "Saving..." : "Start using ClawWork"}
               </button>
             </div>
           </div>

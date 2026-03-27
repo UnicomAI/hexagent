@@ -1,6 +1,6 @@
 import { useReducer, useEffect, useCallback, useRef, useState } from "react";
 import { AppContext, initialState, reducer } from "./store";
-import { listConversations, createConversation, createWarmSession, deleteWarmSession, sendMessage, getServerConfig, getVMStatus } from "./api";
+import { listConversations, createConversation, createWarmSession, deleteWarmSession, sendMessage, subscribeToStream, getServerConfig, getVMStatus, type ServerConfig } from "./api";
 import { useSettings } from "./hooks/useSettings";
 import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
@@ -19,6 +19,8 @@ import "./App.css";
 function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const abortMapRef = useRef<Map<string, AbortController>>(new Map());
+  const serverConfigRef = useRef<ServerConfig | null>(null);
+  serverConfigRef.current = state.serverConfig;
   const { settings, setSettings } = useSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
@@ -78,13 +80,22 @@ function App() {
         }
       })
       .catch(() => {});
+    let loadedConfig: ServerConfig | null = null;
     const cfgP = getServerConfig()
       .then((cfg) => {
+        loadedConfig = cfg;
         dispatch({ type: "SET_SERVER_CONFIG", payload: cfg });
         if (cfg.models.length === 0) setSetupNeeded(true);
       })
       .catch(() => {});
-    Promise.all([convP, cfgP]).then(() => setInitialLoadDone(true));
+    Promise.all([convP, cfgP]).then(() => {
+      // If URL requested chat mode but E2B is not configured, redirect to cowork
+      const urlMode = window.location.pathname.match(/^\/(chat|cowork)/)?.[1];
+      if (urlMode === "chat" && !(loadedConfig?.sandbox?.chat_enabled && loadedConfig?.sandbox?.e2b_api_key)) {
+        dispatch({ type: "SET_SELECTED_MODE", payload: "cowork" as ConversationMode });
+      }
+      setInitialLoadDone(true);
+    });
     getVMStatus()
       .then((vs) => dispatch({ type: "SET_VM_STATUS", payload: vs }))
       .catch(() => {});
@@ -143,7 +154,12 @@ function App() {
     const handler = () => {
       const m = window.location.pathname.match(/^\/(chat|cowork)(?:\/(.+))?/);
       if (m) {
-        dispatch({ type: "SET_SELECTED_MODE", payload: m[1] as ConversationMode });
+        let mode = m[1] as ConversationMode;
+        if (mode === "chat" && !(serverConfigRef.current?.sandbox?.chat_enabled && serverConfigRef.current?.sandbox?.e2b_api_key)) {
+          mode = "cowork";
+          window.history.replaceState(null, "", "/cowork");
+        }
+        dispatch({ type: "SET_SELECTED_MODE", payload: mode });
         dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: m[2] ?? null });
       } else {
         dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: null });
@@ -211,6 +227,93 @@ function App() {
   const streamingRef = useRef(state.streamingByConversation);
   streamingRef.current = state.streamingByConversation;
 
+  // Build stream callbacks for a given conversationId.
+  // Shared between doSendMessage and the reconnect effect.
+  const makeStreamCallbacks = useCallback(
+    (conversationId: string) => ({
+      onMessageStart: (id: string) => {
+        dispatch({ type: "REQUEST_END" });
+        dispatch({ type: "STREAM_START", payload: { messageId: id, conversationId } });
+      },
+      onTextDelta: (delta: string, ts?: number) => {
+        dispatch({ type: "STREAM_TEXT_DELTA", payload: { conversationId, delta, ts } });
+      },
+      onReasoningDelta: (delta: string, ts?: number) => {
+        dispatch({ type: "STREAM_REASONING_DELTA", payload: { conversationId, delta, ts } });
+      },
+      onToolCallDelta: (data: { index: number; name?: string; id?: string; args?: string; ts?: number }) => {
+        dispatch({ type: "STREAM_TOOL_CALL_DELTA", payload: { conversationId, ...data } });
+      },
+      onToolUseStart: (tool: { id: string; name: string; input: Record<string, unknown>; ts?: number }) => {
+        dispatch({ type: "STREAM_TOOL_USE_START", payload: { conversationId, tool } });
+      },
+      onToolResult: (result: { id: string; output: string }) => {
+        dispatch({ type: "STREAM_TOOL_RESULT", payload: { conversationId, ...result } });
+      },
+      onSubagentTextDelta: (data: { task_id: string; delta: string }) => {
+        dispatch({ type: "STREAM_SUBAGENT_TEXT_DELTA", payload: { conversationId, ...data } });
+      },
+      onSubagentReasoningDelta: (data: { task_id: string; delta: string }) => {
+        dispatch({ type: "STREAM_SUBAGENT_REASONING_DELTA", payload: { conversationId, ...data } });
+      },
+      onSubagentToolCallDelta: (data: { task_id: string; index: number; name?: string; id?: string; args?: string }) => {
+        dispatch({ type: "STREAM_SUBAGENT_TOOL_CALL_DELTA", payload: { conversationId, ...data } });
+      },
+      onSubagentToolStart: (data: { task_id: string; id: string; name: string; input: Record<string, unknown> }) => {
+        dispatch({ type: "STREAM_SUBAGENT_TOOL_START", payload: { conversationId, ...data } });
+      },
+      onSubagentToolResult: (data: { task_id: string; id: string; output: string }) => {
+        dispatch({ type: "STREAM_SUBAGENT_TOOL_RESULT", payload: { conversationId, ...data } });
+      },
+      onMessageEnd: (id: string) => {
+        dispatch({ type: "STREAM_END", payload: { conversationId, messageId: id } });
+        abortMapRef.current.delete(conversationId);
+      },
+      onError: (error: string) => {
+        dispatch({ type: "REQUEST_END" });
+        if (streamingRef.current[conversationId]) {
+          dispatch({ type: "STREAM_ERROR", payload: { conversationId, error } });
+        } else {
+          dispatch({ type: "SHOW_NOTIFICATION", payload: { message: error, type: "error" } });
+        }
+        abortMapRef.current.delete(conversationId);
+      },
+    }),
+    [dispatch],
+  );
+
+  // Reconnect to active streams after page load or conversation switch.
+  // If the backend reports a conversation is streaming (agent running in
+  // background), subscribe to the event stream so the UI picks up where
+  // it left off.
+  //
+  // We use refs (conversationsRef, streamingRef) instead of state to avoid
+  // re-running (and aborting the connection) whenever conversations or
+  // streaming state change during normal streaming.  The effect should only
+  // fire when activeConversationId changes.
+  const makeStreamCallbacksRef = useRef(makeStreamCallbacks);
+  makeStreamCallbacksRef.current = makeStreamCallbacks;
+  useEffect(() => {
+    if (!state.activeConversationId) return;
+    // Don't reconnect if we're already streaming for this conversation
+    if (streamingRef.current[state.activeConversationId]) return;
+    const conv = conversationsRef.current.find((c) => c.id === state.activeConversationId);
+    if (!conv?.streaming) return;
+
+    const conversationId = conv.id;
+    const controller = subscribeToStream(
+      conversationId,
+      makeStreamCallbacksRef.current(conversationId),
+      0,
+    );
+    abortMapRef.current.set(conversationId, controller);
+    return () => {
+      controller.abort();
+      abortMapRef.current.delete(conversationId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.activeConversationId]);
+
   const doSendMessage = useCallback(
     async (conversationId: string, content: string, attachments?: Attachment[]) => {
       const allAttachments = attachments ?? [];
@@ -255,59 +358,15 @@ function App() {
       const conv = state.conversations.find((c) => c.id === conversationId);
       const modelId = conv?.model_id || state.selectedModelId || undefined;
 
-      const controller = sendMessage(conversationId, fullContent, {
-        onMessageStart: (id) => {
-          dispatch({ type: "REQUEST_END" });
-          dispatch({ type: "STREAM_START", payload: { messageId: id, conversationId } });
-        },
-        onTextDelta: (delta) => {
-          dispatch({ type: "STREAM_TEXT_DELTA", payload: { conversationId, delta } });
-        },
-        onReasoningDelta: (delta) => {
-          dispatch({ type: "STREAM_REASONING_DELTA", payload: { conversationId, delta } });
-        },
-        onToolCallDelta: (data) => {
-          dispatch({ type: "STREAM_TOOL_CALL_DELTA", payload: { conversationId, ...data } });
-        },
-        onToolUseStart: (tool) => {
-          dispatch({ type: "STREAM_TOOL_USE_START", payload: { conversationId, tool } });
-        },
-        onToolResult: (result) => {
-          dispatch({ type: "STREAM_TOOL_RESULT", payload: { conversationId, ...result } });
-        },
-        onSubagentTextDelta: (data) => {
-          dispatch({ type: "STREAM_SUBAGENT_TEXT_DELTA", payload: { conversationId, ...data } });
-        },
-        onSubagentReasoningDelta: (data) => {
-          dispatch({ type: "STREAM_SUBAGENT_REASONING_DELTA", payload: { conversationId, ...data } });
-        },
-        onSubagentToolCallDelta: (data) => {
-          dispatch({ type: "STREAM_SUBAGENT_TOOL_CALL_DELTA", payload: { conversationId, ...data } });
-        },
-        onSubagentToolStart: (data) => {
-          dispatch({ type: "STREAM_SUBAGENT_TOOL_START", payload: { conversationId, ...data } });
-        },
-        onSubagentToolResult: (data) => {
-          dispatch({ type: "STREAM_SUBAGENT_TOOL_RESULT", payload: { conversationId, ...data } });
-        },
-        onMessageEnd: (id) => {
-          dispatch({ type: "STREAM_END", payload: { conversationId, messageId: id } });
-          abortMapRef.current.delete(conversationId);
-        },
-        onError: (error) => {
-          dispatch({ type: "REQUEST_END" });
-          if (streamingRef.current[conversationId]) {
-            dispatch({ type: "STREAM_ERROR", payload: { conversationId, error } });
-          } else {
-            dispatch({ type: "SHOW_NOTIFICATION", payload: { message: error, type: "error" } });
-          }
-          abortMapRef.current.delete(conversationId);
-        },
-      }, modelId, allAttachments.length > 0 ? allAttachments : undefined);
+      const controller = sendMessage(
+        conversationId, fullContent,
+        makeStreamCallbacks(conversationId),
+        modelId, allAttachments.length > 0 ? allAttachments : undefined,
+      );
 
       abortMapRef.current.set(conversationId, controller);
     },
-    [dispatch, state.conversations, state.selectedModelId]
+    [dispatch, state.conversations, state.selectedModelId, makeStreamCallbacks]
   );
 
   const handleNewConversation = useCallback(() => {

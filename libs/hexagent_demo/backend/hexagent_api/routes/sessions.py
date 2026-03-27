@@ -25,7 +25,7 @@ UPLOADS_DIR = uploads_dir()
 
 
 class SessionCreateRequest(BaseModel):
-    mode: str = Field("chat", description="Session mode: 'chat' or 'cowork'")
+    mode: str = Field("cowork", description="Session mode: 'chat' or 'cowork'")
     model_id: str | None = Field(None, description="Model config ID for eager agent creation")
     working_dir: str | None = Field(None, description="Host folder to mount (cowork)")
 
@@ -45,7 +45,7 @@ async def create_session(body: SessionCreateRequest | None = None) -> dict:
     Agent creation (skill resolution, MCP connects) runs in the background
     to avoid blocking the response.
     """
-    mode = body.mode if body else "chat"
+    mode = body.mode if body else "cowork"
     model_id = body.model_id if body else None
     working_dir = body.working_dir if body else None
 
