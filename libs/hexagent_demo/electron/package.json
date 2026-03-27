@@ -64,6 +64,12 @@
     },
     "afterPack": "./scripts/afterPack.js",
     "win": {
+      "extraResources": [
+        {
+          "from": "resources/wsl/",
+          "to": "wsl"
+        }
+      ],
       "target": [
         {
           "target": "nsis",

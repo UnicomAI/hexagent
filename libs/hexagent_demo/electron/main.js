@@ -107,6 +107,9 @@ function waitForHealth(port, retries = 30, interval = 500) {
 async function spawnBackend() {
   const port = IS_DEV ? 8000 : await findFreePort();
   backendPort = port;
+  const wslOfflineDir = IS_DEV
+    ? path.join(__dirname, "resources", "wsl")
+    : path.join(process.resourcesPath, "wsl");
 
   if (IS_DEV) {
     const backendDir = path.join(__dirname, "..", "backend");
@@ -167,6 +170,7 @@ async function spawnBackend() {
         HOST: "127.0.0.1",
         PORT: String(port),
         HEXAGENT_DATA_DIR: userDataDir,
+        HEXAGENT_WSL_OFFLINE_DIR: wslOfflineDir,
       },
     });
   }

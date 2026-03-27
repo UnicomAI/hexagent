@@ -3,7 +3,8 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ElectronDir = Resolve-Path "$ScriptDir\.."
 $Target = if ($args.Count -gt 0) { $args[0] } else { 'win' }
-$EmbedWslPrebuilt = ($env:OPENAGENT_EMBED_WSL_PREBUILT -eq "1")
+$EmbedWslPrebuilt = ($env:HEXAGENT_EMBED_WSL_PREBUILT -eq "1" -or $env:OPENAGENT_EMBED_WSL_PREBUILT -eq "1")
+$PrepareOfflineWsl = ($env:HEXAGENT_PREPARE_OFFLINE_WSL -ne "0")
 
 Write-Host '========================================='
 Write-Host '  HexAgent Desktop - Build ('$Target')'
@@ -25,10 +26,18 @@ Write-Host ''
 Write-Host '[2/3] Skipping electron dependencies (already installed)...'
 Set-Location $ElectronDir
 
-if ($Target -eq 'win' -and $EmbedWslPrebuilt) {
-    Write-Host ''
-    Write-Host '[2.2/3] Exporting prebuilt WSL VM image for offline-ready package...'
-    & "$ScriptDir\prepare-wsl-prebuilt.ps1"
+if ($Target -eq 'win') {
+    if ($PrepareOfflineWsl) {
+        Write-Host ''
+        Write-Host '[2.1/3] Preparing offline WSL installer assets...'
+        & "$ScriptDir\prepare-wsl-offline-assets.ps1"
+    }
+
+    if ($EmbedWslPrebuilt) {
+        Write-Host ''
+        Write-Host '[2.2/3] Exporting prebuilt WSL VM image for offline-ready package...'
+        & "$ScriptDir\prepare-wsl-prebuilt.ps1"
+    }
 }
 
 Write-Host ''
