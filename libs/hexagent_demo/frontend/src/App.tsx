@@ -17,7 +17,7 @@ import "./App.css";
 
 function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
-  const abortRef = useRef<AbortController | null>(null);
+  const abortMapRef = useRef<Map<string, AbortController>>(new Map());
   const { settings, setSettings } = useSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
@@ -204,9 +204,11 @@ function App() {
     }
   }, [state.warmSessionId, state.activeConversationId]);
 
-  // Reference for doSendMessage to access latest conversations
+  // Refs for doSendMessage callbacks to access latest state
   const conversationsRef = useRef(state.conversations);
   conversationsRef.current = state.conversations;
+  const streamingRef = useRef(state.streamingByConversation);
+  streamingRef.current = state.streamingByConversation;
 
   const doSendMessage = useCallback(
     async (conversationId: string, content: string, attachments?: Attachment[]) => {
@@ -251,51 +253,53 @@ function App() {
 
       const controller = sendMessage(conversationId, fullContent, {
         onMessageStart: (id) => {
-          dispatch({ type: "STREAM_START", payload: { messageId: id } });
+          dispatch({ type: "STREAM_START", payload: { messageId: id, conversationId } });
         },
         onTextDelta: (delta) => {
-          dispatch({ type: "STREAM_TEXT_DELTA", payload: delta });
+          dispatch({ type: "STREAM_TEXT_DELTA", payload: { conversationId, delta } });
         },
         onReasoningDelta: (delta) => {
-          dispatch({ type: "STREAM_REASONING_DELTA", payload: delta });
+          dispatch({ type: "STREAM_REASONING_DELTA", payload: { conversationId, delta } });
         },
         onToolCallDelta: (data) => {
-          dispatch({ type: "STREAM_TOOL_CALL_DELTA", payload: data });
+          dispatch({ type: "STREAM_TOOL_CALL_DELTA", payload: { conversationId, ...data } });
         },
         onToolUseStart: (tool) => {
-          dispatch({ type: "STREAM_TOOL_USE_START", payload: tool });
+          dispatch({ type: "STREAM_TOOL_USE_START", payload: { conversationId, tool } });
         },
         onToolResult: (result) => {
-          dispatch({ type: "STREAM_TOOL_RESULT", payload: result });
+          dispatch({ type: "STREAM_TOOL_RESULT", payload: { conversationId, ...result } });
         },
         onSubagentTextDelta: (data) => {
-          dispatch({ type: "STREAM_SUBAGENT_TEXT_DELTA", payload: data });
+          dispatch({ type: "STREAM_SUBAGENT_TEXT_DELTA", payload: { conversationId, ...data } });
         },
         onSubagentReasoningDelta: (data) => {
-          dispatch({ type: "STREAM_SUBAGENT_REASONING_DELTA", payload: data });
+          dispatch({ type: "STREAM_SUBAGENT_REASONING_DELTA", payload: { conversationId, ...data } });
         },
         onSubagentToolCallDelta: (data) => {
-          dispatch({ type: "STREAM_SUBAGENT_TOOL_CALL_DELTA", payload: data });
+          dispatch({ type: "STREAM_SUBAGENT_TOOL_CALL_DELTA", payload: { conversationId, ...data } });
         },
         onSubagentToolStart: (data) => {
-          dispatch({ type: "STREAM_SUBAGENT_TOOL_START", payload: data });
+          dispatch({ type: "STREAM_SUBAGENT_TOOL_START", payload: { conversationId, ...data } });
         },
         onSubagentToolResult: (data) => {
-          dispatch({ type: "STREAM_SUBAGENT_TOOL_RESULT", payload: data });
+          dispatch({ type: "STREAM_SUBAGENT_TOOL_RESULT", payload: { conversationId, ...data } });
         },
         onMessageEnd: (id) => {
-          dispatch({ type: "STREAM_END", payload: { messageId: id } });
+          dispatch({ type: "STREAM_END", payload: { conversationId, messageId: id } });
+          abortMapRef.current.delete(conversationId);
         },
         onError: (error) => {
-          if (state.isStreaming) {
-            dispatch({ type: "STREAM_ERROR", payload: error });
+          if (streamingRef.current[conversationId]) {
+            dispatch({ type: "STREAM_ERROR", payload: { conversationId, error } });
           } else {
             dispatch({ type: "SHOW_NOTIFICATION", payload: { message: error, type: "error" } });
           }
+          abortMapRef.current.delete(conversationId);
         },
       }, modelId, allAttachments.length > 0 ? allAttachments : undefined);
 
-      abortRef.current = controller;
+      abortMapRef.current.set(conversationId, controller);
     },
     [state.conversations, state.selectedModelId]
   );
@@ -307,7 +311,8 @@ function App() {
 
   const handleSendMessage = useCallback(
     async (content: string, options?: { workingDir?: string; attachments?: Attachment[] }) => {
-      if (state.isStreaming) return;
+      // Block sending only if the *target* conversation is already streaming
+      if (state.activeConversationId && state.streamingByConversation[state.activeConversationId]) return;
 
       // If we have an active conversation, send directly
       if (state.activeConversationId) {
@@ -348,7 +353,7 @@ function App() {
         dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to create conversation", type: "error" } });
       }
     },
-    [state.activeConversationId, state.isStreaming, state.selectedModelId, state.selectedMode, state.warmSessionId, doSendMessage]
+    [state.activeConversationId, state.streamingByConversation, state.selectedModelId, state.selectedMode, state.warmSessionId, doSendMessage]
   );
 
   const activeConversation = state.conversations.find(
@@ -360,11 +365,11 @@ function App() {
     ? (state.rightPanelByConversation[state.activeConversationId] ?? false)
     : false;
 
-  // Only pass streaming blocks when viewing the conversation that owns the stream
-  const activeStreamingBlocks =
-    state.isStreaming && state.streamingConversationId === state.activeConversationId
-      ? state.streamingBlocks
-      : undefined;
+  // Only pass streaming blocks for the active conversation
+  const activeStreamingEntry = state.activeConversationId
+    ? state.streamingByConversation[state.activeConversationId]
+    : undefined;
+  const activeStreamingBlocks = activeStreamingEntry?.blocks;
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>
