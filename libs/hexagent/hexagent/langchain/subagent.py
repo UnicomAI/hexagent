@@ -145,7 +145,7 @@ class LangChainSubagentRunner:
         """
         # Deferred imports to avoid circular deps
         from langchain.agents import create_agent as _create_langchain_agent
-        from langchain_core.messages import HumanMessage
+        from langchain_core.messages import AIMessage, HumanMessage
 
         from hexagent.langchain.middleware import AgentMiddleware
 
@@ -270,8 +270,6 @@ class LangChainSubagentRunner:
                         output_messages = graph_output["messages"]
         except (asyncio.CancelledError, Exception):
             if full_text and self._checkpointer:
-                from langchain_core.messages import AIMessage
-
                 await graph.aupdate_state(config, {"messages": [AIMessage(content=full_text)]})
             raise
 
