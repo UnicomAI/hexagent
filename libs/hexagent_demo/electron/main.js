@@ -454,7 +454,7 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error("Failed to start backend:", err);
     dialog.showErrorBox(
-      "HexAgent - Failed to Start",
+      "ClawWork - Failed to Start",
       `The backend server could not be started.\n\n${err.message}`
     );
     app.quit();

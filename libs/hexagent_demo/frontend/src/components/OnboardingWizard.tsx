@@ -345,13 +345,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           <div className="setup-step setup-welcome">
             <div className="setup-welcome-brand">
               <img className="setup-welcome-logo" width="40" height="40" src={faviconSvg} alt="" />
-              <h2 className="setup-welcome-title">HexAgent</h2>
+              <h2 className="setup-welcome-title">ClawWork</h2>
             </div>
-            <p className="setup-welcome-tagline">Powered by HexAgent harness</p>
+            <p className="setup-welcome-tagline">Powered by ClawWork harness</p>
 
             <div className="setup-welcome-form">
               <div className="setup-field">
-                <label className="setup-label">What should HexAgent call you?</label>
+                <label className="setup-label">What should ClawWork call you?</label>
                 <input
                   className="setup-input setup-welcome-input"
                   type="text"
@@ -845,7 +845,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
               <div>
                 <h2 className="setup-title">Compute environments</h2>
                 <p className="setup-subtitle">
-                  HexAgent uses sandboxed environments to run code safely. E2B is required for Chat mode.
+                  ClawWork uses sandboxed environments to run code safely. E2B is required for Chat mode.
                 </p>
               </div>
             </div>
@@ -979,7 +979,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
 
                     {vmUsable && vmPhase3 !== "done" && (
                       <p className="setup-vm-hint">
-                        System dependencies install in the background — you can continue using HexAgent while it runs.
+                        System dependencies install in the background — you can continue using ClawWork while it runs.
                       </p>
                     )}
                   </div>
@@ -1054,7 +1054,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                     to tools like Python, Node.js, LaTeX, LibreOffice, and more.
                   </p>
                   <p className="setup-deps-desc">
-                    The installation runs in the background — you can start using HexAgent immediately.
+                    The installation runs in the background — you can start using ClawWork immediately.
                   </p>
                   <div className="setup-skip-actions">
                     <button
@@ -1184,7 +1184,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 onClick={handleFinish}
                 disabled={saving}
               >
-                {saving ? "Saving..." : "Start using HexAgent"}
+                {saving ? "Saving..." : "Start using ClawWork"}
               </button>
             </div>
           </div>
