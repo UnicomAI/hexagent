@@ -67,7 +67,7 @@ export const initialState: AppState = {
   selectedModelId: "",
   selectedMode: (() => {
     const m = window.location.pathname.match(/^\/(chat|cowork)/);
-    return (m ? m[1] : "chat") as ConversationMode;
+    return (m ? m[1] : "cowork") as ConversationMode;
   })(),
   lastActiveByMode: { chat: null, cowork: null },
   notifications: [],

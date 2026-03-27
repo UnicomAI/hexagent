@@ -64,6 +64,7 @@ class ToolsConfig:
 @dataclass
 class SandboxConfig:
     e2b_api_key: str = ""
+    chat_enabled: bool = False
 
 
 @dataclass
