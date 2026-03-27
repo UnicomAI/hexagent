@@ -191,7 +191,8 @@ class TestMount:
             ]
         )
 
-        await mgr.mount(Mount(source=str(d), target="code"))
+        with patch("hexagent.computer.local._wsl._win_path_to_wsl", return_value="/mnt/c/code"):
+            await mgr.mount(Mount(source=str(d), target="code"))
 
         vm.apply_mounts.assert_not_awaited()
         assert vm.shell.await_count == 3

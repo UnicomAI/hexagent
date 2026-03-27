@@ -214,8 +214,8 @@ class TestLocalVMComputerDefaultCwd:
         vm._vm = backend
         vm._instance = "openagent"
         vm._lock = asyncio.Lock()
-        vm._generate_unique_name = AsyncMock(return_value="alice")
-        vm._create_user = AsyncMock()
+        vm._generate_unique_name = AsyncMock(return_value="alice")  # type: ignore[method-assign]
+        vm._create_user = AsyncMock()  # type: ignore[method-assign]
 
         computer = await LocalVM.computer(vm)
         await computer.run("pwd")

@@ -1,11 +1,31 @@
 #!/bin/bash
-# NPM global packages (minimal baseline; install extras on demand)
+# NPM global packages
 set -euo pipefail
 
-if [[ "${OPENAGENT_USE_CN_MIRRORS:-0}" == "1" ]]; then
-    emit 04_npm progress "Configuring npm registry mirror"
-    npm config set registry "${OPENAGENT_NPM_REGISTRY}" >/dev/null 2>&1 || true
-fi
-
 emit 04_npm progress "Installing npm global packages"
-npm install -g typescript tsx playwright
+npm install -g \
+    docx@9 \
+    pptxgenjs@4.0.1 \
+    pdf-lib@1.17.1 \
+    pdfjs-dist \
+    marked \
+    markdown-toc \
+    markdownlint-cli \
+    markdownlint-cli2 \
+    remark-cli \
+    remark-preset-lint-recommended \
+    @mermaid-js/mermaid-cli \
+    graphviz \
+    react \
+    react-dom \
+    react-icons \
+    typescript \
+    ts-node \
+    tsx \
+    sharp \
+    playwright
+
+if [[ "$ARCH" == "x86_64" ]]; then
+    emit 04_npm progress "Installing markdown-pdf (x86_64 only)"
+    npm install -g markdown-pdf
+fi

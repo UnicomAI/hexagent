@@ -222,4 +222,13 @@ mounts/
 .trees/
 
 # Electron build artifact
-libs/openagent_demo/electron/dist.zip
+libs/hexagent_demo/electron/dist.zip
+
+# Vite dev-server cache
+**/.vite/
+
+# WSL prebuilt VM image (build artifact — generate with prepare-wsl-prebuilt.ps1)
+**/wsl/prebuilt/*.tar
+
+# One-off investigation/diagnostic reports
+reports/

@@ -27,7 +27,7 @@ from collections.abc import Callable
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, StreamingResponse
 
-from hexagent_api.paths import data_dir, deps_dir, vm_lima_dir, vm_setup_dir
+from hexagent_api.paths import data_dir, deps_dir, vm_lima_dir, vm_setup_dir, vm_setup_lite_dir
 
 logger = logging.getLogger(__name__)
 
@@ -1227,7 +1227,7 @@ class _ProvisionManager(_ProcessManager):
 
         # 2. Copy setup directory into VM
         self._emit("progress", {"step": "copying", "message": "Copying setup files to VM..."})
-        setup_dir = vm_setup_dir()
+        setup_dir = vm_setup_lite_dir()
         if not setup_dir.is_dir():
             self._emit("error", {"message": f"Setup directory not found: {setup_dir}"})
             self._status = "error"
@@ -1238,7 +1238,7 @@ class _ProvisionManager(_ProcessManager):
         with tempfile.TemporaryDirectory(prefix="hexagent_setup_") as tmp:
             tar_path = os.path.join(tmp, "setup.tar.gz")
             _sp.run(
-                ["tar", "-czf", tar_path, "-C", str(setup_dir.parent), "setup"],
+                ["tar", "-czf", tar_path, "-C", str(setup_dir.parent), setup_dir.name],
                 check=True,
             )
             copy_proc = await asyncio.create_subprocess_exec(
@@ -1334,7 +1334,7 @@ class _ProvisionManager(_ProcessManager):
                 return
 
         self._emit("progress", {"step": "copying", "message": "Preparing setup files in WSL..."})
-        setup_dir = vm_setup_dir()
+        setup_dir = vm_setup_lite_dir()
         if not setup_dir.is_dir():
             self._emit("error", {"message": f"Setup directory not found: {setup_dir}"})
             self._status = "error"

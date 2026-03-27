@@ -381,26 +381,6 @@ class AgentMiddleware(LangChainAgentMiddleware):
         Group 3: Annotators (system reminders).
         """
         messages: list[BaseMessage] = list(state["messages"])
-        env_prompt_updated = False
-
-        # Workspace path can change after agent creation (e.g. cowork warm-up
-        # creates the agent, then PATCH mounts the user's folder and sets
-        # default_cwd). Tools see the new cwd, but the system prompt still
-        # lists the old ``pwd`` from EnvironmentResolver — follow-up turns may
-        # run size/list commands against the wrong directory. Refresh when pwd
-        # drifts (same pattern as compaction rebuild).
-        if self._environment_resolver is not None and self._prompt_profile is not None:
-            fresh_env = await self._environment_resolver.resolve()
-            old_wd = self._context.environment.working_dir if self._context.environment else None
-            if fresh_env.working_dir != old_wd:
-                self._context = replace(self._context, environment=fresh_env)
-                new_content = compose(self._prompt_profile, self._context)
-                if self._custom_prompt:
-                    new_content = f"{self._custom_prompt}\n\n{new_content}"
-                if messages and isinstance(messages[0], SystemMessage):
-                    messages[0] = SystemMessage(content=new_content)
-                    self._system_prompt = new_content
-                    env_prompt_updated = True
 
         # --- GROUP 1: Intercepts (compaction phases) ---
         phase = CompactionPhase(state.get("compaction_phase", CompactionPhase.NONE))
@@ -477,9 +457,6 @@ class AgentMiddleware(LangChainAgentMiddleware):
                 }
 
         if images_extracted:
-            return {"messages": LangGraphOverwrite(messages)}
-
-        if env_prompt_updated:
             return {"messages": LangGraphOverwrite(messages)}
 
         return None

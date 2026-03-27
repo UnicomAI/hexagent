@@ -1,7 +1,8 @@
 #!/bin/bash
 # =============================================================================
-# HexAgent VM Setup — Orchestrator
+# HexAgent VM Setup (Lite) — Orchestrator
 # =============================================================================
+# Lite variant: minimal baseline packages for demo/Electron deployments.
 # Discovers and runs step scripts in order with progress reporting,
 # resumability (marker files), concurrency protection (flock), and
 # heartbeat for long-running operations.
@@ -33,6 +34,19 @@ LOCK_FD=9
 export DEBIAN_FRONTEND=noninteractive
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export MARKER_DIR LOG_DIR
+if grep -qi microsoft /proc/version 2>/dev/null; then
+    _OPENAGENT_DEFAULT_CN_MIRRORS=1
+else
+    _OPENAGENT_DEFAULT_CN_MIRRORS=0
+fi
+OPENAGENT_USE_CN_MIRRORS="${OPENAGENT_USE_CN_MIRRORS:-${_OPENAGENT_DEFAULT_CN_MIRRORS}}"
+OPENAGENT_APT_MIRROR="${OPENAGENT_APT_MIRROR:-https://mirrors.ustc.edu.cn/ubuntu}"
+OPENAGENT_APT_PORTS_MIRROR="${OPENAGENT_APT_PORTS_MIRROR:-https://mirrors.ustc.edu.cn/ubuntu-ports}"
+OPENAGENT_PIP_INDEX_URL="${OPENAGENT_PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+OPENAGENT_NPM_REGISTRY="${OPENAGENT_NPM_REGISTRY:-https://registry.npmmirror.com}"
+OPENAGENT_PLAYWRIGHT_DOWNLOAD_HOST="${OPENAGENT_PLAYWRIGHT_DOWNLOAD_HOST:-https://npmmirror.com/mirrors/playwright}"
+export OPENAGENT_USE_CN_MIRRORS OPENAGENT_APT_MIRROR OPENAGENT_APT_PORTS_MIRROR
+export OPENAGENT_PIP_INDEX_URL OPENAGENT_NPM_REGISTRY OPENAGENT_PLAYWRIGHT_DOWNLOAD_HOST
 
 # ── CLI defaults ─────────────────────────────────────────────────────────────
 FORCE=false
@@ -136,16 +150,28 @@ pip_install() {
     local max_attempts=5
     local delay=5
     local attempt=1
+    local use_cn_mirrors="${OPENAGENT_USE_CN_MIRRORS:-0}"
     local pip_opts=(
-        --break-system-packages
         --timeout 120
         --retries 3
+        --no-cache-dir
     )
+    if pip3 help install 2>/dev/null | grep -q -- "--break-system-packages"; then
+        pip_opts+=(--break-system-packages)
+    fi
 
     while [[ $attempt -le $max_attempts ]]; do
         echo ">>> pip install attempt $attempt/$max_attempts (${#} packages)"
         if pip3 install "${pip_opts[@]}" "$@"; then
             return 0
+        fi
+        if [[ "$use_cn_mirrors" == "1" ]]; then
+            echo ">>> Mirror install failed, retrying with official PyPI..."
+            if PIP_INDEX_URL="https://pypi.org/simple" \
+               PIP_EXTRA_INDEX_URL="" \
+               pip3 install "${pip_opts[@]}" "$@"; then
+                return 0
+            fi
         fi
         echo ">>> Attempt $attempt failed. Retrying in ${delay}s..."
         sleep $delay
@@ -164,6 +190,14 @@ pip_install() {
                 pkg_ok=true
                 break
             fi
+            if [[ "$use_cn_mirrors" == "1" ]]; then
+                if PIP_INDEX_URL="https://pypi.org/simple" \
+                   PIP_EXTRA_INDEX_URL="" \
+                   pip3 install "${pip_opts[@]}" "$pkg" 2>&1; then
+                    pkg_ok=true
+                    break
+                fi
+            fi
             echo ">>> Failed: $pkg (attempt $pkg_attempt/3)"
             sleep $((pkg_attempt * 3))
             pkg_attempt=$((pkg_attempt + 1))
@@ -181,6 +215,56 @@ pip_install() {
     return 0
 }
 export -f pip_install
+
+configure_cn_mirrors() {
+    if [[ "${OPENAGENT_USE_CN_MIRRORS}" != "1" ]]; then
+        return 0
+    fi
+
+    emit _meta progress "Applying China mirrors (APT/PIP/NPM/Playwright)"
+
+    # sed replacement escapes for arbitrary mirror strings (e.g. containing '&' or '|')
+    local apt_mirror_esc apt_ports_mirror_esc
+    apt_mirror_esc="${OPENAGENT_APT_MIRROR//\\/\\\\}"
+    apt_mirror_esc="${apt_mirror_esc//&/\\&}"
+    apt_mirror_esc="${apt_mirror_esc//|/\\|}"
+    apt_ports_mirror_esc="${OPENAGENT_APT_PORTS_MIRROR//\\/\\\\}"
+    apt_ports_mirror_esc="${apt_ports_mirror_esc//&/\\&}"
+    apt_ports_mirror_esc="${apt_ports_mirror_esc//|/\\|}"
+
+    if [[ -f /etc/apt/sources.list ]]; then
+        cp -n /etc/apt/sources.list /etc/apt/sources.list.openagent.bak 2>/dev/null || true
+        sed -Ei \
+            -e "s|https?://(archive|security)\.ubuntu\.com/ubuntu|${apt_mirror_esc}|g" \
+            -e "s|https?://ports\.ubuntu\.com/ubuntu-ports|${apt_ports_mirror_esc}|g" \
+            /etc/apt/sources.list 2>/dev/null || true
+    fi
+
+    if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then
+        cp -n /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources.openagent.bak 2>/dev/null || true
+        sed -Ei \
+            -e "s|^URIs:[[:space:]]*https?://(archive|security)\.ubuntu\.com/ubuntu/?$|URIs: ${apt_mirror_esc}|g" \
+            -e "s|^URIs:[[:space:]]*https?://ports\.ubuntu\.com/ubuntu-ports/?$|URIs: ${apt_ports_mirror_esc}|g" \
+            /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+    fi
+
+    cat >/etc/pip.conf <<EOF
+[global]
+index-url = ${OPENAGENT_PIP_INDEX_URL}
+extra-index-url = https://pypi.org/simple
+timeout = 120
+retries = 5
+EOF
+
+    mkdir -p /etc/profile.d
+    cat >/etc/profile.d/openagent-mirrors.sh <<EOF
+export OPENAGENT_USE_CN_MIRRORS=1
+export PIP_INDEX_URL='${OPENAGENT_PIP_INDEX_URL}'
+export NPM_CONFIG_REGISTRY='${OPENAGENT_NPM_REGISTRY}'
+export PLAYWRIGHT_DOWNLOAD_HOST='${OPENAGENT_PLAYWRIGHT_DOWNLOAD_HOST}'
+EOF
+}
+export -f configure_cn_mirrors
 
 # ── Marker helpers ───────────────────────────────────────────────────────────
 step_done() { [[ -f "${MARKER_DIR}/$1.done" ]]; }
@@ -281,7 +365,9 @@ preflight() {
     esac
     export ARCH
 
-    # Disk space (require ≥10 GB free on /)
+    configure_cn_mirrors
+
+    # Disk space (require >= 10 GB free on /)
     local free_kb
     free_kb=$(df / --output=avail | tail -1 | tr -d ' ')
     if (( free_kb < 10485760 )); then

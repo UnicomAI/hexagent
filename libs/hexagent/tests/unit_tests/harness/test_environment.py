@@ -6,8 +6,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
-import pytest
-
 from hexagent.harness.environment import EnvironmentResolver
 from hexagent.types import CLIResult
 

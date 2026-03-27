@@ -281,7 +281,7 @@ class LocalVM:
             return
         await self._vm.stop()
 
-    async def mount(
+    async def mount(  # noqa: PLR0912
         self,
         mounts: Mount | list[Mount],
         *,
@@ -605,19 +605,13 @@ class LocalVM:
         sudo_probe = await self._vm.shell("command -v sudo >/dev/null 2>&1")
         sudo_prefix = "sudo " if sudo_probe.exit_code == 0 else ""
 
-        create_cmd = (
-            f"{sudo_prefix}useradd -m -d {qhome} -s /bin/bash "
-            f"--no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {qname}"
-        )
+        create_cmd = f"{sudo_prefix}useradd -m -d {qhome} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {qname}"
         result = await self._vm.shell(create_cmd)
         if result.exit_code != 0:
             # Some Ubuntu/WSL images reject useradd with SUB_UID/GID_COUNT=0.
             # Retry without those overrides for compatibility. We retry
             # regardless of locale-specific stderr text.
-            fallback_cmd = (
-                f"{sudo_prefix}useradd -m -d {qhome} -s /bin/bash "
-                f"--no-log-init {qname}"
-            )
+            fallback_cmd = f"{sudo_prefix}useradd -m -d {qhome} -s /bin/bash --no-log-init {qname}"
             result = await self._vm.shell(fallback_cmd)
         if result.exit_code != 0:
             msg = f"Failed to create session user '{name}': {result.stderr}"

@@ -54,7 +54,7 @@ def _resolve_wsl_exe() -> str | None:
     w = shutil.which("wsl.exe") or shutil.which("wsl")
     if w:
         return w
-    system_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
+    system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR")
     if not system_root:
         system_root = r"C:\Windows"
     candidate = Path(system_root) / "System32" / "wsl.exe"
@@ -72,13 +72,13 @@ def _stable_host_cwd() -> str:
     unexpected context. Force a stable host cwd to avoid inheriting stale
     per-session paths.
     """
-    system_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows"
+    system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR") or r"C:\Windows"
     # ``wsl.exe`` exists under System32 on supported hosts; use that directory
     # as a stable cwd if available, otherwise fall back to the process cwd.
     safe_dir = Path(system_root) / "System32"
     if safe_dir.is_dir():
         return str(safe_dir)
-    return os.getcwd()
+    return str(Path.cwd())
 
 
 def _ensure_proactor_event_loop() -> None:
@@ -136,7 +136,7 @@ class WslVM:
     def __init__(self, instance: str) -> None:
         _check_wsl_prerequisites()
         wsl_exe = _resolve_wsl_exe()
-        assert wsl_exe is not None
+        assert wsl_exe is not None  # noqa: S101
         self._wsl_exe = wsl_exe
         self._instance = instance
         self._unc_prefix: str | None = None  # cached after first successful probe
@@ -698,7 +698,7 @@ def _session_user_from_guest_mount_path(guest_path: str) -> str | None:
     after ``sessions`` matches the Linux account created for that sandbox session.
     """
     parts = guest_path.split("/")
-    if len(parts) >= 3 and parts[1] == "sessions" and parts[2]:
+    if len(parts) >= 3 and parts[1] == "sessions" and parts[2]:  # noqa: PLR2004
         return parts[2]
     return None
 
