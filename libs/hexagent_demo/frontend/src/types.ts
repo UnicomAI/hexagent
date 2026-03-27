@@ -10,8 +10,12 @@ export interface Conversation {
   messages: Message[];
   created_at: string;
   updated_at: string;
-  /** True when the backend has an active background stream for this conversation. */
+  /** True when a background agent stream is active for this conversation. */
   streaming?: boolean;
+  /** The assistant message ID of the active stream (for reconnect). */
+  stream_msg_id?: string;
+  /** Number of SSE events buffered so far (for resume offset). */
+  stream_event_count?: number;
 }
 
 export interface Attachment {

@@ -18,7 +18,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from hexagent_api.agent_manager import agent_manager
 from hexagent_api.paths import data_dir
 from hexagent_api.routes import chat, config, conversations, sessions, setup, skills
-from hexagent_api.stream_manager import stream_manager
 
 _LOG_DIR = data_dir() / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -77,8 +76,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     cleanup_task = asyncio.create_task(_cleanup_expired_sessions())
     yield
     cleanup_task.cancel()
+    from hexagent_api.stream_manager import stream_manager
     logger.info("Cancelling active streams...")
-    await stream_manager.cancel_all()
+    stream_manager.cancel_all()
     logger.info("Shutting down agent manager...")
     await agent_manager.stop()
     logger.info("Agent manager shut down.")
