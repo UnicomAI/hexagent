@@ -175,7 +175,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const vmPhase2Error = vm.phase2Error;
   const vmPhase3 = vm.phase3;
   const vmUsable = vmPhase1 === "done" && vmPhase2 === "done";
-  const vmPhase1NeedsRestart = /restart windows|重启.*windows|重启.*电脑|reboot/i.test(vmPhase1Error || "");
+  const vmPhase1NeedsRestart = /restart windows|restart your computer|reboot/i.test(vmPhase1Error || "");
 
   // Load server config and restore onboarding draft on open
   useEffect(() => {

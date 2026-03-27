@@ -10,6 +10,8 @@ export interface Conversation {
   messages: Message[];
   created_at: string;
   updated_at: string;
+  /** True when the backend has an active background stream for this conversation. */
+  streaming?: boolean;
 }
 
 export interface Attachment {

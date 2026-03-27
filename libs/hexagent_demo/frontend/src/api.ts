@@ -125,6 +125,77 @@ export interface StreamCallbacks {
   onError: (error: string) => void;
 }
 
+/** Read an SSE response body and dispatch events to callbacks. */
+async function _readSSEStream(response: Response, callbacks: StreamCallbacks): Promise<void> {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let currentEvent = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (line.startsWith("event: ")) {
+        currentEvent = line.slice(7).trim();
+      } else if (line.startsWith("data: ") && currentEvent) {
+        try {
+          const data = JSON.parse(line.slice(6));
+          switch (currentEvent) {
+            case "message_start":
+              callbacks.onMessageStart(data.id);
+              break;
+            case "text_delta":
+              callbacks.onTextDelta(data.delta);
+              break;
+            case "reasoning_delta":
+              callbacks.onReasoningDelta(data.delta);
+              break;
+            case "tool_call_delta":
+              callbacks.onToolCallDelta(data);
+              break;
+            case "tool_use_start":
+              callbacks.onToolUseStart(data);
+              break;
+            case "tool_result":
+              callbacks.onToolResult(data);
+              break;
+            case "subagent_text_delta":
+              callbacks.onSubagentTextDelta(data);
+              break;
+            case "subagent_reasoning_delta":
+              callbacks.onSubagentReasoningDelta(data);
+              break;
+            case "subagent_tool_call_delta":
+              callbacks.onSubagentToolCallDelta(data);
+              break;
+            case "subagent_tool_start":
+              callbacks.onSubagentToolStart(data);
+              break;
+            case "subagent_tool_result":
+              callbacks.onSubagentToolResult(data);
+              break;
+            case "message_end":
+              callbacks.onMessageEnd(data.id);
+              break;
+            case "error":
+              callbacks.onError(data.message);
+              break;
+          }
+        } catch {
+          // skip malformed JSON
+        }
+        currentEvent = "";
+      }
+    }
+  }
+}
+
 export function sendMessage(
   conversationId: string,
   content: string,
@@ -150,74 +221,34 @@ export function sendMessage(
         callbacks.onError(detail?.detail || `HTTP ${response.status}: ${response.statusText}`);
         return;
       }
-
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let currentEvent = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith("data: ") && currentEvent) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              switch (currentEvent) {
-                case "message_start":
-                  callbacks.onMessageStart(data.id);
-                  break;
-                case "text_delta":
-                  callbacks.onTextDelta(data.delta);
-                  break;
-                case "reasoning_delta":
-                  callbacks.onReasoningDelta(data.delta);
-                  break;
-                case "tool_call_delta":
-                  callbacks.onToolCallDelta(data);
-                  break;
-                case "tool_use_start":
-                  callbacks.onToolUseStart(data);
-                  break;
-                case "tool_result":
-                  callbacks.onToolResult(data);
-                  break;
-                case "subagent_text_delta":
-                  callbacks.onSubagentTextDelta(data);
-                  break;
-                case "subagent_reasoning_delta":
-                  callbacks.onSubagentReasoningDelta(data);
-                  break;
-                case "subagent_tool_call_delta":
-                  callbacks.onSubagentToolCallDelta(data);
-                  break;
-                case "subagent_tool_start":
-                  callbacks.onSubagentToolStart(data);
-                  break;
-                case "subagent_tool_result":
-                  callbacks.onSubagentToolResult(data);
-                  break;
-                case "message_end":
-                  callbacks.onMessageEnd(data.id);
-                  break;
-                case "error":
-                  callbacks.onError(data.message);
-                  break;
-              }
-            } catch {
-              // skip malformed JSON
-            }
-            currentEvent = "";
-          }
-        }
+      await _readSSEStream(response, callbacks);
+    })
+    .catch((err: Error) => {
+      if (err.name !== "AbortError") {
+        callbacks.onError(err.message);
       }
+    });
+
+  return controller;
+}
+
+/**
+ * Reconnect to an active background stream for a conversation.
+ * Returns null if no active stream exists (HTTP 204).
+ */
+export function subscribeStream(
+  conversationId: string,
+  callbacks: StreamCallbacks,
+): AbortController {
+  const controller = new AbortController();
+
+  fetch(`${API_BASE}/api/chat/${conversationId}/stream`, {
+    signal: controller.signal,
+  })
+    .then(async (response) => {
+      if (response.status === 204) return; // No active stream
+      if (!response.ok) return;
+      await _readSSEStream(response, callbacks);
     })
     .catch((err: Error) => {
       if (err.name !== "AbortError") {

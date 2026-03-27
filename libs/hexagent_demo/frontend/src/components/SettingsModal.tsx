@@ -1740,7 +1740,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
   const allDone = vmUsable && phase3 === "done";
   const anyRunning = phase1 === "running" || phase2 === "running" || phase3 === "running";
   const coreError = phase1 === "error" || phase2 === "error";
-  const phase1NeedsRestart = /restart windows|重启.*windows|重启.*电脑|reboot/i.test(phase1Error || "");
+  const phase1NeedsRestart = /restart windows|restart your computer|reboot/i.test(phase1Error || "");
 
   const chatEnabled = !!config.sandbox.chat_enabled;
 

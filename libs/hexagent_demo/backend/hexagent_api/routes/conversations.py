@@ -14,6 +14,7 @@ from hexagent_api.agent_manager import agent_manager
 from hexagent_api.models import ConversationCreateRequest, ConversationUpdateRequest
 from hexagent_api.paths import uploads_dir
 from hexagent_api.store import session_store, store
+from hexagent_api.stream_manager import stream_manager
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,13 @@ async def browse_folder() -> dict:
 @router.get("/api/conversations")
 async def list_conversations() -> list[dict]:
     """List all conversations sorted by updated_at descending."""
-    return [c.to_detail() for c in store.list_all()]
+    result = []
+    for c in store.list_all():
+        d = c.to_detail()
+        if stream_manager.is_streaming(c.id):
+            d["streaming"] = True
+        result.append(d)
+    return result
 
 
 @router.post("/api/conversations", status_code=201)
@@ -121,7 +128,10 @@ async def get_conversation(conversation_id: str) -> dict:
     conv = store.get(conversation_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return conv.to_detail()
+    d = conv.to_detail()
+    if stream_manager.is_streaming(conversation_id):
+        d["streaming"] = True
+    return d
 
 
 @router.delete("/api/conversations/{conversation_id}", status_code=204)

@@ -385,13 +385,13 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
                 {mountingFolder && (
                   <div className="mount-hint mount-hint-visible">
                     <Loader2 size={12} className="model-save-spinner" />
-                    <span>正在挂载目录...</span>
+                    <span>Mounting directory...</span>
                   </div>
                 )}
                 {!mountingFolder && isPreparingRequest && (
                   <div className="mount-hint mount-hint-visible">
                     <Loader2 size={12} className="model-save-spinner" />
-                    <span>正在准备请求...</span>
+                    <span>Preparing request...</span>
                   </div>
                 )}
                 {sandboxBlocked && (
