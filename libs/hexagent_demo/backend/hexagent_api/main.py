@@ -16,13 +16,24 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from hexagent_api.agent_manager import agent_manager
+from hexagent_api.paths import data_dir
 from hexagent_api.routes import chat, config, conversations, sessions, setup, skills
+
+_LOG_DIR = data_dir() / "logs"
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+_LOG_FILE = _LOG_DIR / "backend.log"
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(_LOG_FILE, encoding="utf-8"),
+    ],
+    force=True,
 )
 logger = logging.getLogger(__name__)
+logger.info("Backend log file: %s", _LOG_FILE)
 
 
 async def _cleanup_expired_sessions() -> None:

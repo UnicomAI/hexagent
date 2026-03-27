@@ -20,6 +20,8 @@ import asyncio
 import json
 import logging
 import os
+import shlex
+import sys
 from typing import Any
 
 from collections.abc import AsyncIterator
@@ -48,12 +50,48 @@ class AgentManager:
         self._agent_locks: dict[tuple[str, str], asyncio.Lock] = {}
         # session_name -> (working_dir_source, mount_target)
         self._session_working_dirs: dict[str, tuple[str, str]] = {}
+        # Background warm-up task: auto-start VM manager after app startup.
+        self._vm_warm_task: asyncio.Task[None] | None = None
 
     def conversation_lock(self, conversation_id: str) -> asyncio.Lock:
         """Per-conversation lock to serialise prepare/send/mount operations."""
         if conversation_id not in self._conv_locks:
             self._conv_locks[conversation_id] = asyncio.Lock()
         return self._conv_locks[conversation_id]
+
+    @staticmethod
+    def _set_computer_default_cwd(computer: Any, cwd: str | None) -> None:
+        """Best-effort hook for session computers that support default cwd."""
+        setter = getattr(computer, "set_default_cwd", None)
+        if callable(setter):
+            setter(cwd)
+
+    async def _verify_session_dir_writable(self, session_name: str, guest_dir: str) -> None:
+        """Ensure the cowork session user can write to the selected working dir."""
+        if self._vm_manager is None:
+            return
+        vm = getattr(self._vm_manager, "_vm", None)
+        if vm is None:
+            return
+
+        probe = f"{guest_dir.rstrip('/')}/.hexagent_write_probe_{os.getpid()}"
+        cmd = (
+            f"test -d {shlex.quote(guest_dir)} && "
+            f"test -w {shlex.quote(guest_dir)} && "
+            f"touch {shlex.quote(probe)} && "
+            f"rm -f {shlex.quote(probe)}"
+        )
+        result = await vm.shell(cmd, user=session_name)
+        if result.exit_code == 0:
+            return
+
+        detail = (result.stderr or result.stdout or "").strip() or "unknown error"
+        raise RuntimeError(
+            "Selected working directory is mounted but not writable for the cowork session user. "
+            f"guest_dir={guest_dir} session={session_name} detail={detail}. "
+            "Please choose a writable local folder (recommended: D:\\code\\...), "
+            "or adjust Windows folder ACL/WSL mount permissions."
+        )
 
     # ── Computer management ──
 
@@ -113,7 +151,13 @@ class AgentManager:
         if self._vm_manager is None:
             import shutil
 
-            if not shutil.which("limactl"):
+            if sys.platform == "win32":
+                from hexagent.computer.local._wsl import _resolve_wsl_exe
+
+                vm_backend_ready = _resolve_wsl_exe() is not None
+            else:
+                vm_backend_ready = bool(shutil.which("limactl"))
+            if not vm_backend_ready:
                 raise RuntimeError(
                     "Cowork mode requires VM setup. "
                     "Please install and configure it in Settings \u2192 Sandbox."
@@ -135,24 +179,38 @@ class AgentManager:
                     from hexagent.computer import Mount
 
                     session_mounts: list[Mount] | None = None
+                    default_cwd: str | None = None
                     if working_dir:
-                        session_mounts = [Mount(source=working_dir, target=Path(working_dir).name, writable=True)]
+                        mount_target = Path(working_dir).name
+                        session_mounts = [Mount(source=working_dir, target=mount_target, writable=True)]
+                        default_cwd = f"/sessions/{{session}}/mnt/{mount_target}"
                     logger.info("Creating new session (mounts=%s)...", session_mounts)
                     computer = await self._vm_manager.computer(mounts=session_mounts)
+                    if default_cwd is not None:
+                        resolved_cwd = default_cwd.format(session=computer.session_name)
+                        self._set_computer_default_cwd(computer, resolved_cwd)
+                        await self._verify_session_dir_writable(computer.session_name, resolved_cwd)
             except FileNotFoundError:
                 raise RuntimeError(
                     "Cowork mode requires VM setup. "
                     "Please install and configure it in Settings \u2192 Sandbox."
                 ) from None
             except Exception as exc:
-                # Convert VM infrastructure errors to user-friendly messages
-                msg = str(exc).lower()
-                if "not found" in msg or "does not exist" in msg or "not running" in msg:
+                # Preserve actionable details instead of collapsing all errors
+                # into "VM is not running", which can hide the real cause.
+                detail = str(exc).strip() or exc.__class__.__name__
+                low = detail.lower()
+                if "does not exist" in low and "wsl distro" in low:
+                    raise RuntimeError(
+                        "Cowork mode requires VM setup. "
+                        "Please install and configure it in Settings \u2192 Sandbox."
+                    ) from None
+                if "not running" in low and "session" not in low:
                     raise RuntimeError(
                         "VM is not running. "
                         "Please set it up in Settings \u2192 Sandbox."
                     ) from None
-                raise
+                raise RuntimeError(f"Cowork session setup failed: {detail}") from exc
 
             actual_name = computer.session_name
             self._computers[actual_name] = computer
@@ -398,16 +456,39 @@ class AgentManager:
         from dotenv import load_dotenv
 
         load_dotenv()
-        # VM setup is lazy — _ensure_vm_manager() is called on demand
-        # when a cowork-mode conversation starts.
+        # Keep startup fast: warm VM in background (non-blocking). Cowork
+        # still lazily initializes on first use if warm-up fails.
+        self._schedule_vm_warmup()
+        logger.info("Agent manager initialized.")
+
+    def _schedule_vm_warmup(self) -> None:
+        """Best-effort background VM warm-up on supported hosts."""
+        if self._vm_warm_task is not None and not self._vm_warm_task.done():
+            return
+
+        import shutil
+
+        if sys.platform == "win32":
+            from hexagent.computer.local._wsl import _resolve_wsl_exe
+
+            vm_backend_available = _resolve_wsl_exe() is not None
+        else:
+            vm_backend_available = bool(shutil.which("limactl"))
+        if not vm_backend_available:
+            return
+
+        self._vm_warm_task = asyncio.create_task(self._warm_vm_manager())
+
+    async def _warm_vm_manager(self) -> None:
+        """Background VM initialization used to auto-start installed VMs."""
         try:
             await self._ensure_vm_manager()
+            logger.info("Background VM warm-up completed.")
         except Exception:
             logger.warning(
-                "VM manager not available (Lima not installed?). "
-                "Cowork mode will be unavailable; chat mode still works."
+                "Background VM warm-up failed; cowork mode will initialize VM on demand.",
+                exc_info=True,
             )
-        logger.info("Agent manager initialized.")
 
     async def ensure_agent(
         self,
@@ -457,6 +538,9 @@ class AgentManager:
 
     async def stop(self) -> None:
         """Shut down all agents and computers."""
+        if self._vm_warm_task is not None and not self._vm_warm_task.done():
+            self._vm_warm_task.cancel()
+            self._vm_warm_task = None
         for key, agent in self._agents.items():
             logger.info("Closing agent for %s...", key)
             await agent.aclose()
@@ -504,13 +588,44 @@ class AgentManager:
 
         import shlex
 
+        async def _is_mount_active(target_name: str) -> bool:
+            guest_path = f"/sessions/{session_name}/mnt/{target_name}"
+            result = await self._vm_manager._vm.shell(f"findmnt -n {shlex.quote(guest_path)}")
+            return result.exit_code == 0 and bool((result.stdout or "").strip())
+
         # Unmount previous working dir if switching to a different one
         prev = self._session_working_dirs.get(session_name)
         prev_guest_path: str | None = None
         if prev is not None:
             prev_source, prev_target = prev
             if prev_source == working_dir:
-                return  # Same dir already mounted
+                resolved_cwd = f"/sessions/{session_name}/mnt/{prev_target}"
+                self._set_computer_default_cwd(self._computers.get(session_name), resolved_cwd)
+                if await _is_mount_active(prev_target):
+                    # Happy path: mount is still active and writable.
+                    await self._verify_session_dir_writable(session_name, resolved_cwd)
+                    return
+                logger.warning(
+                    "Session mount missing, forcing remount. session=%s target=%s source=%s",
+                    session_name,
+                    prev_target,
+                    prev_source,
+                )
+                # Same source/target: self-heal mount in place to avoid
+                # full apply/restart across all historical session mounts.
+                mount = Mount(source=working_dir, target=prev_target, writable=True)
+                await self._vm_manager.mount([mount], session=session_name)
+                try:
+                    await self._verify_session_dir_writable(session_name, resolved_cwd)
+                except RuntimeError:
+                    logger.warning(
+                        "Writable check failed after in-place remount; forcing VM apply() and retry. session=%s",
+                        session_name,
+                    )
+                    await self._vm_manager.apply()
+                    await self._verify_session_dir_writable(session_name, resolved_cwd)
+                logger.info("Remounted working dir in place %s for session %s", working_dir, session_name)
+                return
             prev_guest_path = f"/sessions/{session_name}/mnt/{prev_target}"
 
             # Force-unmount inside the guest BEFORE the VM restart to flush
@@ -532,12 +647,24 @@ class AgentManager:
         mount = Mount(source=working_dir, target=new_target, writable=True)
         await self._vm_manager.mount([mount], session=session_name)
         self._session_working_dirs[session_name] = (working_dir, new_target)
+        computer = self._computers.get(session_name)
+        resolved_cwd = f"/sessions/{session_name}/mnt/{new_target}"
+        self._set_computer_default_cwd(computer, resolved_cwd)
+        try:
+            await self._verify_session_dir_writable(session_name, resolved_cwd)
+        except RuntimeError:
+            # One-shot recovery: apply mounts.json to restore bind mounts if
+            # WSL was restarted externally and mount state was lost.
+            logger.warning("Writable check failed after mount; forcing VM apply() and retry. session=%s", session_name)
+            await self._vm_manager.apply()
+            await self._verify_session_dir_writable(session_name, resolved_cwd)
         logger.info("Mounted working dir %s for session %s", working_dir, session_name)
 
         # Remove the stale mount-point directory left behind after unmount.
-        # The dir may still be a FUSE mount point briefly after restart, so
-        # attempt umount before rmdir.
-        if prev_guest_path is not None:
+        # Only do this when we switched targets; for same-target remount
+        # (e.g. self-heal on lost bind mount), cleanup would remove the
+        # newly restored live mount.
+        if prev_guest_path is not None and prev_guest_path != resolved_cwd:
             quoted = shlex.quote(prev_guest_path)
             result = await self._vm_manager._vm.shell(
                 f"sudo umount {quoted} 2>/dev/null; sudo rmdir {quoted}"

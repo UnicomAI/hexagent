@@ -84,17 +84,17 @@ class TestResolve:
         assert env.today_date.tzinfo is None
 
     async def test_empty_datetime_raises(self) -> None:
+        """Empty datetime must raise — it indicates a broken shell probe."""
         computer = _mock_computer(_make_stdout(date=""))
         with pytest.raises(ValueError, match="empty datetime"):
             await EnvironmentResolver(computer).resolve()
 
-    async def test_pads_missing_parts(self) -> None:
-        """When stdout has fewer delimiters, missing fields are padded."""
+    async def test_pads_missing_parts_raises(self) -> None:
+        """When stdout has fewer delimiters, missing date field raises."""
         # Only cwd and git — missing platform, shell, os_version, date
         stdout = f"/home/user\n{_DELIM}\ntrue"
         computer = _mock_computer(stdout)
 
-        # Date will be empty → raises ValueError
         with pytest.raises(ValueError, match="empty datetime"):
             await EnvironmentResolver(computer).resolve()
 

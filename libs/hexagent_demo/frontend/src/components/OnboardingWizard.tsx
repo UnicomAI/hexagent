@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import faviconSvg from "../assets/favicon.svg";
 import {
   Eye, EyeOff, ArrowRight, ChevronDown, ChevronRight,
@@ -84,10 +84,47 @@ function stepIndex(s: Step): number {
   return STEPS.indexOf(s);
 }
 
+const ONBOARDING_DRAFT_KEY = "hexagent-onboarding-draft-v1";
+
+interface OnboardingDraft {
+  step?: Step;
+  selectedProviderId?: string;
+  modelId?: string;
+  displayName?: string;
+  baseUrl?: string;
+  sumProviderId?: string;
+  sumModelId?: string;
+  sumDisplayName?: string;
+  sumBaseUrl?: string;
+  sumSameAsMain?: boolean;
+  searchProvider?: string;
+  fetchProvider?: string;
+  vmSkipped?: boolean;
+}
+
+function loadOnboardingDraft(): OnboardingDraft | null {
+  try {
+    const raw = localStorage.getItem(ONBOARDING_DRAFT_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as OnboardingDraft;
+  } catch {
+    return null;
+  }
+}
+
+function saveOnboardingDraft(draft: OnboardingDraft): void {
+  localStorage.setItem(ONBOARDING_DRAFT_KEY, JSON.stringify(draft));
+}
+
+function clearOnboardingDraft(): void {
+  localStorage.removeItem(ONBOARDING_DRAFT_KEY);
+}
+
 // ---------------------------------------------------------------------------
 
 export default function OnboardingWizard({ open, onComplete, settings, onSettingsChange }: OnboardingWizardProps) {
   const { dispatch } = useAppContext();
+  const draftReadyRef = useRef(false);
   const [step, setStep] = useState<Step>("welcome");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -126,6 +163,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
 
   // VM setup — shared with Settings via VMSetupProvider (single source of truth)
   const vm = useVMSetup();
+  const vmAutoBootstrapping = vm.autoBootstrapping;
   const [vmSkipped, setVmSkipped] = useState(false);
   const [showSkipConfirm, setShowSkipConfirm] = useState(false);
   const [showDepsPrompt, setShowDepsPrompt] = useState(false);
@@ -139,14 +177,70 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const vmPhase2Error = vm.phase2Error;
   const vmPhase3 = vm.phase3;
   const vmUsable = vmPhase1 === "done" && vmPhase2 === "done";
+  const vmPhase1NeedsRestart = /restart windows|重启.*windows|重启.*电脑|reboot/i.test(vmPhase1Error || "");
 
-  // Load server config and reset name on open
+  // Load server config and restore onboarding draft on open
   useEffect(() => {
-    if (open) {
-      getServerConfig().then(setConfig).catch(() => {});
-      onSettingsChange((prev) => ({ ...prev, fullName: "" }));
+    if (!open) {
+      draftReadyRef.current = false;
+      return;
     }
+
+    getServerConfig().then(setConfig).catch(() => {});
+
+    const draft = loadOnboardingDraft();
+    if (draft) {
+      if (draft.step && STEPS.includes(draft.step)) setStep(draft.step);
+      if (draft.selectedProviderId) setSelectedProvider(PROVIDERS.find((p) => p.id === draft.selectedProviderId) ?? null);
+      if (typeof draft.modelId === "string") setModelId(draft.modelId);
+      if (typeof draft.displayName === "string") setDisplayName(draft.displayName);
+      if (typeof draft.baseUrl === "string") setBaseUrl(draft.baseUrl);
+      if (draft.sumProviderId) setSumProvider(PROVIDERS.find((p) => p.id === draft.sumProviderId) ?? null);
+      if (typeof draft.sumModelId === "string") setSumModelId(draft.sumModelId);
+      if (typeof draft.sumDisplayName === "string") setSumDisplayName(draft.sumDisplayName);
+      if (typeof draft.sumBaseUrl === "string") setSumBaseUrl(draft.sumBaseUrl);
+      if (typeof draft.sumSameAsMain === "boolean") setSumSameAsMain(draft.sumSameAsMain);
+      if (typeof draft.searchProvider === "string") setSearchProvider(draft.searchProvider);
+      if (typeof draft.fetchProvider === "string") setFetchProvider(draft.fetchProvider);
+      if (typeof draft.vmSkipped === "boolean") setVmSkipped(draft.vmSkipped);
+    }
+
+    draftReadyRef.current = true;
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!open || !draftReadyRef.current) return;
+    saveOnboardingDraft({
+      step,
+      selectedProviderId: selectedProvider?.id,
+      modelId,
+      displayName,
+      baseUrl,
+      sumProviderId: sumProvider?.id,
+      sumModelId,
+      sumDisplayName,
+      sumBaseUrl,
+      sumSameAsMain,
+      searchProvider,
+      fetchProvider,
+      vmSkipped,
+    });
+  }, [
+    open,
+    step,
+    selectedProvider,
+    modelId,
+    displayName,
+    baseUrl,
+    sumProvider,
+    sumModelId,
+    sumDisplayName,
+    sumBaseUrl,
+    sumSameAsMain,
+    searchProvider,
+    fetchProvider,
+    vmSkipped,
+  ]);
 
   if (!open) return null;
 
@@ -225,6 +319,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
 
       const saved = await updateServerConfig(updated);
       dispatch({ type: "SET_SERVER_CONFIG", payload: saved });
+      clearOnboardingDraft();
       onComplete();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to save configuration");
@@ -819,10 +914,22 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                       {vmPhase1 === "done" && <span className="setup-vm-badge">Installed</span>}
                       {vmPhase1 === "running" && vmPhase1Msg && <span className="setup-vm-msg">{vmPhase1Msg}</span>}
                       {vmPhase1 === "pending" && (
-                        <button className="vm-phase-action" type="button" onClick={vm.installLima}>Install</button>
+                        vmAutoBootstrapping ? (
+                          <span className="setup-vm-msg">Auto installing...</span>
+                        ) : (
+                          <button className="vm-phase-action" type="button" onClick={vm.installLima}>Install</button>
+                        )
                       )}
                       {vmPhase1 === "error" && (
-                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.installLima}>Retry</button>
+                        vmPhase1NeedsRestart ? (
+                          <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.recheckVmEngine}>
+                            I've restarted, Re-check
+                          </button>
+                        ) : (
+                          <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.installLima}>
+                            Retry
+                          </button>
+                        )
                       )}
                     </div>
                     {vmPhase1 === "error" && vmPhase1Error && (
@@ -839,7 +946,11 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                       {vmPhase2 === "done" && <span className="setup-vm-badge">Ready</span>}
                       {vmPhase2 === "running" && vmPhase2Msg && <span className="setup-vm-msg">{vmPhase2Msg}</span>}
                       {vmPhase2 === "pending" && vmPhase1 === "done" && (
-                        <button className="vm-phase-action" type="button" onClick={vm.buildVMInstance}>Install</button>
+                        vmAutoBootstrapping ? (
+                          <span className="setup-vm-msg">Auto installing...</span>
+                        ) : (
+                          <button className="vm-phase-action" type="button" onClick={vm.buildVMInstance}>Install</button>
+                        )
                       )}
                       {vmPhase2 === "error" && (
                         <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.buildVMInstance}>Retry</button>

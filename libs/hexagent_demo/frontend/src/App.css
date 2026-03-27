@@ -2327,6 +2327,34 @@
   position: relative;
 }
 
+.mount-hint {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  z-index: 20;
+  opacity: 0;
+  transform: scale(0.96);
+  transform-origin: bottom right;
+  transition: opacity 150ms cubic-bezier(0.16, 1, 0.3, 1),
+              transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mount-hint-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
 .e2b-hint {
   position: absolute;
   bottom: calc(100% + 8px);
@@ -5728,6 +5756,114 @@
     opacity: 0;
     transform: translateX(20px);
   }
+}
+
+/* ===== Global Restart Required Modal ===== */
+.restart-required-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.restart-required-modal {
+  width: min(560px, 94vw);
+  background: var(--bg-primary);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 14px;
+  padding: 20px 22px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.restart-required-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.restart-required-icon {
+  color: var(--danger, #ef4444);
+  flex-shrink: 0;
+}
+
+.restart-required-title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.restart-required-text {
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.restart-required-text--strong {
+  color: var(--danger, #ef4444);
+  font-weight: 600;
+}
+
+.restart-required-detail {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.restart-required-actions {
+  margin-top: 16px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.restart-required-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.restart-required-btn--ghost {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.restart-required-btn--ghost:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+.restart-required-btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.restart-required-btn--primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 /* ===== VM Setup Floating Indicator ===== */

@@ -111,3 +111,13 @@ def vm_setup_dir() -> Path:
     system (Lima, WSL, cloud VMs, etc.).
     """
     return vm_dir() / "setup"
+
+
+def vm_setup_lite_dir() -> Path:
+    """Lite VM setup scripts (``sandbox/vm/setup_lite/``).
+
+    Minimal baseline variant for demo/Electron deployments. Installs only
+    the packages needed for the demo and defers heavier dependencies to
+    on-demand installation. Supports China-region mirrors.
+    """
+    return vm_dir() / "setup_lite"

@@ -1685,6 +1685,28 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
   const [showKey, setShowKey] = useState(!config.sandbox.e2b_api_key);
   const [folders, setFolders] = useState<RecentFolder[]>(() => loadRecentFolders());
 
+  const {
+    vmStatus,
+    autoBootstrapping,
+    phase1,
+    phase1Msg,
+    phase1Error,
+    phase2,
+    phase2Msg,
+    phase2Error,
+    phase3,
+    phase3Error,
+    provSteps,
+    provStepStatus,
+    provStepMsg,
+    provLog,
+  } = vm;
+
+  const inferredBackend = navigator.platform.toUpperCase().includes("WIN") ? "wsl" : "lima";
+  const vmBackend = vmStatus?.backend ?? inferredBackend;
+  const vmEngineLabel = vmBackend === "wsl" ? "WSL Engine" : "Lima Engine";
+  const vmBackendName = vmBackend === "wsl" ? "WSL" : "Lima";
+  const vmPlatformLabel = vmBackend === "wsl" ? "Windows only" : "macOS only";
   const toggleFolderPermission = (path: string) => {
     const updated = folders.map((f) =>
       f.path === path ? { ...f, alwaysAllowed: !f.alwaysAllowed } : f
@@ -1712,15 +1734,13 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
     }
   };
 
-  const { vmStatus, phase1, phase1Msg, phase1Error, phase2, phase2Msg, phase2Error,
-    phase3, phase3Error, provSteps, provStepStatus, provStepMsg, provLog } = vm;
-
-  // Cowork mode is usable once Lima is installed and VM is running (phases 1+2).
-  // Phase 3 (dependency installation) can run in the background.
-  const vmUsable = phase1 === "done" && phase2 === "done";
+  // Cowork mode should prefer backend truth from /api/setup/vm (vm_ready),
+  // but keep UI-consistent fallback when phase1+phase2 are already done.
+  const vmUsable = (vmStatus?.vm_ready === true) || (phase1 === "done" && phase2 === "done");
   const allDone = vmUsable && phase3 === "done";
   const anyRunning = phase1 === "running" || phase2 === "running" || phase3 === "running";
   const coreError = phase1 === "error" || phase2 === "error";
+  const phase1NeedsRestart = /restart windows|重启.*windows|重启.*电脑|reboot/i.test(phase1Error || "");
 
   return (
     <div className="settings-section">
@@ -1782,7 +1802,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
             <div className="sb-card-title-row">
               <span className="sb-card-title">Virtual Machine</span>
               <span className="sb-card-badge sb-card-badge--cowork">Cowork mode</span>
-              <span className="sb-card-badge sb-card-badge--platform">macOS only</span>
+              <span className="sb-card-badge sb-card-badge--platform">{vmPlatformLabel}</span>
             </div>
             <span className="sb-card-desc">Local VM sandbox — runs agent code securely on your machine</span>
           </div>
@@ -1811,22 +1831,59 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
           {/* ── Setup in progress or not yet started ── */}
           {vmStatus && vmStatus.supported && !allDone && (
             <div className="vm-setup-phases">
-              {/* Phase 1: Lima */}
+              {/* Phase 1: VM backend */}
               <div className={`vm-phase ${phase1 === "running" ? "vm-phase--active" : ""}`}>
                 <div className="vm-phase-header">
                   {phaseIcon(phase1)}
-                  <span className="vm-phase-label">VM Engine</span>
+                  <span className="vm-phase-label">{vmEngineLabel}</span>
                   {phase1 === "done" && <span className="vm-phase-badge vm-phase-badge--done">Installed</span>}
                   {phase1 === "running" && phase1Msg && <span className="vm-phase-msg">{phase1Msg}</span>}
                   {phase1 === "pending" && (
-                    <button className="vm-phase-action" type="button" onClick={vm.installLima}>Install</button>
+                    autoBootstrapping ? (
+                      <span className="vm-phase-msg">Auto installing...</span>
+                    ) : (
+                      <button className="vm-phase-action" type="button" onClick={vm.installLima}>
+                        {vmBackend === "wsl" ? "Install runtime" : "Install"}
+                      </button>
+                    )
                   )}
                   {phase1 === "error" && (
-                    <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.installLima}>Retry</button>
+                    phase1NeedsRestart ? (
+                      <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.recheckVmEngine}>
+                        I've restarted, Re-check
+                      </button>
+                    ) : (
+                      <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.installLima}>
+                        {vmBackend === "wsl" ? "Retry install" : "Retry"}
+                      </button>
+                    )
                   )}
                 </div>
                 {phase1 === "error" && phase1Error && (
                   <p className="vm-phase-error"><CircleAlert size={12} /> {phase1Error}</p>
+                )}
+                {phase1 === "error" && /bios|firmware|vt-x|amd-v|svm|virtualization is disabled|BIOS_VIRT_DISABLED|virtualization/i.test(phase1Error || "") && (
+                  <div className="vm-phase-detail" style={{ marginTop: 8 }}>
+                    <p style={{ margin: "0 0 6px 0" }}>
+                      We cannot enable BIOS virtualization remotely, but you can finish it in 3 steps:
+                    </p>
+                    <ol style={{ margin: 0, paddingLeft: 18 }}>
+                      <li>Restart and enter BIOS/UEFI setup.</li>
+                      <li>Enable virtualization.</li>
+                      <li>Save and reboot Windows, then click Retry.</li>
+                    </ol>
+                    <p style={{ margin: "8px 0 4px 0" }}>Common option names:</p>
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      <li>Intel: Intel Virtualization Technology / VT-x</li>
+                      <li>AMD: SVM Mode / AMD-V</li>
+                    </ul>
+                    <p style={{ margin: "8px 0 0 0" }}>
+                      Common BIOS keys: <code>F2</code>, <code>Del</code>, <code>Esc</code>, <code>F10</code>, <code>F12</code> (varies by brand).
+                    </p>
+                  </div>
+                )}
+                {phase1 === "done" && (
+                  <p className="vm-phase-detail">{vmBackendName} is installed and available.</p>
                 )}
               </div>
 
@@ -1838,7 +1895,11 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
                   {phase2 === "done" && <span className="vm-phase-badge vm-phase-badge--done">Ready</span>}
                   {phase2 === "running" && phase2Msg && <span className="vm-phase-msg">{phase2Msg}</span>}
                   {phase2 === "pending" && phase1 === "done" && (
-                    <button className="vm-phase-action" type="button" onClick={vm.buildVMInstance}>Install</button>
+                    autoBootstrapping ? (
+                      <span className="vm-phase-msg">Auto installing...</span>
+                    ) : (
+                      <button className="vm-phase-action" type="button" onClick={vm.buildVMInstance}>Install</button>
+                    )
                   )}
                   {phase2 === "error" && (
                     <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.buildVMInstance}>Retry</button>

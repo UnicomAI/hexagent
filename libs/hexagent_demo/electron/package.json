@@ -17,7 +17,7 @@
     "tree-kill": "^1.2.2"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
+    "electron": "^33.4.11",
     "electron-builder": "^25.1.8"
   },
   "build": {
@@ -50,8 +50,11 @@
     "mac": {
       "target": [
         {
-          "target": "dir",
-          "arch": ["arm64", "x64"]
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ],
       "icon": "resources/icon.icns",
@@ -64,7 +67,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "resources/icon.ico",
@@ -72,7 +77,9 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": true,
+      "include": "resources/installer.nsh"
     }
   }
 }

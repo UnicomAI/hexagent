@@ -40,6 +40,7 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
   const { state, dispatch } = useAppContext();
   const noModels = !state.serverConfig?.models?.length;
   const missingE2bKey = state.selectedMode === "chat" && !state.serverConfig?.sandbox?.e2b_api_key;
+  const isPreparingRequest = state.isRequestPending;
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -94,7 +95,7 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
     if (missingE2bKey) { flashE2bHint(); return; }
     const trimmed = value.trim();
     const hasContent = trimmed || doneFiles.length > 0;
-    if (!hasContent || !!state.streamingByConversation[conversationId] || anyUploading) return;
+    if (!hasContent || !!state.streamingByConversation[conversationId] || isPreparingRequest || anyUploading) return;
 
     const attachments = doneFiles.map((f) => f.result!);
     onSend(trimmed, attachments.length > 0 ? { attachments } : undefined);
@@ -103,7 +104,7 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [value, doneFiles, anyUploading, state.streamingByConversation, conversationId, onSend, missingE2bKey, flashE2bHint]);
+  }, [value, doneFiles, anyUploading, state.streamingByConversation, conversationId, isPreparingRequest, onSend, missingE2bKey, flashE2bHint]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -299,11 +300,17 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
                 <button
                   className="input-send"
                   onClick={handleSubmit}
-                  disabled={(!value.trim() && doneFiles.length === 0) || !!state.streamingByConversation[conversationId] || anyUploading || noModels || missingE2bKey}
-                  title={noModels ? "Configure a model in Settings first" : "Send message"}
+                  disabled={(!value.trim() && doneFiles.length === 0) || !!state.streamingByConversation[conversationId] || isPreparingRequest || anyUploading || noModels || missingE2bKey}
+                  title={noModels ? "Configure a model in Settings first" : isPreparingRequest ? "Preparing request..." : "Send message"}
                 >
-                  <ArrowUp />
+                  {isPreparingRequest ? <Loader2 className="model-save-spinner" /> : <ArrowUp />}
                 </button>
+                {isPreparingRequest && (
+                  <div className="mount-hint mount-hint-visible">
+                    <Loader2 size={12} className="model-save-spinner" />
+                    <span>Preparing request...</span>
+                  </div>
+                )}
                 {missingE2bKey && (
                   <div className={`e2b-hint${value.trim() || e2bHintFlash ? " e2b-hint-visible" : ""}`}>
                     E2B API key required —{" "}

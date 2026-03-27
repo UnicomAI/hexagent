@@ -27,6 +27,7 @@ to an isolated Linux user on the WSL distro.
 from __future__ import annotations
 
 import asyncio
+import os
 import shlex
 import uuid
 from pathlib import Path
@@ -73,11 +74,12 @@ class _VMSessionComputer(AsyncComputerMixin):
         session_name: Linux username for this session.
     """
 
-    def __init__(self, *, vm: WslVM, session_name: str) -> None:
+    def __init__(self, *, vm: WslVM, session_name: str, default_cwd: str | None = None) -> None:
         """Initialize with a VM backend and session name."""
         self._vm = vm
         self._session_name = session_name
         self._active = True
+        self._default_cwd = default_cwd
 
     @property
     def session_name(self) -> str:
@@ -88,6 +90,10 @@ class _VMSessionComputer(AsyncComputerMixin):
     def is_running(self) -> bool:
         """True if this handle is active."""
         return self._active
+
+    def set_default_cwd(self, cwd: str | None) -> None:
+        """Set the default working directory for future commands."""
+        self._default_cwd = cwd
 
     async def start(self) -> None:
         """Health check — verify the distro is running and session user exists.
@@ -131,6 +137,7 @@ class _VMSessionComputer(AsyncComputerMixin):
             return await self._vm.shell(
                 command,
                 user=self._session_name,
+                cwd=self._default_cwd,
                 timeout=timeout_ms / 1000,
             )
         except VMError as e:
@@ -259,9 +266,13 @@ class LocalVM:
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Ensure the distro is running. Idempotent."""
-        if await self._vm.status() == "Running":
-            return
+        """Ensure the distro is running and session mounts are applied.
+
+        WSL bind mounts are ephemeral; they are often absent if the distro
+        was started outside LocalVM (for example during setup/build flows).
+        Always delegate to ``WslVM.start()`` so it can re-apply mounts from
+        ``mounts.json`` even when status is already Running.
+        """
         await self._vm.start()
 
     async def stop(self) -> None:
@@ -270,7 +281,7 @@ class LocalVM:
             return
         await self._vm.stop()
 
-    async def mount(
+    async def mount(  # noqa: PLR0912
         self,
         mounts: Mount | list[Mount],
         *,
@@ -319,6 +330,39 @@ class LocalVM:
 
             truly_new = [r for r in resolved_new if (r.host_path, r.guest_path, r.writable) not in existing_set]
             if not truly_new:
+                # Config may already contain the mount while the live bind mount
+                # was lost (for example after external WSL restart). Verify and
+                # self-heal by restoring only the missing live bind mount.
+                for r in resolved_new:
+                    probe = await self._vm.shell(f"findmnt -n {shlex.quote(r.guest_path)}")
+                    if probe.exit_code != 0:
+                        from hexagent.computer.local._wsl import _session_user_from_guest_mount_path, _win_path_to_wsl
+
+                        wsl_host = _win_path_to_wsl(r.host_path)
+                        qguest = shlex.quote(r.guest_path)
+                        qhost = shlex.quote(wsl_host)
+                        cmd = f"mkdir -p {qguest} && mount --bind {qhost} {qguest}"
+                        if not r.writable:
+                            cmd += f" && mount -o remount,ro,bind {qguest}"
+                        remount = await self._vm.shell(cmd, user="root")
+                        if remount.exit_code != 0:
+                            msg = f"Failed to self-heal mount '{r.guest_path}': {remount.stderr or remount.stdout}"
+                            raise VMError(msg)
+
+                        sess = _session_user_from_guest_mount_path(r.guest_path)
+                        skip_chown = os.environ.get("OPENAGENT_WSL_SKIP_SESSION_MOUNT_CHOWN", "").strip().lower() in (
+                            "1",
+                            "true",
+                            "yes",
+                        )
+                        if r.writable and sess is not None and not skip_chown:
+                            quser = shlex.quote(sess)
+                            await self._vm.shell(f"chown -R {quser}:{quser} {qguest}", user="root")
+
+                        verify = await self._vm.shell(f"findmnt -n {qguest}", user="root")
+                        if verify.exit_code != 0 or not (verify.stdout or "").strip():
+                            msg = f"Mount self-heal verification failed for '{r.guest_path}'"
+                            raise VMError(msg)
                 return
 
             existing_guests = {r.guest_path for r in existing}
@@ -442,7 +486,11 @@ class LocalVM:
                     await self._vm.shell(f"sudo userdel -r {shlex.quote(name)}")
                     raise
 
-        return _VMSessionComputer(vm=self._vm, session_name=name)
+        # Keep cowork commands inside the session home by default. Without an
+        # explicit cwd, WSL may inherit a host-side working directory
+        # (e.g. /mnt/c/Windows/System32), which is often not writable.
+        default_cwd = f"/sessions/{name}"
+        return _VMSessionComputer(vm=self._vm, session_name=name, default_cwd=default_cwd)
 
     async def destroy(self, name: str) -> None:
         """Delete a session user and its mounts.
@@ -554,14 +602,24 @@ class LocalVM:
         qname = shlex.quote(name)
         home = f"/sessions/{name}"
         qhome = shlex.quote(home)
-        result = await self._vm.shell(f"sudo useradd -m -d {qhome} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {qname}")
+        sudo_probe = await self._vm.shell("command -v sudo >/dev/null 2>&1")
+        sudo_prefix = "sudo " if sudo_probe.exit_code == 0 else ""
+
+        create_cmd = f"{sudo_prefix}useradd -m -d {qhome} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {qname}"
+        result = await self._vm.shell(create_cmd)
+        if result.exit_code != 0:
+            # Some Ubuntu/WSL images reject useradd with SUB_UID/GID_COUNT=0.
+            # Retry without those overrides for compatibility. We retry
+            # regardless of locale-specific stderr text.
+            fallback_cmd = f"{sudo_prefix}useradd -m -d {qhome} -s /bin/bash --no-log-init {qname}"
+            result = await self._vm.shell(fallback_cmd)
         if result.exit_code != 0:
             msg = f"Failed to create session user '{name}': {result.stderr}"
             raise VMError(msg)
 
         all_dirs = " ".join(shlex.quote(f"{home}/{d}") for d in SESSION_DIRS)
         writable = f"{shlex.quote(f'{home}/{SESSION_TMP_DIR}')} {shlex.quote(f'{home}/{SESSION_OUTPUTS_DIR}')}"
-        result = await self._vm.shell(f"sudo mkdir -p {all_dirs} && sudo chown {qname} {writable}")
+        result = await self._vm.shell(f"{sudo_prefix}mkdir -p {all_dirs} && {sudo_prefix}chown {qname} {writable}")
         if result.exit_code != 0:
             msg = f"Failed to create session directories for '{name}': {result.stderr}"
             raise VMError(msg)

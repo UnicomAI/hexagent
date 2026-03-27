@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import re
 import shlex
@@ -32,6 +33,8 @@ from hexagent.computer.local._types import ResolvedMount
 from hexagent.exceptions import MissingDependencyError, UnsupportedPlatformError, WslError
 from hexagent.types import CLIResult
 
+logger = logging.getLogger(__name__)
+
 # UNC path prefixes for accessing WSL filesystem from Windows.
 # Modern Windows 11 uses ``wsl.localhost``; older builds use ``wsl$``.
 _UNC_PREFIXES = (r"\\wsl.localhost", r"\\wsl$")
@@ -40,6 +43,42 @@ _UNC_PREFIXES = (r"\\wsl.localhost", r"\\wsl$")
 # (which would make everything after the platform guard "unreachable"
 # when type-checking on macOS/Linux).
 _PLATFORM = sys.platform
+
+
+def _resolve_wsl_exe() -> str | None:
+    """Return a usable ``wsl.exe`` path.
+
+    Some hosts (notably Electron-spawned backends) omit ``System32`` from
+    ``PATH``, so ``shutil.which`` fails even though WSL is installed.
+    """
+    w = shutil.which("wsl.exe") or shutil.which("wsl")
+    if w:
+        return w
+    system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR")
+    if not system_root:
+        system_root = r"C:\Windows"
+    candidate = Path(system_root) / "System32" / "wsl.exe"
+    if candidate.is_file():
+        return str(candidate)
+    return None
+
+
+def _stable_host_cwd() -> str:
+    """Return a safe Windows cwd for launching ``wsl.exe``.
+
+    WSL tries to translate the parent process cwd into Linux path on every
+    invocation. If that cwd is a stale UNC/session path, startup prints
+    ``CreateProcessCommon: ... chdir(...) failed`` and commands may run in an
+    unexpected context. Force a stable host cwd to avoid inheriting stale
+    per-session paths.
+    """
+    system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR") or r"C:\Windows"
+    # ``wsl.exe`` exists under System32 on supported hosts; use that directory
+    # as a stable cwd if available, otherwise fall back to the process cwd.
+    safe_dir = Path(system_root) / "System32"
+    if safe_dir.is_dir():
+        return str(safe_dir)
+    return str(Path.cwd())
 
 
 def _ensure_proactor_event_loop() -> None:
@@ -61,8 +100,8 @@ def _ensure_proactor_event_loop() -> None:
         asyncio.set_event_loop_policy(proactor_cls())  # type: ignore[deprecated,unused-ignore]
 
 
-def _check_wsl_prerequisites() -> None:
-    """Verify we are on Windows with WSL available.
+def _check_wsl_prerequisites() -> str:
+    """Verify we are on Windows with WSL available and return the wsl.exe path.
 
     Also ensures the ``ProactorEventLoop`` policy is active.  On Windows,
     uvicorn (and some other frameworks) force ``SelectorEventLoop``, which
@@ -71,6 +110,9 @@ def _check_wsl_prerequisites() -> None:
     instantiates ``WslVM`` gets it automatically, regardless of the
     application entry point.
 
+    Returns:
+        Absolute path to ``wsl.exe``.
+
     Raises:
         UnsupportedPlatformError: If not on Windows.
         MissingDependencyError: If ``wsl.exe`` is not found.
@@ -78,13 +120,15 @@ def _check_wsl_prerequisites() -> None:
     if _PLATFORM != "win32":
         msg = f"WSL is a Windows subsystem — it cannot run on {_PLATFORM}"
         raise UnsupportedPlatformError(msg)
-    if not shutil.which("wsl") and not shutil.which("wsl.exe"):
+    wsl_exe = _resolve_wsl_exe()
+    if wsl_exe is None:
         msg = "wsl.exe not found. Install WSL2: https://learn.microsoft.com/windows/wsl/install"
         raise MissingDependencyError(msg)
 
     # Ensure ProactorEventLoop is used so create_subprocess_exec works.
     # SelectorEventLoop (uvicorn's default on Windows) does not support it.
     _ensure_proactor_event_loop()
+    return wsl_exe
 
 
 class WslVM:
@@ -95,7 +139,7 @@ class WslVM:
     """
 
     def __init__(self, instance: str) -> None:
-        _check_wsl_prerequisites()
+        self._wsl_exe = _check_wsl_prerequisites()
         self._instance = instance
         self._unc_prefix: str | None = None  # cached after first successful probe
 
@@ -130,7 +174,7 @@ class WslVM:
             WslError: If the distribution exists but is WSL version 1.
         """
         proc = await asyncio.create_subprocess_exec(
-            "wsl.exe",
+            self._wsl_exe,
             "--list",
             "--verbose",
             stdout=asyncio.subprocess.PIPE,
@@ -199,12 +243,11 @@ class WslVM:
         The change takes effect on the next distro restart (via
         ``apply_mounts`` or ``start``).
 
-        Raises:
-            WslError: If the config directory does not exist.
+        Creates the config directory if missing. This can happen when a distro
+        was installed outside ``build()`` (for example via setup migration or
+        manual WSL import) and cowork mounts are configured later.
         """
-        if not self._config_dir.exists():
-            msg = f"Config directory not found for instance '{self._instance}'"
-            raise WslError(msg)
+        self._config_dir.mkdir(parents=True, exist_ok=True)
 
         entries = [
             {
@@ -239,7 +282,7 @@ class WslVM:
         disk_dir.mkdir(parents=True, exist_ok=True)
 
         await self._run_wsl(
-            "wsl.exe",
+            self._wsl_exe,
             "--import",
             self._instance,
             str(disk_dir),
@@ -271,15 +314,27 @@ class WslVM:
 
         if current != "Running":
             # Trigger start by running a trivial command.
-            await self._run_wsl(
-                "wsl.exe",
-                "-d",
-                self._instance,
-                "--",
-                "echo",
-                "ok",
-                timeout=120,
-            )
+            # Some Windows hosts occasionally return a transient -1/4294967295
+            # from wsl.exe during startup even though a subsequent attempt works.
+            for attempt in range(2):
+                try:
+                    await self._run_wsl(
+                        self._wsl_exe,
+                        "-d",
+                        self._instance,
+                        "--",
+                        "echo",
+                        "ok",
+                        timeout=120,
+                    )
+                    break
+                except WslError as exc:
+                    text = str(exc).lower()
+                    transient = "exit 4294967295" in text or "exit -1" in text
+                    if transient and attempt == 0:
+                        await asyncio.sleep(0.5)
+                        continue
+                    raise
 
         await self._apply_bind_mounts()
 
@@ -321,7 +376,7 @@ class WslVM:
             return
 
         await self._run_wsl(
-            "wsl.exe",
+            self._wsl_exe,
             "--terminate",
             self._instance,
             timeout=60,
@@ -331,7 +386,7 @@ class WslVM:
         """Unregister the WSL distribution and clean up config (best-effort)."""
         with contextlib.suppress(WslError):
             await self._run_wsl(
-                "wsl.exe",
+                self._wsl_exe,
                 "--unregister",
                 self._instance,
             )
@@ -368,7 +423,7 @@ class WslVM:
         """
         inner = f"cd {shlex.quote(cwd)} && {command}" if cwd is not None else command
 
-        exec_args: list[str] = ["wsl.exe", "-d", self._instance]
+        exec_args: list[str] = [self._wsl_exe, "-d", self._instance]
         if user is not None:
             exec_args += ["-u", user]
         exec_args += ["--", "bash"]
@@ -384,6 +439,7 @@ class WslVM:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=_stable_host_cwd(),
         )
 
         try:
@@ -460,6 +516,7 @@ class WslVM:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=_stable_host_cwd(),
         )
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
@@ -489,6 +546,8 @@ class WslVM:
         if not mounts:
             return
 
+        logger.debug("WSL applying %d bind mount(s) from mounts.json", len(mounts))
+
         for m in mounts:
             wsl_host = _win_path_to_wsl(m.host_path)
             qguest = shlex.quote(m.guest_path)
@@ -497,6 +556,12 @@ class WslVM:
             # Skip if already mounted.
             check = await self.shell(f"mountpoint -q {qguest}", user="root")
             if check.exit_code == 0:
+                logger.info(
+                    "WSL bind-mount already active: guest=%s wsl_source=%s host_win=%s",
+                    m.guest_path,
+                    wsl_host,
+                    m.host_path,
+                )
                 continue
 
             cmd = f"mkdir -p {qguest} && mount --bind {qhost} {qguest}"
@@ -507,6 +572,48 @@ class WslVM:
             if result.exit_code != 0:
                 msg = f"Failed to bind-mount {m.host_path} → {m.guest_path}: {result.stderr}"
                 raise WslError(msg)
+
+            # Cowork mounts bind a DrvFs path (/mnt/<drive>/...) into /sessions/<user>/mnt/....
+            # DrvFs often presents files as root:root with mode 755 to Linux UIDs that are not
+            # the WSL default user, so session users see a read-only directory even though
+            # Windows ACLs allow writes. chown maps ownership to the session Linux user so
+            # mkdir/Write behave consistently.
+            sess = _session_user_from_guest_mount_path(m.guest_path)
+            skip_chown = os.environ.get("HEXAGENT_WSL_SKIP_SESSION_MOUNT_CHOWN", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+            if m.writable and sess is not None and not skip_chown:
+                quser = shlex.quote(sess)
+                own = await self.shell(f"chown -R {quser}:{quser} {qguest}", user="root")
+                if own.exit_code != 0:
+                    logger.warning(
+                        "WSL post-bind chown failed (session=%s guest=%s): %s",
+                        sess,
+                        m.guest_path,
+                        (own.stderr or own.stdout or "").strip() or "(empty)",
+                    )
+
+            # Post-verify so logs show whether the guest path is really a mount (debug empty ls issues).
+            verify = await self.shell(f"findmnt -n {qguest}", user="root")
+            if verify.exit_code == 0 and (verify.stdout or "").strip():
+                logger.info(
+                    "WSL bind-mount applied+verified: guest=%s host_win=%s findmnt=%s",
+                    m.guest_path,
+                    m.host_path,
+                    verify.stdout.strip().replace("\n", " | "),
+                )
+            else:
+                logger.warning(
+                    "WSL bind-mount mount(8) succeeded but findmnt could not confirm guest=%s "
+                    "(host_win=%s, wsl_source=%s, findmnt_exit=%s, findmnt_stderr=%s)",
+                    m.guest_path,
+                    m.host_path,
+                    wsl_host,
+                    verify.exit_code,
+                    (verify.stderr or "").strip() or "(empty)",
+                )
 
     async def _resolve_unc_prefix(self) -> str:
         r"""Resolve and cache the working UNC prefix for this system.
@@ -584,6 +691,18 @@ def _win_path_to_wsl(win_path: str) -> str:
         rest = "/" + rest
 
     return f"/mnt/{drive}{rest}"
+
+
+def _session_user_from_guest_mount_path(guest_path: str) -> str | None:
+    """Return the cowork session Linux username if *guest_path* is under ``/sessions/<user>/``.
+
+    Session-scoped mounts resolve to ``/sessions/<petname>/mnt/...``; the first path component
+    after ``sessions`` matches the Linux account created for that sandbox session.
+    """
+    parts = guest_path.split("/")
+    if len(parts) >= 3 and parts[1] == "sessions" and parts[2]:  # noqa: PLR2004
+        return parts[2]
+    return None
 
 
 def _parse_status_output(stdout: bytes) -> list[dict[str, str]]:

@@ -25,6 +25,7 @@ interface WelcomeScreenProps {
 export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: WelcomeScreenProps) {
   const { state, dispatch } = useAppContext();
   const warmSessionId = state.warmSessionId;
+  const isPreparingRequest = state.isRequestPending;
   const isCowork = mode === "cowork";
   const noModels = !state.serverConfig?.models?.length;
   const missingE2bKey = !isCowork && !state.serverConfig?.sandbox?.e2b_api_key;
@@ -50,6 +51,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
   const [current, setCurrent] = useState(0);
   const [prev, setPrev] = useState<number | null>(null);
   const [selectedFolder, setSelectedFolder] = useState("");
+  const [mountingFolder, setMountingFolder] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -111,12 +113,22 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
 
   const doneFiles = pendingFiles.filter((f) => f.status === "done");
   const anyUploading = pendingFiles.some((f) => f.status === "uploading");
+  const sendDisabled = (!value.trim() && doneFiles.length === 0) || anyUploading || mountingFolder || isPreparingRequest || noModels || sandboxBlocked;
+  const sendTitle = noModels
+    ? "Configure a model in Settings first"
+    : mountingFolder
+      ? "Mounting folder..."
+      : isPreparingRequest
+        ? "Preparing request..."
+      : sandboxBlocked
+        ? "Sandbox setup required"
+        : "Send message";
 
   const handleSubmit = useCallback(() => {
     if (sandboxBlocked) { flashE2bHint(); return; }
     const trimmed = value.trim();
     const hasContent = trimmed || doneFiles.length > 0;
-    if (!hasContent || anyUploading) return;
+    if (!hasContent || anyUploading || mountingFolder || isPreparingRequest) return;
     const opts: { workingDir?: string; attachments?: Attachment[] } = {};
     if (selectedFolder) opts.workingDir = selectedFolder;
     if (doneFiles.length > 0) {
@@ -125,7 +137,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     onSubmit(trimmed, Object.keys(opts).length > 0 ? opts : undefined);
     setValue("");
     setPendingFiles([]);
-  }, [value, onSubmit, selectedFolder, doneFiles, anyUploading, sandboxBlocked, flashE2bHint]);
+  }, [value, onSubmit, selectedFolder, doneFiles, anyUploading, mountingFolder, isPreparingRequest, sandboxBlocked, flashE2bHint]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -196,9 +208,15 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     setSelectedFolder(folder);
     if (warmSessionId && folder) {
       // Mount the folder in the warm session
-      updateWarmSession(warmSessionId, { working_dir: folder }).catch(() => {
-        dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to mount folder", type: "error" } });
-      });
+      setMountingFolder(true);
+      updateWarmSession(warmSessionId, { working_dir: folder })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          // Benign race: warm session may be claimed by conversation creation.
+          if (msg.includes("(404)") && msg.includes("Session was claimed")) return;
+          dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to mount folder", type: "error" } });
+        })
+        .finally(() => setMountingFolder(false));
     }
     // If warmSessionId isn't ready yet, the effect below will flush when it arrives
   }, [warmSessionId, dispatch, vmNotReady, flashE2bHint]);
@@ -206,9 +224,14 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
   // Flush pending folder mount when warm session becomes available
   useEffect(() => {
     if (warmSessionId && selectedFolder) {
-      updateWarmSession(warmSessionId, { working_dir: selectedFolder }).catch(() => {
-        dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to mount folder", type: "error" } });
-      });
+      setMountingFolder(true);
+      updateWarmSession(warmSessionId, { working_dir: selectedFolder })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes("(404)") && msg.includes("Session was claimed")) return;
+          dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to mount folder", type: "error" } });
+        })
+        .finally(() => setMountingFolder(false));
     }
     // Only trigger when warmSessionId changes (not on every folder change —
     // handleFolderChange already handles that when the session is ready)
@@ -354,11 +377,23 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
                 <button
                   className="input-send"
                   onClick={handleSubmit}
-                  disabled={(!value.trim() && doneFiles.length === 0) || anyUploading || noModels || sandboxBlocked}
-                  title={noModels ? "Configure a model in Settings first" : sandboxBlocked ? "Sandbox setup required" : "Send message"}
+                  disabled={sendDisabled}
+                  title={sendTitle}
                 >
-                  <ArrowUp />
+                  {mountingFolder || isPreparingRequest ? <Loader2 className="model-save-spinner" /> : <ArrowUp />}
                 </button>
+                {mountingFolder && (
+                  <div className="mount-hint mount-hint-visible">
+                    <Loader2 size={12} className="model-save-spinner" />
+                    <span>正在挂载目录...</span>
+                  </div>
+                )}
+                {!mountingFolder && isPreparingRequest && (
+                  <div className="mount-hint mount-hint-visible">
+                    <Loader2 size={12} className="model-save-spinner" />
+                    <span>正在准备请求...</span>
+                  </div>
+                )}
                 {sandboxBlocked && (
                   <div className={`e2b-hint${value.trim() || e2bHintFlash ? " e2b-hint-visible" : ""}`}>
                     {missingE2bKey ? "E2B API key required" : "VM setup required"} —{" "}

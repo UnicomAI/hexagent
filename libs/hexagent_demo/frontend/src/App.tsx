@@ -10,6 +10,7 @@ import type { Tab as SettingsTab } from "./components/SettingsModal";
 import OnboardingWizard from "./components/OnboardingWizard";
 import SearchModal from "./components/SearchModal";
 import Toast from "./components/Toast";
+import RestartRequiredModal from "./components/RestartRequiredModal";
 import VMSetupFloater from "./components/VMSetupFloater";
 import { VMSetupProvider } from "./vmSetup";
 import type { Attachment, ConversationMode, Message } from "./types";
@@ -221,7 +222,10 @@ function App() {
         fullContent = fullContent ? `${fullContent}\n\n${refs}` : refs;
       }
 
-      if (!fullContent) return;
+      if (!fullContent) {
+        dispatch({ type: "REQUEST_END" });
+        return;
+      }
 
       const userMessage: Message = {
         id: crypto.randomUUID(),
@@ -253,6 +257,7 @@ function App() {
 
       const controller = sendMessage(conversationId, fullContent, {
         onMessageStart: (id) => {
+          dispatch({ type: "REQUEST_END" });
           dispatch({ type: "STREAM_START", payload: { messageId: id, conversationId } });
         },
         onTextDelta: (delta) => {
@@ -290,6 +295,7 @@ function App() {
           abortMapRef.current.delete(conversationId);
         },
         onError: (error) => {
+          dispatch({ type: "REQUEST_END" });
           if (streamingRef.current[conversationId]) {
             dispatch({ type: "STREAM_ERROR", payload: { conversationId, error } });
           } else {
@@ -301,7 +307,7 @@ function App() {
 
       abortMapRef.current.set(conversationId, controller);
     },
-    [state.conversations, state.selectedModelId]
+    [dispatch, state.conversations, state.selectedModelId, state.isStreaming]
   );
 
   const handleNewConversation = useCallback(() => {
@@ -311,8 +317,10 @@ function App() {
 
   const handleSendMessage = useCallback(
     async (content: string, options?: { workingDir?: string; attachments?: Attachment[] }) => {
-      // Block sending only if the *target* conversation is already streaming
+      // Block sending only if the *target* conversation is already streaming or a request is pending
+      if (state.isRequestPending) return;
       if (state.activeConversationId && state.streamingByConversation[state.activeConversationId]) return;
+      dispatch({ type: "REQUEST_START" });
 
       // If we have an active conversation, send directly
       if (state.activeConversationId) {
@@ -350,10 +358,11 @@ function App() {
         // Now send the message to the newly created conversation
         doSendMessage(conv.id, content, options?.attachments);
       } catch {
+        dispatch({ type: "REQUEST_END" });
         dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to create conversation", type: "error" } });
       }
     },
-    [state.activeConversationId, state.streamingByConversation, state.selectedModelId, state.selectedMode, state.warmSessionId, doSendMessage]
+    [dispatch, state.activeConversationId, state.isRequestPending, state.streamingByConversation, state.selectedModelId, state.selectedMode, state.warmSessionId, doSendMessage]
   );
 
   const activeConversation = state.conversations.find(
@@ -422,6 +431,11 @@ function App() {
         <Toast
           notifications={state.notifications}
           onDismiss={(id) => dispatch({ type: "DISMISS_NOTIFICATION", payload: id })}
+        />
+        <RestartRequiredModal
+          open={state.restartRequiredModal.open}
+          message={state.restartRequiredModal.message}
+          onOpenSettings={() => openSettings("sandbox")}
         />
       </VMSetupProvider>
     </AppContext.Provider>

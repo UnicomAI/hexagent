@@ -15,6 +15,11 @@ export interface Notification {
   type: "error" | "info" | "success";
 }
 
+export interface RestartRequiredModalState {
+  open: boolean;
+  message: string;
+}
+
 export interface StreamingEntry {
   messageId: string;
   blocks: ContentBlock[];
@@ -25,6 +30,8 @@ export interface AppState {
   activeConversationId: string | null;
   /** Pre-conversation warm session ID (exists before first message). */
   warmSessionId: string | null;
+  /** True after user submits until SSE stream starts (or request fails). */
+  isRequestPending: boolean;
   /** Per-conversation streaming state. A key exists iff that conversation is streaming. */
   streamingByConversation: Record<string, StreamingEntry>;
   sidebarCollapsed: boolean;
@@ -39,6 +46,7 @@ export interface AppState {
   /** Remembers the last active conversation (or null=welcome) per mode. */
   lastActiveByMode: Record<ConversationMode, string | null>;
   notifications: Notification[];
+  restartRequiredModal: RestartRequiredModalState;
   filePreview: { path: string; mimeType: string; conversationId: string } | null;
   filePreviewVisible: boolean;
   /** Saved right-panel state before file preview opened (for restore on close). */
@@ -49,6 +57,7 @@ export const initialState: AppState = {
   conversations: [],
   activeConversationId: null,
   warmSessionId: null,
+  isRequestPending: false,
   streamingByConversation: {},
   sidebarCollapsed: true,
   rightPanelByConversation: {},
@@ -62,6 +71,7 @@ export const initialState: AppState = {
   })(),
   lastActiveByMode: { chat: null, cowork: null },
   notifications: [],
+  restartRequiredModal: { open: false, message: "" },
   filePreview: null,
   filePreviewVisible: false,
   rightPanelBeforePreview: null,
@@ -73,6 +83,8 @@ export type Action =
   | { type: "DELETE_CONVERSATION"; payload: string }
   | { type: "SET_ACTIVE_CONVERSATION"; payload: string | null }
   | { type: "SET_WARM_SESSION"; payload: string | null }
+  | { type: "REQUEST_START" }
+  | { type: "REQUEST_END" }
   | { type: "ADD_USER_MESSAGE"; payload: { conversationId: string; message: Message } }
   | { type: "STREAM_START"; payload: { messageId: string; conversationId: string } }
   | { type: "STREAM_TEXT_DELTA"; payload: { conversationId: string; delta: string } }
@@ -98,6 +110,8 @@ export type Action =
   | { type: "SET_SELECTED_MODE"; payload: ConversationMode }
   | { type: "SHOW_NOTIFICATION"; payload: { message: string; type: "error" | "info" | "success" } }
   | { type: "DISMISS_NOTIFICATION"; payload: string }
+  | { type: "SHOW_RESTART_REQUIRED_MODAL"; payload: { message: string } }
+  | { type: "HIDE_RESTART_REQUIRED_MODAL" }
   | { type: "SET_FILE_PREVIEW"; payload: { path: string; mimeType: string; conversationId: string } | null }
   | { type: "SET_FILE_PREVIEW_VISIBLE"; payload: boolean };
 
@@ -525,6 +539,12 @@ export function reducer(state: AppState, action: Action): AppState {
     case "SET_WARM_SESSION":
       return { ...state, warmSessionId: action.payload };
 
+    case "REQUEST_START":
+      return { ...state, isRequestPending: true };
+
+    case "REQUEST_END":
+      return { ...state, isRequestPending: false };
+
     case "ADD_USER_MESSAGE":
       return {
         ...state,
@@ -545,6 +565,7 @@ export function reducer(state: AppState, action: Action): AppState {
       };
       return {
         ...state,
+        isRequestPending: false,
         streamingByConversation: {
           ...state.streamingByConversation,
           [cid]: { messageId, blocks: [] },
@@ -629,6 +650,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const { [endCid]: _, ...restStreaming } = state.streamingByConversation;
       return {
         ...state,
+        isRequestPending: false,
         streamingByConversation: restStreaming,
         conversations: state.conversations.map((c) =>
           c.id === endCid
@@ -657,6 +679,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const { [errCid]: __, ...restStreamingErr } = state.streamingByConversation;
       return {
         ...state,
+        isRequestPending: false,
         streamingByConversation: restStreamingErr,
         // Persist the error blocks into the message so user can see them
         conversations: errEntry
@@ -769,6 +792,24 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         notifications: state.notifications.filter((n) => n.id !== action.payload),
+      };
+
+    case "SHOW_RESTART_REQUIRED_MODAL":
+      return {
+        ...state,
+        restartRequiredModal: {
+          open: true,
+          message: action.payload.message,
+        },
+      };
+
+    case "HIDE_RESTART_REQUIRED_MODAL":
+      return {
+        ...state,
+        restartRequiredModal: {
+          open: false,
+          message: "",
+        },
       };
 
     case "SET_FILE_PREVIEW": {
