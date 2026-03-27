@@ -15,16 +15,18 @@ export interface Notification {
   type: "error" | "info" | "success";
 }
 
+export interface StreamingEntry {
+  messageId: string;
+  blocks: ContentBlock[];
+}
+
 export interface AppState {
   conversations: Conversation[];
   activeConversationId: string | null;
   /** Pre-conversation warm session ID (exists before first message). */
   warmSessionId: string | null;
-  isStreaming: boolean;
-  streamingBlocks: ContentBlock[];
-  streamingMessageId: string | null;
-  /** The conversation that owns the current stream (set at STREAM_START). */
-  streamingConversationId: string | null;
+  /** Per-conversation streaming state. A key exists iff that conversation is streaming. */
+  streamingByConversation: Record<string, StreamingEntry>;
   sidebarCollapsed: boolean;
   /** Per-conversation right-panel visibility. */
   rightPanelByConversation: Record<string, boolean>;
@@ -47,10 +49,7 @@ export const initialState: AppState = {
   conversations: [],
   activeConversationId: null,
   warmSessionId: null,
-  isStreaming: false,
-  streamingBlocks: [],
-  streamingMessageId: null,
-  streamingConversationId: null,
+  streamingByConversation: {},
   sidebarCollapsed: true,
   rightPanelByConversation: {},
   rightPanelAutoShowed: {},
@@ -75,19 +74,19 @@ export type Action =
   | { type: "SET_ACTIVE_CONVERSATION"; payload: string | null }
   | { type: "SET_WARM_SESSION"; payload: string | null }
   | { type: "ADD_USER_MESSAGE"; payload: { conversationId: string; message: Message } }
-  | { type: "STREAM_START"; payload: { messageId: string } }
-  | { type: "STREAM_TEXT_DELTA"; payload: string }
-  | { type: "STREAM_REASONING_DELTA"; payload: string }
-  | { type: "STREAM_TOOL_CALL_DELTA"; payload: { index: number; name?: string; id?: string; args?: string } }
-  | { type: "STREAM_TOOL_USE_START"; payload: ToolCall }
-  | { type: "STREAM_TOOL_RESULT"; payload: { id: string; output: string } }
-  | { type: "STREAM_SUBAGENT_TEXT_DELTA"; payload: { task_id: string; delta: string } }
-  | { type: "STREAM_SUBAGENT_REASONING_DELTA"; payload: { task_id: string; delta: string } }
-  | { type: "STREAM_SUBAGENT_TOOL_CALL_DELTA"; payload: { task_id: string; index: number; name?: string; id?: string; args?: string } }
-  | { type: "STREAM_SUBAGENT_TOOL_START"; payload: { task_id: string; id: string; name: string; input: Record<string, unknown> } }
-  | { type: "STREAM_SUBAGENT_TOOL_RESULT"; payload: { task_id: string; id: string; output: string } }
-  | { type: "STREAM_END"; payload: { messageId: string } }
-  | { type: "STREAM_ERROR"; payload: string }
+  | { type: "STREAM_START"; payload: { messageId: string; conversationId: string } }
+  | { type: "STREAM_TEXT_DELTA"; payload: { conversationId: string; delta: string } }
+  | { type: "STREAM_REASONING_DELTA"; payload: { conversationId: string; delta: string } }
+  | { type: "STREAM_TOOL_CALL_DELTA"; payload: { conversationId: string; index: number; name?: string; id?: string; args?: string } }
+  | { type: "STREAM_TOOL_USE_START"; payload: { conversationId: string; tool: ToolCall } }
+  | { type: "STREAM_TOOL_RESULT"; payload: { conversationId: string; id: string; output: string } }
+  | { type: "STREAM_SUBAGENT_TEXT_DELTA"; payload: { conversationId: string; task_id: string; delta: string } }
+  | { type: "STREAM_SUBAGENT_REASONING_DELTA"; payload: { conversationId: string; task_id: string; delta: string } }
+  | { type: "STREAM_SUBAGENT_TOOL_CALL_DELTA"; payload: { conversationId: string; task_id: string; index: number; name?: string; id?: string; args?: string } }
+  | { type: "STREAM_SUBAGENT_TOOL_START"; payload: { conversationId: string; task_id: string; id: string; name: string; input: Record<string, unknown> } }
+  | { type: "STREAM_SUBAGENT_TOOL_RESULT"; payload: { conversationId: string; task_id: string; id: string; output: string } }
+  | { type: "STREAM_END"; payload: { conversationId: string; messageId: string } }
+  | { type: "STREAM_ERROR"; payload: { conversationId: string; error: string } }
   | { type: "TOGGLE_SIDEBAR" }
   | { type: "SET_SIDEBAR_COLLAPSED"; payload: boolean }
   | { type: "SET_RIGHT_PANEL"; payload: boolean }
@@ -436,6 +435,24 @@ function blocksToContent(blocks: ContentBlock[]): string {
     .join("");
 }
 
+// ── Per-conversation stream update helper ──
+
+function updateStreamBlocks(
+  state: AppState,
+  conversationId: string,
+  updater: (blocks: ContentBlock[]) => ContentBlock[],
+): AppState {
+  const entry = state.streamingByConversation[conversationId];
+  if (!entry) return state;
+  return {
+    ...state,
+    streamingByConversation: {
+      ...state.streamingByConversation,
+      [conversationId]: { ...entry, blocks: updater(entry.blocks) },
+    },
+  };
+}
+
 // ── Reducer ──
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -467,6 +484,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const filtered = state.conversations.filter((c) => c.id !== action.payload);
       const { [action.payload]: _rpDel, ...restPanel } = state.rightPanelByConversation;
       const { [action.payload]: _asDel, ...restAutoShowed } = state.rightPanelAutoShowed;
+      const { [action.payload]: _stDel, ...restStreaming } = state.streamingByConversation;
       return {
         ...state,
         conversations: filtered,
@@ -476,6 +494,7 @@ export function reducer(state: AppState, action: Action): AppState {
             : state.activeConversationId,
         rightPanelByConversation: restPanel,
         rightPanelAutoShowed: restAutoShowed,
+        streamingByConversation: restStreaming,
       };
     }
 
@@ -517,20 +536,21 @@ export function reducer(state: AppState, action: Action): AppState {
       };
 
     case "STREAM_START": {
+      const { conversationId: cid, messageId } = action.payload;
       const placeholder: Message = {
-        id: action.payload.messageId,
+        id: messageId,
         role: "assistant",
         content: "",
         created_at: new Date().toISOString(),
       };
       return {
         ...state,
-        isStreaming: true,
-        streamingBlocks: [],
-        streamingMessageId: action.payload.messageId,
-        streamingConversationId: state.activeConversationId,
+        streamingByConversation: {
+          ...state.streamingByConversation,
+          [cid]: { messageId, blocks: [] },
+        },
         conversations: state.conversations.map((c) =>
-          c.id === state.activeConversationId
+          c.id === cid
             ? { ...c, messages: [...(c.messages ?? []), placeholder] }
             : c
         ),
@@ -538,110 +558,84 @@ export function reducer(state: AppState, action: Action): AppState {
     }
 
     case "STREAM_TEXT_DELTA":
-      return {
-        ...state,
-        streamingBlocks: appendTextDelta(state.streamingBlocks, action.payload),
-      };
+      return updateStreamBlocks(state, action.payload.conversationId, (blocks) =>
+        appendTextDelta(blocks, action.payload.delta),
+      );
 
     case "STREAM_REASONING_DELTA":
-      return {
-        ...state,
-        streamingBlocks: appendReasoningDelta(state.streamingBlocks, action.payload),
-      };
+      return updateStreamBlocks(state, action.payload.conversationId, (blocks) =>
+        appendReasoningDelta(blocks, action.payload.delta),
+      );
 
     case "STREAM_TOOL_CALL_DELTA":
-      return {
-        ...state,
-        streamingBlocks: appendToolCallDelta(state.streamingBlocks, action.payload),
-      };
+      return updateStreamBlocks(state, action.payload.conversationId, (blocks) =>
+        appendToolCallDelta(blocks, action.payload),
+      );
 
     case "STREAM_TOOL_USE_START":
-      return {
-        ...state,
-        streamingBlocks: appendToolStart(state.streamingBlocks, action.payload),
-      };
+      return updateStreamBlocks(state, action.payload.conversationId, (blocks) =>
+        appendToolStart(blocks, action.payload.tool),
+      );
 
     case "STREAM_TOOL_RESULT":
-      return {
-        ...state,
-        streamingBlocks: updateToolResult(
-          state.streamingBlocks,
-          action.payload.id,
-          action.payload.output,
-        ),
-      };
+      return updateStreamBlocks(state, action.payload.conversationId, (blocks) =>
+        updateToolResult(blocks, action.payload.id, action.payload.output),
+      );
 
     case "STREAM_SUBAGENT_TEXT_DELTA":
-      return {
-        ...state,
-        streamingBlocks: findAndUpdateSubagent(
-          state.streamingBlocks,
-          action.payload.task_id,
-          (inner) => subAppendText(inner, action.payload.delta),
+      return updateStreamBlocks(state, action.payload.conversationId, (blocks) =>
+        findAndUpdateSubagent(blocks, action.payload.task_id, (inner) =>
+          subAppendText(inner, action.payload.delta),
         ),
-      };
+      );
 
     case "STREAM_SUBAGENT_REASONING_DELTA":
-      return {
-        ...state,
-        streamingBlocks: findAndUpdateSubagent(
-          state.streamingBlocks,
-          action.payload.task_id,
-          (inner) => subAppendReasoning(inner, action.payload.delta),
+      return updateStreamBlocks(state, action.payload.conversationId, (blocks) =>
+        findAndUpdateSubagent(blocks, action.payload.task_id, (inner) =>
+          subAppendReasoning(inner, action.payload.delta),
         ),
-      };
+      );
 
     case "STREAM_SUBAGENT_TOOL_CALL_DELTA":
-      return {
-        ...state,
-        streamingBlocks: findAndUpdateSubagent(
-          state.streamingBlocks,
-          action.payload.task_id,
-          (inner) => subAppendToolCallDelta(inner, action.payload),
+      return updateStreamBlocks(state, action.payload.conversationId, (blocks) =>
+        findAndUpdateSubagent(blocks, action.payload.task_id, (inner) =>
+          subAppendToolCallDelta(inner, action.payload),
         ),
-      };
+      );
 
     case "STREAM_SUBAGENT_TOOL_START":
-      return {
-        ...state,
-        streamingBlocks: findAndUpdateSubagent(
-          state.streamingBlocks,
-          action.payload.task_id,
-          (inner) =>
-            subAppendTool(inner, {
-              id: action.payload.id,
-              name: action.payload.name,
-              input: action.payload.input,
-            }),
+      return updateStreamBlocks(state, action.payload.conversationId, (blocks) =>
+        findAndUpdateSubagent(blocks, action.payload.task_id, (inner) =>
+          subAppendTool(inner, {
+            id: action.payload.id,
+            name: action.payload.name,
+            input: action.payload.input,
+          }),
         ),
-      };
+      );
 
     case "STREAM_SUBAGENT_TOOL_RESULT":
-      return {
-        ...state,
-        streamingBlocks: findAndUpdateSubagent(
-          state.streamingBlocks,
-          action.payload.task_id,
-          (inner) => subUpdateToolResult(inner, action.payload.id, action.payload.output),
+      return updateStreamBlocks(state, action.payload.conversationId, (blocks) =>
+        findAndUpdateSubagent(blocks, action.payload.task_id, (inner) =>
+          subUpdateToolResult(inner, action.payload.id, action.payload.output),
         ),
-      };
+      );
 
     case "STREAM_END": {
-      const finalBlocks = finalizeThinking(state.streamingBlocks);
+      const { conversationId: endCid, messageId: endMsgId } = action.payload;
+      const entry = state.streamingByConversation[endCid];
+      const finalBlocks = entry ? finalizeThinking(entry.blocks) : [];
       const finalContent = blocksToContent(finalBlocks);
-      const streamConvId = state.streamingConversationId;
+      const { [endCid]: _, ...restStreaming } = state.streamingByConversation;
       return {
         ...state,
-        isStreaming: false,
-        streamingBlocks: [],
-        streamingMessageId: null,
-        streamingConversationId: null,
+        streamingByConversation: restStreaming,
         conversations: state.conversations.map((c) =>
-          c.id === streamConvId
+          c.id === endCid
             ? {
                 ...c,
                 messages: (c.messages ?? []).map((m) =>
-                  m.id === action.payload.messageId
+                  m.id === endMsgId
                     ? { ...m, content: finalContent, blocks: finalBlocks.length > 0 ? finalBlocks : undefined }
                     : m
                 ),
@@ -652,16 +646,35 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     }
 
-    case "STREAM_ERROR":
+    case "STREAM_ERROR": {
+      const { conversationId: errCid, error } = action.payload;
+      // Append error to the conversation's streaming blocks, then remove from map
+      const errEntry = state.streamingByConversation[errCid];
+      const errorBlocks = errEntry
+        ? appendTextDelta(errEntry.blocks, `\n\n**Error:** ${error}`)
+        : [];
+      const errFinalContent = blocksToContent(errorBlocks);
+      const { [errCid]: __, ...restStreamingErr } = state.streamingByConversation;
       return {
         ...state,
-        isStreaming: false,
-        streamingConversationId: null,
-        streamingBlocks: appendTextDelta(
-          state.streamingBlocks,
-          `\n\n**Error:** ${action.payload}`,
-        ),
+        streamingByConversation: restStreamingErr,
+        // Persist the error blocks into the message so user can see them
+        conversations: errEntry
+          ? state.conversations.map((c) =>
+              c.id === errCid
+                ? {
+                    ...c,
+                    messages: (c.messages ?? []).map((m) =>
+                      m.id === errEntry.messageId
+                        ? { ...m, content: errFinalContent, blocks: errorBlocks.length > 0 ? errorBlocks : undefined }
+                        : m
+                    ),
+                  }
+                : c
+            )
+          : state.conversations,
       };
+    }
 
     case "TOGGLE_SIDEBAR":
       return { ...state, sidebarCollapsed: !state.sidebarCollapsed };

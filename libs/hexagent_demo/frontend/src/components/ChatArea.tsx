@@ -21,18 +21,19 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
   const [editingTitle, setEditingTitle] = useState(false);
   const chatAreaRef = useRef<HTMLDivElement>(null);
 
+  const streamingEntry = conversation?.id
+    ? state.streamingByConversation[conversation.id]
+    : undefined;
+  const thisConvStreaming = !!streamingEntry;
   const hasMessages = !!conversation && (
     (conversation.messages && conversation.messages.length > 0) ||
-    state.isStreaming
+    thisConvStreaming
   );
 
   // Only consider streaming blocks that belong to this conversation (stable ref when not streaming)
   const activeStreamingBlocks = useMemo(
-    () =>
-      state.isStreaming && state.streamingConversationId === conversation?.id
-        ? state.streamingBlocks
-        : EMPTY_BLOCKS,
-    [state.isStreaming, state.streamingConversationId, conversation?.id, state.streamingBlocks],
+    () => streamingEntry?.blocks ?? EMPTY_BLOCKS,
+    [streamingEntry?.blocks],
   );
 
   // Check if conversation has any PresentToUser or TodoWrite tool calls
