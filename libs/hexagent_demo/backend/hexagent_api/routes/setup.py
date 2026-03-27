@@ -1419,11 +1419,13 @@ class _ProvisionManager(_ProcessManager):
         if sys.platform == "win32":
             instance_status = await _wsl_instance_status()
             shell = lambda cmd: _wsl_shell(cmd, user="root")
+            if not _wsl_distro_ready_for_cowork(instance_status):
+                return {"provisioned": False, "steps_done": [], "total_steps": len(_PROVISION_STEPS)}
         else:
             instance_status = await _lima_instance_status()
             shell = _lima_shell
-        if instance_status != "Running":
-            return {"provisioned": False, "steps_done": [], "total_steps": len(_PROVISION_STEPS)}
+            if instance_status != "Running":
+                return {"provisioned": False, "steps_done": [], "total_steps": len(_PROVISION_STEPS)}
 
         rc, stdout, _ = await shell(f"ls {_SETUP_MARKER_DIR}/*.done 2>/dev/null || true")
         if rc != 0 or not stdout.strip():

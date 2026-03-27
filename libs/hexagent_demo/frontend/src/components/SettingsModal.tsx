@@ -1687,6 +1687,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
 
   const {
     vmStatus,
+    autoBootstrapping,
     phase1,
     phase1Msg,
     phase1Error,
@@ -1733,9 +1734,9 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
     }
   };
 
-  // Cowork mode should follow backend truth from /api/setup/vm (vm_ready).
-  // Keep phase fallback only when status payload is unavailable.
-  const vmUsable = vmStatus?.vm_ready ?? (phase1 === "done" && phase2 === "done");
+  // Cowork mode should prefer backend truth from /api/setup/vm (vm_ready),
+  // but keep UI-consistent fallback when phase1+phase2 are already done.
+  const vmUsable = (vmStatus?.vm_ready === true) || (phase1 === "done" && phase2 === "done");
   const allDone = vmUsable && phase3 === "done";
   const anyRunning = phase1 === "running" || phase2 === "running" || phase3 === "running";
   const coreError = phase1 === "error" || phase2 === "error";
@@ -1838,9 +1839,13 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
                   {phase1 === "done" && <span className="vm-phase-badge vm-phase-badge--done">Installed</span>}
                   {phase1 === "running" && phase1Msg && <span className="vm-phase-msg">{phase1Msg}</span>}
                   {phase1 === "pending" && (
-                    <button className="vm-phase-action" type="button" onClick={vm.installLima}>
-                      {vmBackend === "wsl" ? "Install runtime" : "Install"}
-                    </button>
+                    autoBootstrapping ? (
+                      <span className="vm-phase-msg">Auto installing...</span>
+                    ) : (
+                      <button className="vm-phase-action" type="button" onClick={vm.installLima}>
+                        {vmBackend === "wsl" ? "Install runtime" : "Install"}
+                      </button>
+                    )
                   )}
                   {phase1 === "error" && (
                     phase1NeedsRestart ? (
@@ -1890,7 +1895,11 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
                   {phase2 === "done" && <span className="vm-phase-badge vm-phase-badge--done">Ready</span>}
                   {phase2 === "running" && phase2Msg && <span className="vm-phase-msg">{phase2Msg}</span>}
                   {phase2 === "pending" && phase1 === "done" && (
-                    <button className="vm-phase-action" type="button" onClick={vm.buildVMInstance}>Install</button>
+                    autoBootstrapping ? (
+                      <span className="vm-phase-msg">Auto installing...</span>
+                    ) : (
+                      <button className="vm-phase-action" type="button" onClick={vm.buildVMInstance}>Install</button>
+                    )
                   )}
                   {phase2 === "error" && (
                     <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.buildVMInstance}>Retry</button>

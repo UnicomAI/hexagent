@@ -50,6 +50,7 @@ export type PhaseStatus = "checking" | "pending" | "running" | "done" | "error";
 
 export interface VMSetupContextValue {
   vmStatus: VMStatus | null;
+  autoBootstrapping: boolean;
 
   phase1: PhaseStatus;
   phase1Msg: string;
@@ -108,6 +109,7 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
   const [provStepMsg, setProvStepMsg] = useState<Record<string, string>>({});
   const [provLog, setProvLog] = useState<string | null>(null);
   const autoBootstrapTriggeredRef = useRef(false);
+  const [autoBootstrapping, setAutoBootstrapping] = useState(false);
 
   // SSE abort controllers (kept alive across renders, never aborted on unmount)
   const installCtrl = useRef<AbortController | null>(null);
@@ -527,6 +529,7 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
 
     if (phase1 === "pending") {
       autoBootstrapTriggeredRef.current = true;
+      setAutoBootstrapping(true);
       notify("Detected first-time Windows setup. Starting VM runtime install automatically...", "info");
       void doInstallLima();
       return;
@@ -534,13 +537,22 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
 
     if (phase1 === "done" && phase2 === "pending") {
       autoBootstrapTriggeredRef.current = true;
+      setAutoBootstrapping(true);
       notify("Runtime is ready. Starting VM instance setup automatically...", "info");
       attachBuild();
     }
   }, [vmStatus, phase1, phase2]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!autoBootstrapping) return;
+    if (phase2 === "done" || phase1 === "error" || phase2 === "error") {
+      setAutoBootstrapping(false);
+    }
+  }, [autoBootstrapping, phase1, phase2]);
+
   const value: VMSetupContextValue = {
     vmStatus,
+    autoBootstrapping,
     phase1, phase1Msg, phase1Error,
     phase2, phase2Msg, phase2Error,
     phase3, phase3Error,

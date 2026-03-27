@@ -152,7 +152,7 @@ class AgentManager:
             import shutil
 
             if sys.platform == "win32":
-                from openagent.computer.local._wsl import _resolve_wsl_exe
+                from hexagent.computer.local._wsl import _resolve_wsl_exe
 
                 vm_backend_ready = _resolve_wsl_exe() is not None
             else:
@@ -469,7 +469,7 @@ class AgentManager:
         import shutil
 
         if sys.platform == "win32":
-            from openagent.computer.local._wsl import _resolve_wsl_exe
+            from hexagent.computer.local._wsl import _resolve_wsl_exe
 
             vm_backend_available = _resolve_wsl_exe() is not None
         else:

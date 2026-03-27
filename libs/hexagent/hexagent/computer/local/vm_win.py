@@ -336,7 +336,7 @@ class LocalVM:
                 for r in resolved_new:
                     probe = await self._vm.shell(f"findmnt -n {shlex.quote(r.guest_path)}")
                     if probe.exit_code != 0:
-                        from openagent.computer.local._wsl import _session_user_from_guest_mount_path, _win_path_to_wsl
+                        from hexagent.computer.local._wsl import _session_user_from_guest_mount_path, _win_path_to_wsl
 
                         wsl_host = _win_path_to_wsl(r.host_path)
                         qguest = shlex.quote(r.guest_path)
