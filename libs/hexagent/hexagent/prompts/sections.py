@@ -47,23 +47,6 @@ def tone_and_style(ctx: AgentContext) -> str | None:
     return substitute(load("system_prompt_tone_and_style"), **ctx.tool_name_vars)
 
 
-def environment(ctx: AgentContext) -> str | None:
-    """Environment description."""
-    if ctx.environment is None:
-        return None
-    env = ctx.environment
-    return substitute(
-        load("system_prompt_environment"),
-        WORKING_DIR=env.working_dir,
-        IS_GIT_REPO=str(env.is_git_repo).lower(),
-        PLATFORM=env.platform,
-        SHELL=env.shell,
-        OS_VERSION=env.os_version,
-        TODAY_DATE=env.today_date.strftime("%a %b %d, %Y"),
-        MODEL_NAME=ctx.model_name,
-    )
-
-
 def _mnt_dirs(working_dir: str) -> tuple[str, str]:
     """Derive mnt output/upload paths from working_dir.
 

@@ -3,10 +3,8 @@
 # ruff: noqa: S604, S108, PLR2004, RUF005
 
 from datetime import UTC, date, datetime
-from unittest.mock import MagicMock
 
 from hexagent.harness.definition import AgentDefinition
-from hexagent.harness.model import ModelProfile
 from hexagent.mcp import McpClient
 from hexagent.prompts import FRESH_SESSION, RESUMED_SESSION, SUBAGENT_SESSION, compose
 from hexagent.prompts.sections import (
@@ -14,7 +12,6 @@ from hexagent.prompts.sections import (
     agency,
     computer_use,
     doing_tasks,
-    environment,
     executing_actions_with_care,
     identity,
     mcps,
@@ -170,33 +167,6 @@ class TestMcps:
         assert result is not None
         assert "# MCP Servers" in result
         assert "**github**" in result
-
-
-class TestEnvironment:
-    def test_returns_none_when_empty(self) -> None:
-        assert environment(AgentContext(model=STUB_PROFILE)) is None
-
-    def test_loads_md_and_substitutes_vars(self) -> None:
-        env = EnvironmentContext(
-            working_dir="/home/user",
-            is_git_repo=True,
-            platform="linux",
-            shell="bash",
-            os_version="Ubuntu 22.04",
-            today_date=datetime(2026, 2, 14, 10, 30, 0, tzinfo=UTC),
-        )
-        mock_model = MagicMock()
-        mock_model.model_name = "gpt-5.2"
-        profile = ModelProfile(model=mock_model, compaction_threshold=100_000)
-        ctx = AgentContext(model=profile, environment=env)
-        result = environment(ctx)
-        assert result is not None
-        assert "Environment" in result
-        assert "/home/user" in result
-        assert "linux" in result
-        assert "gpt-5.2" in result
-        assert "true" in result
-        assert "Sat Feb 14, 2026" in result
 
 
 class TestMntDirs:
