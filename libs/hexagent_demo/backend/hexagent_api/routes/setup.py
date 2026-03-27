@@ -266,7 +266,8 @@ def _probe_wsl2_readiness() -> tuple[bool, str | None]:
             timeout=8,
         )
     except Exception as exc:  # pragma: no cover - defensive
-        return False, str(exc)
+        logger.warning("WSL readiness probe failed", exc_info=exc)
+        return False, "Failed to probe WSL runtime"
 
     combined = _combine_wsl_output(proc.stdout, proc.stderr).strip()
     reason = _wsl2_blocker_reason(combined)
@@ -456,7 +457,8 @@ def _wsl_status() -> dict[str, object]:
                 timeout=8,
             )
         except Exception as exc:  # pragma: no cover - defensive
-            last_err = str(exc)
+            logger.warning("WSL status probe failed for args=%s", args, exc_info=exc)
+            last_err = "Failed to probe WSL runtime"
             continue
 
         if proc.returncode == 0:
@@ -592,9 +594,9 @@ async def _install_lima_stream():
         _ensure_managed_lima_on_path()
         yield sse("done", {"message": f"Lima v{version} installed successfully", "path": str(_lima_bin())})
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Lima installation failed")
-        yield sse("error", {"message": str(exc)})
+        yield sse("error", {"message": "Lima installation failed. Check server logs for details."})
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
