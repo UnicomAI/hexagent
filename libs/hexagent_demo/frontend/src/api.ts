@@ -111,10 +111,10 @@ export async function deleteConversation(id: string): Promise<void> {
 
 export interface StreamCallbacks {
   onMessageStart: (id: string) => void;
-  onTextDelta: (delta: string) => void;
-  onReasoningDelta: (delta: string) => void;
-  onToolCallDelta: (data: { index: number; name?: string; id?: string; args?: string }) => void;
-  onToolUseStart: (tool: { id: string; name: string; input: Record<string, unknown> }) => void;
+  onTextDelta: (delta: string, ts?: number) => void;
+  onReasoningDelta: (delta: string, ts?: number) => void;
+  onToolCallDelta: (data: { index: number; name?: string; id?: string; args?: string; ts?: number }) => void;
+  onToolUseStart: (tool: { id: string; name: string; input: Record<string, unknown>; ts?: number }) => void;
   onToolResult: (result: { id: string; output: string }) => void;
   onSubagentTextDelta: (data: { task_id: string; delta: string }) => void;
   onSubagentReasoningDelta: (data: { task_id: string; delta: string }) => void;
@@ -125,9 +125,14 @@ export interface StreamCallbacks {
   onError: (error: string) => void;
 }
 
-/** Read an SSE response body and dispatch events to callbacks. */
-async function _readSSEStream(response: Response, callbacks: StreamCallbacks): Promise<void> {
-  const reader = response.body!.getReader();
+/**
+ * Parse an SSE stream and dispatch events to callbacks.
+ * Shared by sendMessage() and subscribeToStream().
+ */
+async function _parseSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  callbacks: StreamCallbacks,
+): Promise<void> {
   const decoder = new TextDecoder();
   let buffer = "";
   let currentEvent = "";
@@ -151,10 +156,10 @@ async function _readSSEStream(response: Response, callbacks: StreamCallbacks): P
               callbacks.onMessageStart(data.id);
               break;
             case "text_delta":
-              callbacks.onTextDelta(data.delta);
+              callbacks.onTextDelta(data.delta, data.ts);
               break;
             case "reasoning_delta":
-              callbacks.onReasoningDelta(data.delta);
+              callbacks.onReasoningDelta(data.delta, data.ts);
               break;
             case "tool_call_delta":
               callbacks.onToolCallDelta(data);
@@ -221,7 +226,7 @@ export function sendMessage(
         callbacks.onError(detail?.detail || `HTTP ${response.status}: ${response.statusText}`);
         return;
       }
-      await _readSSEStream(response, callbacks);
+      await _parseSSEStream(response.body!.getReader(), callbacks);
     })
     .catch((err: Error) => {
       if (err.name !== "AbortError") {
@@ -233,22 +238,22 @@ export function sendMessage(
 }
 
 /**
- * Reconnect to an active background stream for a conversation.
- * Returns null if no active stream exists (HTTP 204).
+ * Subscribe to an active (or recently finished) event stream for a conversation.
+ * Used to reconnect after page refresh.
  */
-export function subscribeStream(
+export function subscribeToStream(
   conversationId: string,
   callbacks: StreamCallbacks,
+  lastEventId: number = 0,
 ): AbortController {
   const controller = new AbortController();
 
-  fetch(`${API_BASE}/api/chat/${conversationId}/stream`, {
+  fetch(`${API_BASE}/api/chat/${conversationId}/stream?last_event_id=${lastEventId}`, {
     signal: controller.signal,
   })
     .then(async (response) => {
-      if (response.status === 204) return; // No active stream
-      if (!response.ok) return;
-      await _readSSEStream(response, callbacks);
+      if (response.status === 204 || !response.ok) return; // no active stream
+      await _parseSSEStream(response.body!.getReader(), callbacks);
     })
     .catch((err: Error) => {
       if (err.name !== "AbortError") {

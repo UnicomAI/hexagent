@@ -87,10 +87,10 @@ export type Action =
   | { type: "REQUEST_END" }
   | { type: "ADD_USER_MESSAGE"; payload: { conversationId: string; message: Message } }
   | { type: "STREAM_START"; payload: { messageId: string; conversationId: string } }
-  | { type: "STREAM_TEXT_DELTA"; payload: { conversationId: string; delta: string } }
-  | { type: "STREAM_REASONING_DELTA"; payload: { conversationId: string; delta: string } }
-  | { type: "STREAM_TOOL_CALL_DELTA"; payload: { conversationId: string; index: number; name?: string; id?: string; args?: string } }
-  | { type: "STREAM_TOOL_USE_START"; payload: { conversationId: string; tool: ToolCall } }
+  | { type: "STREAM_TEXT_DELTA"; payload: { conversationId: string; delta: string; ts?: number } }
+  | { type: "STREAM_REASONING_DELTA"; payload: { conversationId: string; delta: string; ts?: number } }
+  | { type: "STREAM_TOOL_CALL_DELTA"; payload: { conversationId: string; index: number; name?: string; id?: string; args?: string; ts?: number } }
+  | { type: "STREAM_TOOL_USE_START"; payload: { conversationId: string; tool: ToolCall & { ts?: number } } }
   | { type: "STREAM_TOOL_RESULT"; payload: { conversationId: string; id: string; output: string } }
   | { type: "STREAM_SUBAGENT_TEXT_DELTA"; payload: { conversationId: string; task_id: string; delta: string } }
   | { type: "STREAM_SUBAGENT_REASONING_DELTA"; payload: { conversationId: string; task_id: string; delta: string } }
@@ -131,8 +131,8 @@ function finalizeStreamingTool(blocks: ContentBlock[]): ContentBlock[] {
   return blocks;
 }
 
-function appendTextDelta(blocks: ContentBlock[], delta: string): ContentBlock[] {
-  const finalized = finalizeStreamingTool(finalizeThinking(blocks));
+function appendTextDelta(blocks: ContentBlock[], delta: string, ts?: number): ContentBlock[] {
+  const finalized = finalizeStreamingTool(finalizeThinking(blocks, ts));
   const last = finalized[finalized.length - 1];
   if (last && last.type === "text") {
     return [...finalized.slice(0, -1), { type: "text", text: last.text + delta }];
@@ -140,22 +140,22 @@ function appendTextDelta(blocks: ContentBlock[], delta: string): ContentBlock[] 
   return [...finalized, { type: "text", text: delta }];
 }
 
-function appendReasoningDelta(blocks: ContentBlock[], delta: string): ContentBlock[] {
+function appendReasoningDelta(blocks: ContentBlock[], delta: string, ts?: number): ContentBlock[] {
   const finalized = finalizeStreamingTool(blocks);
   const last = finalized[finalized.length - 1];
   if (last && last.type === "thinking") {
     return [...finalized.slice(0, -1), { ...last, text: last.text + delta }];
   }
-  return [...finalized, { type: "thinking", text: delta, startedAt: Date.now() }];
+  return [...finalized, { type: "thinking", text: delta, startedAt: ts ?? Date.now() }];
 }
 
 /** Mark the last thinking block as ended (if it has no endedAt yet). */
-function finalizeThinking(blocks: ContentBlock[]): ContentBlock[] {
+function finalizeThinking(blocks: ContentBlock[], ts?: number): ContentBlock[] {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i];
     if (b.type === "thinking" && !b.endedAt) {
       const updated = [...blocks];
-      updated[i] = { ...b, endedAt: Date.now() };
+      updated[i] = { ...b, endedAt: ts ?? Date.now() };
       return updated;
     }
     // Only finalize the most recent thinking block — stop searching once we hit a non-thinking block
@@ -166,9 +166,9 @@ function finalizeThinking(blocks: ContentBlock[]): ContentBlock[] {
 
 function appendToolCallDelta(
   blocks: ContentBlock[],
-  delta: { index: number; name?: string; id?: string; args?: string },
+  delta: { index: number; name?: string; id?: string; args?: string; ts?: number },
 ): ContentBlock[] {
-  blocks = finalizeThinking(blocks);
+  blocks = finalizeThinking(blocks, delta.ts);
   const last = blocks[blocks.length - 1];
   // Append to existing streaming block only if same index
   if (last && last.type === "tool_call" && last.tool.streaming && last.tool.streamIndex === delta.index) {
@@ -238,8 +238,8 @@ function subAppendToolCallDelta(
   ];
 }
 
-function appendToolStart(blocks: ContentBlock[], tool: ToolCall): ContentBlock[] {
-  blocks = finalizeThinking(blocks);
+function appendToolStart(blocks: ContentBlock[], tool: ToolCall & { ts?: number }): ContentBlock[] {
+  blocks = finalizeThinking(blocks, tool.ts);
   blocks = finalizeStreamingTool(blocks);
 
   // Find existing block: match by id first, then by name (first incomplete one)
@@ -557,6 +557,10 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case "STREAM_START": {
       const { conversationId: cid, messageId } = action.payload;
+      // Check if a message with this ID already exists (reconnect replay).
+      // If so, just re-create the streaming entry without adding a duplicate.
+      const conv = state.conversations.find((c) => c.id === cid);
+      const alreadyExists = conv?.messages?.some((m) => m.id === messageId) ?? false;
       const placeholder: Message = {
         id: messageId,
         role: "assistant",
@@ -570,22 +574,24 @@ export function reducer(state: AppState, action: Action): AppState {
           ...state.streamingByConversation,
           [cid]: { messageId, blocks: [] },
         },
-        conversations: state.conversations.map((c) =>
-          c.id === cid
-            ? { ...c, messages: [...(c.messages ?? []), placeholder] }
-            : c
-        ),
+        conversations: alreadyExists
+          ? state.conversations
+          : state.conversations.map((c) =>
+              c.id === cid
+                ? { ...c, messages: [...(c.messages ?? []), placeholder] }
+                : c
+            ),
       };
     }
 
     case "STREAM_TEXT_DELTA":
       return updateStreamBlocks(state, action.payload.conversationId, (blocks) =>
-        appendTextDelta(blocks, action.payload.delta),
+        appendTextDelta(blocks, action.payload.delta, action.payload.ts),
       );
 
     case "STREAM_REASONING_DELTA":
       return updateStreamBlocks(state, action.payload.conversationId, (blocks) =>
-        appendReasoningDelta(blocks, action.payload.delta),
+        appendReasoningDelta(blocks, action.payload.delta, action.payload.ts),
       );
 
     case "STREAM_TOOL_CALL_DELTA":

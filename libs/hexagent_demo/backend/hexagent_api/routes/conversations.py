@@ -70,16 +70,22 @@ async def browse_folder() -> dict:
     raise HTTPException(status_code=501, detail=f"Folder picker not supported on {sys.platform}")
 
 
+def _enrich_with_stream_status(d: dict, conversation_id: str) -> dict:
+    """Add streaming metadata to a conversation dict."""
+    stream = stream_manager.get_stream(conversation_id)
+    if stream is not None and stream.status == "streaming":
+        d["streaming"] = True
+        d["stream_msg_id"] = stream.msg_id
+        d["stream_event_count"] = len(stream.events)
+    else:
+        d["streaming"] = False
+    return d
+
+
 @router.get("/api/conversations")
 async def list_conversations() -> list[dict]:
     """List all conversations sorted by updated_at descending."""
-    result = []
-    for c in store.list_all():
-        d = c.to_detail()
-        if stream_manager.is_streaming(c.id):
-            d["streaming"] = True
-        result.append(d)
-    return result
+    return [_enrich_with_stream_status(c.to_detail(), c.id) for c in store.list_all()]
 
 
 @router.post("/api/conversations", status_code=201)
@@ -128,10 +134,7 @@ async def get_conversation(conversation_id: str) -> dict:
     conv = store.get(conversation_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    d = conv.to_detail()
-    if stream_manager.is_streaming(conversation_id):
-        d["streaming"] = True
-    return d
+    return _enrich_with_stream_status(conv.to_detail(), conversation_id)
 
 
 @router.delete("/api/conversations/{conversation_id}", status_code=204)
