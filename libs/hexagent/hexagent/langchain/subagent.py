@@ -271,6 +271,7 @@ class LangChainSubagentRunner:
         except (asyncio.CancelledError, Exception):
             if full_text and self._checkpointer:
                 from langchain_core.messages import AIMessage
+
                 await graph.aupdate_state(config, {"messages": [AIMessage(content=full_text)]})
             raise
 
