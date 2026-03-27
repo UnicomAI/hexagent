@@ -307,7 +307,7 @@ function App() {
 
       abortMapRef.current.set(conversationId, controller);
     },
-    [dispatch, state.conversations, state.selectedModelId, state.isStreaming]
+    [dispatch, state.conversations, state.selectedModelId]
   );
 
   const handleNewConversation = useCallback(() => {
