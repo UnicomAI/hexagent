@@ -21,9 +21,10 @@ import json
 import logging
 import os
 from typing import Any
-
 from collections.abc import AsyncIterator
 
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from hexagent_api.paths import data_dir
 logger = logging.getLogger(__name__)
 
 
@@ -48,6 +49,30 @@ class AgentManager:
         self._agent_locks: dict[tuple[str, str], asyncio.Lock] = {}
         # session_name -> (working_dir_source, mount_target)
         self._session_working_dirs: dict[str, tuple[str, str]] = {}
+        # LangGraph checkpointer for HITL and interrupts
+        self._checkpointer: AsyncSqliteSaver | None = None
+        # Track active stream tasks: conversation_id -> Task
+        self._active_tasks: dict[str, asyncio.Task[None]] = {}
+
+    async def _ensure_checkpointer(self) -> AsyncSqliteSaver:
+        """Ensure the LangGraph checkpointer is initialized."""
+        if self._checkpointer is not None:
+            return self._checkpointer
+
+        async with self._setup_lock:
+            if self._checkpointer is not None:
+                return self._checkpointer
+
+            db_path = data_dir() / "checkpoints.db"
+            logger.info("Initializing LangGraph AsyncSqliteSaver at %s", db_path)
+            # Use a single shared AsyncSqliteSaver for all agents
+            self._checkpointer = AsyncSqliteSaver.from_conn_string(str(db_path))
+            # We don't need to await setup() here, AsyncSqliteSaver handles it
+            # on first use if created via from_conn_string, or we can do it explicitly.
+            # But wait, LangGraph docs suggest it should be used as a context manager.
+            # However, for a long-lived app, we can just start it.
+            await self._checkpointer.setup()
+            return self._checkpointer
 
     def conversation_lock(self, conversation_id: str) -> asyncio.Lock:
         """Per-conversation lock to serialise prepare/send/mount operations."""
@@ -315,6 +340,7 @@ class AgentManager:
             else:
                 output_dir = f"/sessions/{session_key}/{SESSION_OUTPUTS_DIR}"
 
+            checkpointer = await self._ensure_checkpointer()
             agent = await create_agent(
                 model=main_model,
                 computer=computer,
@@ -325,6 +351,7 @@ class AgentManager:
                 fetch_provider=fetch,
                 skill_paths=skill_paths,
                 extra_tools=[PresentToUserTool(computer=computer, output_dir=output_dir)],
+                checkpointer=checkpointer,
             )
             self._agents[cache_key] = agent
             logger.info("create_agent() returned: %r", agent)
@@ -452,8 +479,33 @@ class AgentManager:
         """
         agent, _ = await self._get_or_create_agent(model_id, mode, session_name)
         config = {"configurable": {"thread_id": conversation_id}, "recursion_limit": 10_000}
-        async for event in agent.astream_events(input_dict, config=config):
-            yield event
+
+        # Create the stream iterator
+        stream = agent.astream_events(input_dict, config=config)
+
+        # Track this stream in a task so it can be cancelled externally
+        task = asyncio.current_task()
+        if task:
+            self._active_tasks[conversation_id] = task
+
+        try:
+            async for event in stream:
+                yield event
+        finally:
+            self._active_tasks.pop(conversation_id, None)
+
+    async def stop_response(self, conversation_id: str) -> bool:
+        """Cancel the running agent stream for the given conversation.
+
+        Returns:
+            True if a task was found and cancelled, False otherwise.
+        """
+        task = self._active_tasks.get(conversation_id)
+        if task and not task.done():
+            task.cancel()
+            logger.info("Cancelled active stream for conversation %s", conversation_id)
+            return True
+        return False
 
     async def stop(self) -> None:
         """Shut down all agents and computers."""
@@ -472,6 +524,17 @@ class AgentManager:
             logger.info("Stopping LocalVM...")
             await self._vm_manager.stop()
             self._vm_manager = None
+
+        if self._checkpointer is not None:
+            logger.info("Closing LangGraph AsyncSqliteSaver...")
+            # AsyncSqliteSaver doesn't have a close() but it is an async context manager.
+            # However, if we didn't use it as one, we can just let it gc,
+            # or if it has an internal connection we should close it.
+            # Looking at langgraph source, it has an `aclose` method in some versions.
+            if hasattr(self._checkpointer, "aclose"):
+                await self._checkpointer.aclose()
+            self._checkpointer = None
+
         self._mcp_servers = None
         logger.info("Shutdown complete.")
 

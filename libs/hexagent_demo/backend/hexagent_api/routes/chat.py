@@ -199,6 +199,13 @@ def _extract_reasoning_from_chunk(chunk: object) -> str:
     return ""
 
 
+@router.post("/api/chat/{conversation_id}/stop")
+async def stop_message(conversation_id: str) -> dict[str, bool]:
+    """Stop the running agent stream for the given conversation."""
+    success = await agent_manager.stop_response(conversation_id)
+    return {"success": success}
+
+
 @router.post("/api/chat/{conversation_id}/message")
 async def send_message(conversation_id: str, body: MessageRequest) -> StreamingResponse:
     """Send a message and stream the agent response as SSE."""
@@ -280,163 +287,184 @@ async def send_message(conversation_id: str, body: MessageRequest) -> StreamingR
             input_dict = {"messages": messages}
 
             async with aclosing(agent_manager.stream_response(input_dict, conversation_id, model_id, mode=mode, session_name=session_name)) as stream:
-              # Wrap the async iterator so we can send SSE keepalive
-              # comments while waiting for long-running tool executions.
-              # Without this, idle connections get killed by proxies
-              # (Vite dev proxy, nginx, etc.) causing "network error" on
-              # the frontend.
-              #
-              # We use asyncio.wait() instead of asyncio.wait_for()
-              # because wait_for cancels the awaitable on timeout, which
-              # would corrupt the underlying async generator state.
-              stream_iter = stream.__aiter__()
-              next_event: asyncio.Task[dict] | None = None  # type: ignore[type-arg]
-              while True:
-                if next_event is None:
-                    next_event = asyncio.ensure_future(stream_iter.__anext__())
-                done, _ = await asyncio.wait(
-                    {next_event}, timeout=_SSE_KEEPALIVE_SECONDS,
-                )
-                if not done:
-                    yield ": keepalive\n\n"
-                    continue
-                next_event = None
-                try:
-                    event = done.pop().result()
-                except StopAsyncIteration:
-                    break
+                # Wrap the async iterator so we can send SSE keepalive
+                # comments while waiting for long-running tool executions.
+                # Without this, idle connections get killed by proxies
+                # (Vite dev proxy, nginx, etc.) causing "network error" on
+                # the frontend.
+                #
+                # We use asyncio.wait() instead of asyncio.wait_for()
+                # because wait_for cancels the awaitable on timeout, which
+                # would corrupt the underlying async generator state.
+                stream_iter = stream.__aiter__()
+                next_event: asyncio.Task[dict] | None = None  # type: ignore[type-arg]
+                while True:
+                    if next_event is None:
+                        next_event = asyncio.ensure_future(stream_iter.__anext__())
+                    done, _ = await asyncio.wait(
+                        {next_event}, timeout=_SSE_KEEPALIVE_SECONDS,
+                    )
+                    if not done:
+                        yield ": keepalive\n\n"
+                        continue
+                    next_event = None
+                    try:
+                        event = done.pop().result()
+                    except StopAsyncIteration:
+                        break
 
-                # Skip internal tool completion events (e.g. web-search summarisation)
-                if INTERNAL_TOOL_TAG in event.get("tags", []):
-                    continue
+                    # Skip internal tool completion events (e.g. web-search summarisation)
+                    if INTERNAL_TOOL_TAG in event.get("tags", []):
+                        continue
 
-                kind = event.get("event")
-                task_id = _get_subagent_task_id(event)
-                is_subagent = task_id is not None
+                    kind = event.get("event")
+                    task_id = _get_subagent_task_id(event)
+                    is_subagent = task_id is not None
 
-                if kind == "on_chat_model_stream":
-                    chunk = event.get("data", {}).get("chunk")
-                    if chunk:
-                        # Reasoning / thinking content
-                        reasoning = _extract_reasoning_from_chunk(chunk)
-                        if reasoning:
-                            if is_subagent:
-                                yield (
-                                    f"event: subagent_reasoning_delta\n"
-                                    f"data: {json.dumps({'task_id': task_id, 'delta': reasoning})}\n\n"
-                                )
-                            else:
-                                if not current_thinking:
-                                    thinking_started_at = time.time() * 1000
-                                current_thinking += reasoning
-                                yield f"event: reasoning_delta\ndata: {json.dumps({'delta': reasoning})}\n\n"
-
-                        # Tool call argument streaming
-                        tool_call_chunks = getattr(chunk, "tool_call_chunks", None)
-                        if tool_call_chunks:
-                            for tcc in tool_call_chunks:
-                                idx = tcc["index"] if isinstance(tcc, dict) else tcc.index
-                                name = tcc.get("name") if isinstance(tcc, dict) else tcc.name
-                                tid = tcc.get("id") if isinstance(tcc, dict) else tcc.id
-                                args = tcc.get("args") if isinstance(tcc, dict) else tcc.args
-                                payload: dict[str, object] = {"index": idx}
-                                if name:
-                                    payload["name"] = name
-                                if tid:
-                                    payload["id"] = tid
-                                if args:
-                                    payload["args"] = args
+                    if kind == "on_chat_model_stream":
+                        chunk = event.get("data", {}).get("chunk")
+                        if chunk:
+                            # Reasoning / thinking content
+                            reasoning = _extract_reasoning_from_chunk(chunk)
+                            if reasoning:
                                 if is_subagent:
-                                    payload["task_id"] = task_id
                                     yield (
-                                        f"event: subagent_tool_call_delta\n"
-                                        f"data: {json.dumps(payload)}\n\n"
+                                        f"event: subagent_reasoning_delta\n"
+                                        f"data: {json.dumps({'task_id': task_id, 'delta': reasoning})}\n\n"
                                     )
                                 else:
-                                    yield f"event: tool_call_delta\ndata: {json.dumps(payload)}\n\n"
+                                    if not current_thinking:
+                                        thinking_started_at = time.time() * 1000
+                                    current_thinking += reasoning
+                                    yield f"event: reasoning_delta\ndata: {json.dumps({'delta': reasoning})}\n\n"
 
-                        # Normal text content
-                        text = _extract_text_from_chunk(chunk)
-                        if text:
-                            if is_subagent:
-                                yield (
-                                    f"event: subagent_text_delta\n"
-                                    f"data: {json.dumps({'task_id': task_id, 'delta': text})}\n\n"
-                                )
-                            else:
-                                # Flush any accumulated thinking before text
-                                if current_thinking:
-                                    ended = time.time() * 1000
-                                    blocks.append({"type": "thinking", "text": current_thinking, "startedAt": thinking_started_at, "endedAt": ended})
-                                    current_thinking = ""
-                                    thinking_started_at = None
-                                full_text += text
-                                # Append to last text block or create new one
-                                if blocks and blocks[-1].get("type") == "text":
-                                    blocks[-1]["text"] = str(blocks[-1]["text"]) + text
+                            # Tool call argument streaming
+                            tool_call_chunks = getattr(chunk, "tool_call_chunks", None)
+                            if tool_call_chunks:
+                                for tcc in tool_call_chunks:
+                                    idx = tcc["index"] if isinstance(tcc, dict) else tcc.index
+                                    name = tcc.get("name") if isinstance(tcc, dict) else tcc.name
+                                    tid = tcc.get("id") if isinstance(tcc, dict) else tcc.id
+                                    args = tcc.get("args") if isinstance(tcc, dict) else tcc.args
+                                    payload: dict[str, object] = {"index": idx}
+                                    if name:
+                                        payload["name"] = name
+                                    if tid:
+                                        payload["id"] = tid
+                                    if args:
+                                        payload["args"] = args
+                                    if is_subagent:
+                                        payload["task_id"] = task_id
+                                        yield (
+                                            f"event: subagent_tool_call_delta\n"
+                                            f"data: {json.dumps(payload)}\n\n"
+                                        )
+                                    else:
+                                        yield f"event: tool_call_delta\ndata: {json.dumps(payload)}\n\n"
+
+                            # Normal text content
+                            text = _extract_text_from_chunk(chunk)
+                            if text:
+                                if is_subagent:
+                                    yield (
+                                        f"event: subagent_text_delta\n"
+                                        f"data: {json.dumps({'task_id': task_id, 'delta': text})}\n\n"
+                                    )
                                 else:
-                                    blocks.append({"type": "text", "text": text})
-                                yield f"event: text_delta\ndata: {json.dumps({'delta': text})}\n\n"
+                                    # Flush any accumulated thinking before text
+                                    if current_thinking:
+                                        ended = time.time() * 1000
+                                        blocks.append({"type": "thinking", "text": current_thinking, "startedAt": thinking_started_at, "endedAt": ended})
+                                        current_thinking = ""
+                                        thinking_started_at = None
+                                    full_text += text
+                                    # Append to last text block or create new one
+                                    if blocks and blocks[-1].get("type") == "text":
+                                        blocks[-1]["text"] = str(blocks[-1]["text"]) + text
+                                    else:
+                                        blocks.append({"type": "text", "text": text})
+                                    yield f"event: text_delta\ndata: {json.dumps({'delta': text})}\n\n"
 
-                elif kind == "on_tool_start":
-                    tool_name = event.get("name", "")
-                    run_id = event.get("run_id", "")
-                    tool_input = event.get("data", {}).get("input", {})
-                    if is_subagent:
-                        yield (
-                            f"event: subagent_tool_start\n"
-                            f"data: {json.dumps({'task_id': task_id, 'id': run_id, 'name': tool_name, 'input': tool_input})}\n\n"
-                        )
-                    else:
-                        # Flush thinking before tool call
-                        if current_thinking:
-                            blocks.append({"type": "thinking", "text": current_thinking})
-                            current_thinking = ""
-                        tool_index[run_id] = len(blocks)
-                        blocks.append({
-                            "type": "tool_call",
-                            "tool": {"id": run_id, "name": tool_name, "input": tool_input},
-                        })
-                        yield (
-                            f"event: tool_use_start\n"
-                            f"data: {json.dumps({'id': run_id, 'name': tool_name, 'input': tool_input})}\n\n"
-                        )
-
-                elif kind == "on_tool_end":
-                    run_id = event.get("run_id", "")
-                    raw_output = event.get("data", {}).get("output", "")
-                    output_content = getattr(raw_output, "content", raw_output)
-                    output_text = _extract_tool_output_text(output_content)
-                    if is_subagent:
-                        yield (
-                            f"event: subagent_tool_result\n"
-                            f"data: {json.dumps({'task_id': task_id, 'id': run_id, 'output': output_text})}\n\n"
-                        )
-                    else:
-                        # Update the tool block with output
-                        idx = tool_index.get(run_id)
-                        resolved_tool_name = ""
-                        if idx is not None and idx < len(blocks):
-                            tool_data = blocks[idx].get("tool")
-                            if isinstance(tool_data, dict):
-                                tool_data["output"] = output_text
-                                resolved_tool_name = tool_data.get("name", "")
-                        yield (
-                            f"event: tool_result\n"
-                            f"data: {json.dumps({'id': run_id, 'output': output_text})}\n\n"
-                        )
-
-                        # Eager pre-conversion: when PresentToUser emits
-                        # .pptx files, start LibreOffice conversion in the
-                        # background so the PDF is cached before the user
-                        # clicks the preview.
-                        if resolved_tool_name == "PresentToUser":
-                            _trigger_preconvert(
-                                conversation_id, output_text,
+                    elif kind == "on_tool_start":
+                        tool_name = event.get("name", "")
+                        run_id = event.get("run_id", "")
+                        tool_input = event.get("data", {}).get("input", {})
+                        if is_subagent:
+                            yield (
+                                f"event: subagent_tool_start\n"
+                                f"data: {json.dumps({'task_id': task_id, 'id': run_id, 'name': tool_name, 'input': tool_input})}\n\n"
+                            )
+                        else:
+                            # Flush thinking before tool call
+                            if current_thinking:
+                                blocks.append({"type": "thinking", "text": current_thinking})
+                                current_thinking = ""
+                            tool_index[run_id] = len(blocks)
+                            blocks.append({
+                                "type": "tool_call",
+                                "tool": {"id": run_id, "name": tool_name, "input": tool_input},
+                            })
+                            yield (
+                                f"event: tool_use_start\n"
+                                f"data: {json.dumps({'id': run_id, 'name': tool_name, 'input': tool_input})}\n\n"
                             )
 
+                    elif kind == "on_tool_end":
+                        run_id = event.get("run_id", "")
+                        raw_output = event.get("data", {}).get("output", "")
+                        output_content = getattr(raw_output, "content", raw_output)
+                        output_text = _extract_tool_output_text(output_content)
+                        if is_subagent:
+                            yield (
+                                f"event: subagent_tool_result\n"
+                                f"data: {json.dumps({'task_id': task_id, 'id': run_id, 'output': output_text})}\n\n"
+                            )
+                        else:
+                            # Update the tool block with output
+                            idx = tool_index.get(run_id)
+                            resolved_tool_name = ""
+                            if idx is not None and idx < len(blocks):
+                                tool_data = blocks[idx].get("tool")
+                                if isinstance(tool_data, dict):
+                                    tool_data["output"] = output_text
+                                    resolved_tool_name = tool_data.get("name", "")
+                            yield (
+                                f"event: tool_result\n"
+                                f"data: {json.dumps({'id': run_id, 'output': output_text})}\n\n"
+                            )
+
+                            # Eager pre-conversion: when PresentToUser emits
+                            # .pptx files, start LibreOffice conversion in the
+                            # background so the PDF is cached before the user
+                            # clicks the preview.
+                            if resolved_tool_name == "PresentToUser":
+                                _trigger_preconvert(
+                                    conversation_id, output_text,
+                                )
+
+        except asyncio.CancelledError:
+            logger.info("Agent stream for conversation %s was cancelled", conversation_id)
+            # Save partial progress to LangGraph checkpoint
+            if full_text:
+                try:
+                    agent, _ = await agent_manager._get_or_create_agent(model_id, mode, session_name)
+                    config = {"configurable": {"thread_id": conversation_id}}
+                    await agent.aupdate_state(config, {"messages": [AIMessage(content=full_text)]})
+                    logger.info("Saved partial AIMessage to checkpoint for %s", conversation_id)
+                except Exception:
+                    logger.exception("Failed to save partial state on cancellation")
+            yield f"event: error\ndata: {json.dumps({'message': 'Interrupted by user'})}\n\n"
         except Exception as exc:
             logger.exception("Error streaming agent response")
+            # Save partial progress to LangGraph checkpoint on error too
+            if full_text:
+                try:
+                    agent, _ = await agent_manager._get_or_create_agent(model_id, mode, session_name)
+                    config = {"configurable": {"thread_id": conversation_id}}
+                    await agent.aupdate_state(config, {"messages": [AIMessage(content=full_text)]})
+                    logger.info("Saved partial AIMessage to checkpoint for %s after error", conversation_id)
+                except Exception:
+                    logger.exception("Failed to save partial state on error")
             detail = f"{type(exc).__name__}: {exc}"
             yield f"event: error\ndata: {json.dumps({'message': detail})}\n\n"
 

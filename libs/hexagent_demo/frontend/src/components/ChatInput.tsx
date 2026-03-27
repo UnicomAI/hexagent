@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Paperclip, ArrowUp, ArrowDown, X, FileText, Loader2, CircleAlert } from "lucide-react";
+import { Paperclip, ArrowUp, ArrowDown, X, FileText, Loader2, CircleAlert, Square } from "lucide-react";
 import { useAppContext } from "../store";
-import { uploadChatFile, deleteChatFile } from "../api";
+import { uploadChatFile, deleteChatFile, stopMessage } from "../api";
 import { useFileDrop } from "../hooks/useFileDrop";
 import ModelPicker from "./ModelPicker";
 import InputSettingsMenu from "./InputSettingsMenu";
@@ -104,6 +104,17 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
       textareaRef.current.style.height = "auto";
     }
   }, [value, doneFiles, anyUploading, state.streamingByConversation, conversationId, onSend, missingE2bKey, flashE2bHint]);
+
+  const handleStop = useCallback(async () => {
+    try {
+      await stopMessage(conversationId);
+    } catch (err) {
+      dispatch({
+        type: "SHOW_NOTIFICATION",
+        payload: { message: `Failed to stop: ${err instanceof Error ? err.message : String(err)}`, type: "error" },
+      });
+    }
+  }, [conversationId, dispatch]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -296,14 +307,24 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
             <div className="input-toolbar-right">
               <ModelPicker dropUp />
               <div className="input-send-wrapper">
-                <button
-                  className="input-send"
-                  onClick={handleSubmit}
-                  disabled={(!value.trim() && doneFiles.length === 0) || !!state.streamingByConversation[conversationId] || anyUploading || noModels || missingE2bKey}
-                  title={noModels ? "Configure a model in Settings first" : "Send message"}
-                >
-                  <ArrowUp />
-                </button>
+                {state.streamingByConversation[conversationId] ? (
+                  <button
+                    className="input-stop"
+                    onClick={handleStop}
+                    title="Stop generation"
+                  >
+                    <Square size={18} fill="currentColor" />
+                  </button>
+                ) : (
+                  <button
+                    className="input-send"
+                    onClick={handleSubmit}
+                    disabled={(!value.trim() && doneFiles.length === 0) || anyUploading || noModels || missingE2bKey}
+                    title={noModels ? "Configure a model in Settings first" : "Send message"}
+                  >
+                    <ArrowUp />
+                  </button>
+                )}
                 {missingE2bKey && (
                   <div className={`e2b-hint${value.trim() || e2bHintFlash ? " e2b-hint-visible" : ""}`}>
                     E2B API key required —{" "}

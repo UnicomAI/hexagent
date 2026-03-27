@@ -88,6 +88,7 @@ class LangChainSubagentRunner:
         environment: EnvironmentContext,
         permission_gate: PermissionGate,
         approval_callback: ApprovalCallback | None = None,
+        checkpointer: Checkpointer | None = None,
     ) -> None:
         """Initialize the runner with all dependencies.
 
@@ -103,6 +104,7 @@ class LangChainSubagentRunner:
             environment: Current environment snapshot.
             permission_gate: Permission checking.
             approval_callback: Human-in-the-loop callback.
+            checkpointer: Optional checkpointer for subagent persistence.
         """
         self._default_model = default_model
         self._base_tools = list(base_tools)
@@ -115,6 +117,7 @@ class LangChainSubagentRunner:
         self._environment = environment
         self._permission_gate = permission_gate
         self._approval_callback = approval_callback
+        self._checkpointer = checkpointer
 
     def get_definition(self, subagent_type: str) -> AgentDefinition | None:
         """Look up an agent definition by type name."""
@@ -204,7 +207,12 @@ class LangChainSubagentRunner:
         )
 
         # 7. Create graph + run
-        graph = _create_langchain_agent(sub_profile.model, middleware=[middleware], name="HexAgent Subagent")
+        graph = _create_langchain_agent(
+            sub_profile.model,
+            middleware=[middleware],
+            name="HexAgent Subagent",
+            checkpointer=self._checkpointer,
+        )
         graph = graph.with_config({"recursion_limit": 10_000})
 
         input_messages = [*prior_messages, HumanMessage(content=prompt)] if prior_messages else [HumanMessage(content=prompt)]
@@ -214,27 +222,57 @@ class LangChainSubagentRunner:
         from langchain_core.runnables.config import ensure_config
 
         parent_config = ensure_config()
-        parent_config["tags"] = [*parent_config.get("tags", []), f"{SUBAGENT_EVENT_TAG_PREFIX}{task_id}"]
+        parent_thread_id = parent_config.get("configurable", {}).get("thread_id")
+        sub_thread_id = f"{parent_thread_id}:sub:{task_id}" if parent_thread_id and task_id else f"sub:{task_id}"
+
+        config = {
+            **parent_config,
+            "configurable": {
+                **parent_config.get("configurable", {}),
+                "thread_id": sub_thread_id,
+            },
+            "tags": [*parent_config.get("tags", []), f"{SUBAGENT_EVENT_TAG_PREFIX}{task_id}"],
+        }
+
         output_messages: list[Any] = []
         root_run_id: str | None = None
+        full_text = ""
 
-        async for event in graph.astream_events(
-            {"messages": input_messages},
-            config=parent_config,
-            version="v2",
-        ):
-            # The first event is always the subagent graph's own on_chain_start.
-            # Capture its run_id so we can match the corresponding on_chain_end
-            # (parent_ids is NOT reliable here — it includes the parent's run_ids
-            # when nested inside astream_events via ensure_config).
-            if root_run_id is None:
-                root_run_id = event.get("run_id")
+        try:
+            async for event in graph.astream_events(
+                {"messages": input_messages},
+                config=config,
+                version="v2",
+            ):
+                # The first event is always the subagent graph's own on_chain_start.
+                # Capture its run_id so we can match the corresponding on_chain_end
+                # (parent_ids is NOT reliable here — it includes the parent's run_ids
+                # when nested inside astream_events via ensure_config).
+                if root_run_id is None:
+                    root_run_id = event.get("run_id")
 
-            if event["event"] == "on_chain_end" and event.get("run_id") == root_run_id:
-                event_data: dict[str, Any] = dict(event.get("data", {}))
-                graph_output = event_data.get("output")
-                if isinstance(graph_output, dict) and "messages" in graph_output:
-                    output_messages = graph_output["messages"]
+                if event["event"] == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk:
+                        content = getattr(chunk, "content", "")
+                        text = ""
+                        if isinstance(content, str):
+                            text = content
+                        elif isinstance(content, list):
+                            text = "".join(block.get("text", "") if isinstance(block, dict) else "" for block in content)
+                        if text:
+                            full_text += text
+
+                if event["event"] == "on_chain_end" and event.get("run_id") == root_run_id:
+                    event_data: dict[str, Any] = dict(event.get("data", {}))
+                    graph_output = event_data.get("output")
+                    if isinstance(graph_output, dict) and "messages" in graph_output:
+                        output_messages = graph_output["messages"]
+        except (asyncio.CancelledError, Exception):
+            if full_text and self._checkpointer:
+                from langchain_core.messages import AIMessage
+                await graph.aupdate_state(config, {"messages": [AIMessage(content=full_text)]})
+            raise
 
         return SubagentResult(
             output=_extract_final_output(output_messages),

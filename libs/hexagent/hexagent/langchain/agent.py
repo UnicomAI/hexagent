@@ -353,6 +353,7 @@ async def create_agent(
             environment_resolver=env_resolver,
             environment=env,
             permission_gate=permission_gate,
+            checkpointer=checkpointer,
         )
 
         # 9. Create AgentTool (not a base tool — subagents cannot spawn sub-sub-agents)

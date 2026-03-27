@@ -2321,6 +2321,32 @@
   color: var(--bg-primary);
 }
 
+.input-stop {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 200ms ease;
+  color: var(--bg-primary);
+}
+
+.input-stop:hover {
+  opacity: 0.85;
+  transform: translateY(-1px);
+}
+
+.input-stop:active {
+  transform: translateY(0) scale(0.95);
+}
+
+.input-stop svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* ── E2B key hint floating below send button ── */
 
 .input-send-wrapper {

@@ -121,6 +121,13 @@ export interface StreamCallbacks {
   onError: (error: string) => void;
 }
 
+export async function stopMessage(conversationId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/chat/${conversationId}/stop`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`Failed to stop message: ${res.statusText}`);
+}
+
 export function sendMessage(
   conversationId: string,
   content: string,

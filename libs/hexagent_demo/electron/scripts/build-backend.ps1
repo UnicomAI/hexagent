@@ -36,6 +36,7 @@ uv run pyinstaller `
     --hidden-import uvicorn.lifespan.off `
     --collect-submodules hexagent_api `
     --collect-submodules hexagent `
+    --collect-submodules langgraph `
     --collect-data hexagent `
     --add-data "skills;skills" `
     hexagent_api/server.py
