@@ -6,6 +6,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
+import pytest
+
 from hexagent.harness.environment import EnvironmentResolver
 from hexagent.types import CLIResult
 
@@ -81,20 +83,20 @@ class TestResolve:
         assert env.today_date.year == 2026
         assert env.today_date.tzinfo is None
 
-    async def test_empty_datetime_fallback_now(self) -> None:
+    async def test_empty_datetime_raises(self) -> None:
+        """Empty datetime must raise — it indicates a broken shell probe."""
         computer = _mock_computer(_make_stdout(date=""))
-        env = await EnvironmentResolver(computer).resolve()
-        assert isinstance(env.today_date, datetime)
+        with pytest.raises(ValueError, match="empty datetime"):
+            await EnvironmentResolver(computer).resolve()
 
-    async def test_pads_missing_parts(self) -> None:
-        """When stdout has fewer delimiters, missing fields are padded."""
+    async def test_pads_missing_parts_raises(self) -> None:
+        """When stdout has fewer delimiters, missing date field raises."""
         # Only cwd and git — missing platform, shell, os_version, date
         stdout = f"/home/user\n{_DELIM}\ntrue"
         computer = _mock_computer(stdout)
 
-        # Date will be empty -> fallback to current time.
-        env = await EnvironmentResolver(computer).resolve()
-        assert isinstance(env.today_date, datetime)
+        with pytest.raises(ValueError, match="empty datetime"):
+            await EnvironmentResolver(computer).resolve()
 
     async def test_darwin_platform(self) -> None:
         computer = _mock_computer(_make_stdout(platform="darwin", os_version="Darwin 25.3.0"))
