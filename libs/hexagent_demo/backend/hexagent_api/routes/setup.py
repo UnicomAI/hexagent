@@ -567,6 +567,28 @@ async def _install_lima_stream():
             yield sse("error", {"message": "Installation failed: limactl binary not found after extraction"})
             return
 
+        # Strip macOS quarantine flag so Gatekeeper doesn't block the binary
+        proc = await asyncio.create_subprocess_exec(
+            "xattr", "-dr", "com.apple.quarantine", str(_lima_dir()),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.communicate()  # best-effort, ignore errors
+
+        # Ad-hoc codesign limactl with virtualization entitlement (required for VZ on macOS)
+        entitlements = vm_lima_dir() / "entitlements.plist"
+        if entitlements.is_file():
+            proc = await asyncio.create_subprocess_exec(
+                "codesign", "--force", "--sign", "-",
+                "--entitlements", str(entitlements),
+                str(_lima_bin()),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                logger.warning("codesign limactl failed: %s", (stderr or b"").decode(errors="replace"))
+
         _ensure_managed_lima_on_path()
         yield sse("done", {"message": f"Lima v{version} installed successfully", "path": str(_lima_bin())})
 
@@ -847,6 +869,50 @@ class _ProcessManager(abc.ABC):
 # ---------------------------------------------------------------------------
 
 
+async def _ensure_limactl_entitlement() -> None:
+    """Verify limactl has the virtualization entitlement; re-sign if missing.
+
+    Without ``com.apple.security.virtualization``, the VZ backend will refuse
+    to start with ``VZErrorDomain Code=2``.  This can happen when the binary
+    was installed from a GitHub tarball, built from source, or had its
+    signature stripped by another tool.
+    """
+    limactl = shutil.which("limactl")
+    if not limactl:
+        return
+
+    # Check current entitlements
+    proc = await asyncio.create_subprocess_exec(
+        "codesign", "-d", "--entitlements", "-", "--xml", limactl,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    if b"com.apple.security.virtualization" in stdout:
+        return  # already has the entitlement
+
+    logger.info("limactl at %s is missing virtualization entitlement, attempting to re-sign", limactl)
+
+    entitlements = vm_lima_dir() / "entitlements.plist"
+    if not entitlements.is_file():
+        logger.warning("Cannot re-sign limactl: entitlements.plist not found at %s", entitlements)
+        return
+
+    proc = await asyncio.create_subprocess_exec(
+        "codesign", "--force", "--sign", "-",
+        "--entitlements", str(entitlements),
+        limactl,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        logger.warning(
+            "Failed to re-sign limactl with virtualization entitlement: %s",
+            (stderr or b"").decode(errors="replace"),
+        )
+
+
 class _BuildManager(_ProcessManager):
     """Manages ``limactl start`` to create or boot the VM."""
 
@@ -885,6 +951,10 @@ class _BuildManager(_ProcessManager):
         await self._run_lima()
 
     async def _run_lima(self) -> None:
+        # Ensure limactl has the virtualization entitlement before any VM
+        # operation — otherwise VZ will fail with a cryptic entitlement error.
+        await _ensure_limactl_entitlement()
+
         instance_status = await _lima_instance_status()
 
         if instance_status == "Running":

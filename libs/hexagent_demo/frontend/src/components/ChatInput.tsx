@@ -77,9 +77,10 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
   }, [scrollContainerRef, checkScrollBtn]);
 
   // React to content growth during streaming
+  const streamingEntry = state.streamingByConversation[conversationId];
   useEffect(() => {
     checkScrollBtn();
-  }, [state.streamingBlocks, state.isStreaming, checkScrollBtn]);
+  }, [streamingEntry?.blocks, checkScrollBtn]);
 
   const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -94,7 +95,7 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
     if (missingE2bKey) { flashE2bHint(); return; }
     const trimmed = value.trim();
     const hasContent = trimmed || doneFiles.length > 0;
-    if (!hasContent || state.isStreaming || isPreparingRequest || anyUploading) return;
+    if (!hasContent || !!state.streamingByConversation[conversationId] || isPreparingRequest || anyUploading) return;
 
     const attachments = doneFiles.map((f) => f.result!);
     onSend(trimmed, attachments.length > 0 ? { attachments } : undefined);
@@ -103,7 +104,7 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [value, doneFiles, anyUploading, state.isStreaming, isPreparingRequest, onSend, missingE2bKey, flashE2bHint]);
+  }, [value, doneFiles, anyUploading, state.streamingByConversation, conversationId, isPreparingRequest, onSend, missingE2bKey, flashE2bHint]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -299,7 +300,7 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
                 <button
                   className="input-send"
                   onClick={handleSubmit}
-                  disabled={(!value.trim() && doneFiles.length === 0) || state.isStreaming || isPreparingRequest || anyUploading || noModels || missingE2bKey}
+                  disabled={(!value.trim() && doneFiles.length === 0) || !!state.streamingByConversation[conversationId] || isPreparingRequest || anyUploading || noModels || missingE2bKey}
                   title={noModels ? "Configure a model in Settings first" : isPreparingRequest ? "Preparing request..." : "Send message"}
                 >
                   {isPreparingRequest ? <Loader2 className="model-save-spinner" /> : <ArrowUp />}

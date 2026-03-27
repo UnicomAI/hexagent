@@ -84,9 +84,12 @@ export default function MessageList({ conversation, scrollContainerRef }: Messag
   }, [messages.length, messages, updateSpacer, scrollContainerRef]);
 
   // Recalculate spacer as streaming content grows
+  const streamingEntry = conversation?.id
+    ? state.streamingByConversation[conversation.id]
+    : undefined;
   useEffect(() => {
     updateSpacer();
-  }, [state.streamingBlocks, state.isStreaming, updateSpacer]);
+  }, [streamingEntry?.blocks, updateSpacer]);
 
   // ResizeObserver on content area (streaming growth, markdown rendering, etc.)
   useEffect(() => {
@@ -123,7 +126,7 @@ export default function MessageList({ conversation, scrollContainerRef }: Messag
   return (
     <div className="message-list" ref={contentRef}>
       {messages.map((msg, i) => {
-        const isStreamingMsg = state.isStreaming && msg.id === state.streamingMessageId;
+        const isStreamingMsg = !!streamingEntry && msg.id === streamingEntry.messageId;
         const ref =
           i === firstUserIdx && i === lastUserIdx
             ? (node: HTMLDivElement | null) => {
@@ -140,8 +143,8 @@ export default function MessageList({ conversation, scrollContainerRef }: Messag
             key={msg.id}
             ref={ref}
             message={msg}
-            isLastAssistant={!state.isStreaming && i === lastAssistantIdx}
-            streamingBlocks={isStreamingMsg ? state.streamingBlocks : undefined}
+            isLastAssistant={!streamingEntry && i === lastAssistantIdx}
+            streamingBlocks={isStreamingMsg ? streamingEntry.blocks : undefined}
             isStreaming={isStreamingMsg}
           />
         );
