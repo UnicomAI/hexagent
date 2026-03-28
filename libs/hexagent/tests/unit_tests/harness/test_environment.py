@@ -1,4 +1,4 @@
-﻿# ruff: noqa: PLR2004
+# ruff: noqa: PLR2004
 """Tests for EnvironmentResolver."""
 
 from __future__ import annotations

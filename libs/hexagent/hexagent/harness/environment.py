@@ -75,8 +75,7 @@ class EnvironmentResolver:
                     logger.warning("Unparseable python datetime probe: %r", py_raw)
 
         logger.warning(
-            "Environment datetime probes failed; falling back to UTC now. "
-            "date.stdout=%r date.stderr=%r python3.stdout=%r python3.stderr=%r",
+            "Environment datetime probes failed; falling back to UTC now. date.stdout=%r date.stderr=%r python3.stdout=%r python3.stderr=%r",
             probe.stdout,
             probe.stderr,
             py_probe.stdout,
@@ -100,7 +99,7 @@ class EnvironmentResolver:
             f"printf '%s\\n' {qd}; "
             "uname -s | tr '[:upper:]' '[:lower:]'; "
             f"printf '%s\\n' {qd}; "
-            "basename \"${SHELL:-bash}\"; "
+            'basename "${SHELL:-bash}"; '
             f"printf '%s\\n' {qd}; "
             "uname -sr; "
             f"printf '%s\\n' {qd}; "
