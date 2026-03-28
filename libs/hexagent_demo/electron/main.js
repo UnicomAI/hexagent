@@ -419,9 +419,14 @@ try {
 // ── Window ───────────────────────────────────────────────────────────────────
 
 function createWindow() {
+  const winIconPath = IS_DEV
+    ? path.join(__dirname, "resources", "icon.ico")
+    : path.join(process.resourcesPath, "app-icon.ico");
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    icon: fs.existsSync(winIconPath) ? winIconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

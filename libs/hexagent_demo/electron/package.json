@@ -68,6 +68,10 @@
         {
           "from": "resources/wsl/",
           "to": "wsl"
+        },
+        {
+          "from": "resources/icon.ico",
+          "to": "app-icon.ico"
         }
       ],
       "target": [
