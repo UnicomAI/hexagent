@@ -1,7 +1,7 @@
 {
   "name": "hexagent",
   "version": "0.0.1",
-  "description": "HexAgent Desktop App",
+  "description": "ClawWork Desktop App",
   "main": "main.js",
   "scripts": {
     "dev": "ELECTRON_DEV=1 electron .",
@@ -22,7 +22,7 @@
   },
   "build": {
     "appId": "com.hexagent.app",
-    "productName": "HexAgent",
+    "productName": "ClawWork",
     "directories": {
       "buildResources": "resources",
       "output": "dist"
