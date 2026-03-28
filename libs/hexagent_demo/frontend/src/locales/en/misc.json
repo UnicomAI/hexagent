@@ -22,7 +22,12 @@
     "wslComplete": "WSL runtime installation is complete, but Windows must restart before OpenAgent can continue.",
     "pleaseRestart": "Please restart your computer now, otherwise VM/Cowork features will not work.",
     "openSandboxSettings": "Open Sandbox Settings",
-    "recheck": "I have restarted, Re-check"
+    "recheck": "I have restarted, Re-check",
+    "restartNow": "Restart Now",
+    "restarting": "Restarting...",
+    "confirmRestartNow": "Restart Windows now? Unsaved work in other apps may be lost.",
+    "restartNotSupported": "Immediate restart is only available in the desktop app on Windows.",
+    "restartFailed": "Failed to trigger Windows restart."
   },
   "vmSetup": {
     "settingUp": "Setting up VM",

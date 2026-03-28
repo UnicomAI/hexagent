@@ -244,6 +244,15 @@ def _looks_like_missing_wsl_disk(msg: str) -> bool:
     )
 
 
+def _looks_like_wsl_localhost_proxy_warning(msg: str) -> bool:
+    """Return True for known non-fatal WSL localhost-proxy warning text."""
+    text = (msg or "").lower()
+    return (
+        ("localhost" in text and "proxy" in text and "wsl" in text and "nat" in text)
+        or ("localhost 代理" in (msg or "") and "未镜像到 wsl" in (msg or ""))
+    )
+
+
 def _wsl2_blocker_reason(text: str) -> str | None:
     """Return a friendly reason when host cannot run WSL2."""
     t = (text or "").lower()
@@ -394,6 +403,23 @@ async def _wsl_probe_start() -> tuple[bool, str]:
     if (proc.returncode or 0) == 0:
         return True, ""
     return False, _combine_wsl_output(stdout_b, stderr_b)
+
+
+async def _wait_for_wsl_vhdx(import_dir: Path, timeout_s: float = 45.0) -> Path | None:
+    """Wait until WSL import materializes ``ext4.vhdx`` under ``import_dir``.
+
+    On some Windows hosts `wsl --import` returns before the VHDX file is fully
+    visible to subsequent `wsl -d` start attempts, which can cause transient
+    `MountDisk ... ERROR_PATH_NOT_FOUND`.
+    """
+    target = import_dir / "ext4.vhdx"
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while loop.time() < deadline:
+        if target.is_file():
+            return target
+        await asyncio.sleep(0.5)
+    return None
 
 
 # ``wsl -l -v`` uses the Windows display language for the STATE column.
@@ -1190,12 +1216,14 @@ class _BuildManager(_ProcessManager):
                 self._error = f"exit {proc_import.returncode}"
                 return
 
+            self._emit("progress", {"step": "starting", "message": "Finalizing imported WSL disk..."})
+            await _wait_for_wsl_vhdx(import_dir)
             self._emit("progress", {"step": "starting", "message": "Starting imported HexAgent WSL distro..."})
             ok, err = await self._start_wsl_instance(
                 wsl_exe,
                 step="starting",
                 message="Starting imported HexAgent WSL distro...",
-                retries_on_missing_disk=3,
+                retries_on_missing_disk=6,
             )
             if ok:
                 self._emit("done", {"message": "WSL distro imported from bundled image and started successfully"})
@@ -1287,12 +1315,14 @@ class _BuildManager(_ProcessManager):
             self._error = f"exit {proc_import.returncode}"
             return
 
+        self._emit("progress", {"step": "starting", "message": "Finalizing imported WSL disk..."})
+        await _wait_for_wsl_vhdx(import_dir)
         self._emit("progress", {"step": "starting", "message": "Starting HexAgent WSL distro..."})
         ok, err = await self._start_wsl_instance(
             wsl_exe,
             step="starting",
             message="Starting HexAgent WSL distro...",
-            retries_on_missing_disk=3,
+            retries_on_missing_disk=6,
         )
         if ok:
             self._emit("done", {"message": "WSL distro created and started successfully"})
@@ -1504,10 +1534,40 @@ class _ProvisionManager(_ProcessManager):
             user="root",
         )
         if rc != 0:
-            self._emit("error", {"message": f"Failed to stage setup files in WSL: {err}"})
-            self._status = "error"
-            self._error = "Stage failed"
-            return
+            # Some WSL builds emit a localhost-proxy warning under NAT mode,
+            # and may still finish staging. Verify before failing hard.
+            if _looks_like_wsl_localhost_proxy_warning(err):
+                verify_rc, _, verify_err = await _wsl_shell(
+                    f"test -f {setup_vm_dir_quoted}/setup.sh && test -d {setup_vm_dir_quoted}/steps",
+                    timeout=15,
+                    user="root",
+                )
+                if verify_rc == 0:
+                    self._emit(
+                        "progress",
+                        {
+                            "step": "copying",
+                            "message": "WSL reported localhost proxy warning, but setup files were staged successfully. Continuing...",
+                        },
+                    )
+                else:
+                    self._emit(
+                        "error",
+                        {
+                            "message": (
+                                f"Failed to stage setup files in WSL: {err}"
+                                + (f"\nVerification error: {verify_err}" if verify_err else "")
+                            )
+                        },
+                    )
+                    self._status = "error"
+                    self._error = "Stage failed"
+                    return
+            else:
+                self._emit("error", {"message": f"Failed to stage setup files in WSL: {err}"})
+                self._status = "error"
+                self._error = "Stage failed"
+                return
 
         self._emit("progress", {"step": "starting", "message": "Starting provisioning..."})
         cmd = f"bash {_SETUP_VM_DIR}/setup.sh"

@@ -28,6 +28,10 @@ declare global {
         stdout?: string;
         stderr?: string;
       }>;
+      restartWindowsNow?: () => Promise<{
+        ok: boolean;
+        message?: string;
+      }>;
     };
   }
 }

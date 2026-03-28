@@ -416,6 +416,55 @@ try {
   };
 });
 
+ipcMain.handle("restart-windows-now", async () => {
+  if (process.platform !== "win32") {
+    return { ok: false, message: "This action is only available on Windows." };
+  }
+
+  // First try a normal restart request.
+  let res = await runCommand("shutdown.exe", ["/r", "/t", "0"]);
+  if (res.code === 0) {
+    return { ok: true, message: "Windows restart has been triggered." };
+  }
+
+  // Fallback with elevation prompt when policy/permissions block direct call.
+  const psScript = `
+$ErrorActionPreference = 'Stop'
+try {
+  Start-Process -FilePath shutdown.exe -ArgumentList @('/r','/t','0') -Verb RunAs
+  exit 0
+} catch {
+  $msg = $_.Exception.Message
+  if ([string]::IsNullOrWhiteSpace($msg)) { $msg = "Unknown restart failure." }
+  Write-Output ("RESTART_ERR:" + $msg)
+  exit 1
+}
+`.trim();
+
+  res = await runCommand("powershell.exe", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    psScript,
+  ]);
+
+  if (res.code === 0) {
+    return { ok: true, message: "Windows restart has been triggered." };
+  }
+
+  const combined = `${res.stderr || ""}\n${res.stdout || ""}`.trim();
+  const restartErr = (combined.match(/RESTART_ERR:(.*)/) || [null, ""])[1]?.trim();
+  const cancelled = /canceled|cancelled|拒绝|已取消|denied/i.test(combined);
+  if (cancelled) {
+    return { ok: false, message: "Restart was cancelled." };
+  }
+  return {
+    ok: false,
+    message: restartErr || combined || `Failed to trigger restart (exit ${res.code}).`,
+  };
+});
+
 // ── Window ───────────────────────────────────────────────────────────────────
 
 function createWindow() {

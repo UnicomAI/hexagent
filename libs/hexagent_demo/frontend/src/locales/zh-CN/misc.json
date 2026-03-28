@@ -22,7 +22,12 @@
     "wslComplete": "WSL 运行时安装已完成，但 Windows 需要重启才能继续使用 OpenAgent。",
     "pleaseRestart": "请立即重启计算机，否则虚拟机/协作功能将无法使用。",
     "openSandboxSettings": "打开沙盒设置",
-    "recheck": "已重启，重新检查"
+    "recheck": "已重启，重新检查",
+    "restartNow": "立即重启",
+    "restarting": "正在重启...",
+    "confirmRestartNow": "确认立即重启 Windows 吗？其他应用中未保存的内容可能会丢失。",
+    "restartNotSupported": "仅 Windows 桌面客户端支持立即重启。",
+    "restartFailed": "触发 Windows 重启失败。"
   },
   "vmSetup": {
     "settingUp": "正在配置虚拟机",

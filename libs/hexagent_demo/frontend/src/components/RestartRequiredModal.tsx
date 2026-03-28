@@ -1,6 +1,7 @@
-import { AlertTriangle, RefreshCw, Settings } from "lucide-react";
+import { AlertTriangle, Loader2, Settings } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useVMSetup } from "../vmSetup";
+import { useAppContext } from "../store";
 
 interface RestartRequiredModalProps {
   open: boolean;
@@ -14,7 +15,30 @@ export default function RestartRequiredModal({
   onOpenSettings,
 }: RestartRequiredModalProps) {
   const { t } = useTranslation("misc");
-  const vm = useVMSetup();
+  const { dispatch } = useAppContext();
+  const [restarting, setRestarting] = useState(false);
+
+  const handleRestartNow = async () => {
+    if (restarting) return;
+    const confirmed = window.confirm(t("restartRequired.confirmRestartNow"));
+    if (!confirmed) return;
+
+    setRestarting(true);
+    try {
+      const api = window.electronAPI?.restartWindowsNow;
+      if (!api) {
+        throw new Error(t("restartRequired.restartNotSupported"));
+      }
+      const res = await api();
+      if (!res?.ok) {
+        throw new Error(res?.message || t("restartRequired.restartFailed"));
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : t("restartRequired.restartFailed");
+      dispatch({ type: "SHOW_NOTIFICATION", payload: { message: msg, type: "error" } });
+      setRestarting(false);
+    }
+  };
 
   if (!open) return null;
 
@@ -39,9 +63,9 @@ export default function RestartRequiredModal({
             <Settings size={14} />
             <span>{t("restartRequired.openSandboxSettings")}</span>
           </button>
-          <button className="restart-required-btn restart-required-btn--primary" type="button" onClick={vm.recheckVmEngine}>
-            <RefreshCw size={14} />
-            <span>{t("restartRequired.recheck")}</span>
+          <button className="restart-required-btn restart-required-btn--primary" type="button" onClick={handleRestartNow} disabled={restarting}>
+            {restarting ? <Loader2 size={14} className="model-save-spinner" /> : null}
+            <span>{restarting ? t("restartRequired.restarting") : t("restartRequired.restartNow")}</span>
           </button>
         </div>
       </div>

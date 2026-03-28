@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld("electronAPI", {
   platform: process.platform,
   checkWslPrerequisites: () => ipcRenderer.invoke("check-wsl-prerequisites"),
   installWslRuntime: () => ipcRenderer.invoke("install-wsl-runtime"),
+  restartWindowsNow: () => ipcRenderer.invoke("restart-windows-now"),
 });

@@ -12,6 +12,23 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ELECTRON_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BACKEND_DIR="$(cd "$ELECTRON_DIR/../backend" && pwd)"
 TARGET_ARCH="${1:-}"
+CONFIG_SOURCE="$BACKEND_DIR/config.json"
+TEMP_CONFIG_CREATED=0
+
+if [ ! -f "$CONFIG_SOURCE" ]; then
+    # Keep packaging resilient in CI/local envs where config.json is not present.
+    # Electron will still seed userData/config.json from this bundled default.
+    CONFIG_SOURCE="$BACKEND_DIR/.packaged-default-config.json"
+    printf '{}\n' > "$CONFIG_SOURCE"
+    TEMP_CONFIG_CREATED=1
+fi
+
+cleanup_temp_config() {
+    if [ "$TEMP_CONFIG_CREATED" = "1" ] && [ -f "$CONFIG_SOURCE" ]; then
+        rm -f "$CONFIG_SOURCE"
+    fi
+}
+trap cleanup_temp_config EXIT
 
 # ── PyInstaller flags (shared) ──
 PYINSTALLER_ARGS=(
@@ -40,6 +57,7 @@ PYINSTALLER_ARGS=(
     --collect-data hexagent
     --add-data "skills:skills"
     --add-data "../../hexagent/sandbox/vm:sandbox/vm"
+    --add-data "$CONFIG_SOURCE:."
     hexagent_api/server.py
 )
 

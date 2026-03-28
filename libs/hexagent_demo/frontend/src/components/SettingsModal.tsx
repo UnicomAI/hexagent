@@ -13,7 +13,7 @@ import type { PhaseStatus } from "../vmSetup";
 /** Available languages. Add new entries here to support more languages. */
 const LANGUAGES = [
   { code: "en", label: "English" },
-  { code: "zh-CN", label: "绠€浣撲腑鏂? },
+  { code: "zh-CN", label: "Chinese (Simplified)" },
 ] as const;
 
 interface SettingsModalProps {
