@@ -179,9 +179,11 @@ def _lima_status() -> dict[str, object]:
 # WSL (Windows)
 # ---------------------------------------------------------------------------
 
-_WSL_INSTANCE = "hexagent"
+_WSL_INSTANCE = "clawwork"
 _WSL_EXPORT_SOURCE = "Ubuntu"
 _WSL_PREBUILT_CANDIDATES = (
+    "clawwork-prebuilt.tar",
+    "clawwork.tar",
     "hexagent-prebuilt.tar",
     "hexagent.tar",
     "ubuntu-base-24.04-amd64.tar.gz",
@@ -363,7 +365,7 @@ def _wsl_prebuilt_tar_path() -> Path | None:
     """
     candidate_dirs: list[Path] = [vm_setup_dir().parent / "wsl" / "prebuilt"]
 
-    offline_dir = os.environ.get("HEXAGENT_WSL_OFFLINE_DIR", "").strip()
+    offline_dir = os.environ.get("CLAWWORK_WSL_OFFLINE_DIR") or os.environ.get("HEXAGENT_WSL_OFFLINE_DIR", "").strip()
     if offline_dir:
         candidate_dirs.append(Path(offline_dir))
 
@@ -578,7 +580,7 @@ async def _install_lima_stream():
     version = await _resolve_lima_version()
     yield sse("progress", {"step": "downloading", "message": f"Downloading Lima v{version}..."})
 
-    tmp_dir = tempfile.mkdtemp(prefix="hexagent_lima_")
+    tmp_dir = tempfile.mkdtemp(prefix="clawwork_lima_")
     tarball_path = os.path.join(tmp_dir, "lima.tar.gz")
 
     try:
@@ -805,7 +807,7 @@ async def install_vm_backend() -> StreamingResponse:
 #   - Multiple concurrent viewers are supported
 # ---------------------------------------------------------------------------
 
-_LIMA_INSTANCE = "hexagent"
+_LIMA_INSTANCE = "clawwork"
 
 
 def _sse(event: str, data: dict[str, object]) -> str:
@@ -1363,9 +1365,9 @@ class _BuildManager(_ProcessManager):
 # Provision Manager — runs setup.sh inside the VM
 # ---------------------------------------------------------------------------
 
-_SETUP_MARKER_DIRS = ("/var/lib/hexagent/setup", "/var/lib/openagent/setup")
-_SETUP_LOG_DIRS = ("/var/log/hexagent/setup", "/var/log/openagent/setup")
-_SETUP_VM_DIR = "/tmp/hexagent-setup"
+_SETUP_MARKER_DIRS = ("/var/lib/clawwork/setup", "/var/lib/openagent/setup")
+_SETUP_LOG_DIRS = ("/var/log/clawwork/setup", "/var/log/openagent/setup")
+_SETUP_VM_DIR = "/tmp/clawwork-setup"
 
 # Step IDs that setup.sh discovers (must match filenames in steps/)
 _PROVISION_STEPS = [
@@ -1416,14 +1418,14 @@ class _ProvisionManager(_ProcessManager):
             return
 
         # Tar locally, copy tarball, extract in VM
-        with tempfile.TemporaryDirectory(prefix="hexagent_setup_") as tmp:
+        with tempfile.TemporaryDirectory(prefix="clawwork_setup_") as tmp:
             tar_path = os.path.join(tmp, "setup.tar.gz")
             _sp.run(
                 ["tar", "-czf", tar_path, "-C", str(setup_dir.parent), setup_dir.name],
                 check=True,
             )
             copy_proc = await asyncio.create_subprocess_exec(
-                "limactl", "copy", tar_path, f"{_LIMA_INSTANCE}:/tmp/hexagent-setup.tar.gz",
+                "limactl", "copy", tar_path, f"{_LIMA_INSTANCE}:/tmp/clawwork-setup.tar.gz",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -1437,8 +1439,8 @@ class _ProvisionManager(_ProcessManager):
         # Extract in VM
         rc, _, err = await _lima_shell(
             f"sudo rm -rf {_SETUP_VM_DIR} && sudo mkdir -p {_SETUP_VM_DIR} && "
-            f"sudo tar -xzf /tmp/hexagent-setup.tar.gz -C {_SETUP_VM_DIR} --strip-components=1 && "
-            f"rm -f /tmp/hexagent-setup.tar.gz",
+            f"sudo tar -xzf /tmp/clawwork-setup.tar.gz -C {_SETUP_VM_DIR} --strip-components=1 && "
+            f"rm -f /tmp/clawwork-setup.tar.gz",
             timeout=30,
         )
         if rc != 0:

@@ -250,7 +250,7 @@ class LocalVM:
         instance: WSL distribution name.
     """
 
-    def __init__(self, *, instance: str = "hexagent") -> None:
+    def __init__(self, *, instance: str = "clawwork") -> None:
         """Initialize with a WSL distribution name.
 
         MERGE NOTE: When unifying with ``vm.py``, this is the platform

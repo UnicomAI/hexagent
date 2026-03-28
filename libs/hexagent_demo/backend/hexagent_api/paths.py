@@ -17,7 +17,7 @@ from pathlib import Path
 # Change this if the project is ever renamed.
 # ---------------------------------------------------------------------------
 
-_PROJECT_DIR_NAME = "hexagent"
+_PROJECT_DIR_NAME = "clawwork"
 
 # ---------------------------------------------------------------------------
 # Root
@@ -29,9 +29,13 @@ def data_dir() -> Path:
 
     Respects ``HEXAGENT_DATA_DIR`` if set, otherwise ``~/.hexagent``.
     """
-    env = os.environ.get("HEXAGENT_DATA_DIR")
+    env = os.environ.get("CLAWWORK_DATA_DIR")
     if env:
         return Path(env)
+    # Support legacy HEXAGENT_DATA_DIR for backward compatibility
+    legacy_env = os.environ.get("HEXAGENT_DATA_DIR")
+    if legacy_env:
+        return Path(legacy_env)
     return Path.home() / f".{_PROJECT_DIR_NAME}"
 
 

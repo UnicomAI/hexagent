@@ -185,8 +185,11 @@ class WslVM:
     @property
     def _config_dir(self) -> Path:
         """Config directory for this instance."""
-        data_dir = os.environ.get("HEXAGENT_DATA_DIR")
-        base = Path(data_dir) if data_dir else Path.home() / ".hexagent"
+        data_dir = os.environ.get("CLAWWORK_DATA_DIR") or os.environ.get("HEXAGENT_DATA_DIR")
+        # Try clawwork first, then hexagent for backward compatibility
+        base = Path(data_dir) if data_dir else Path.home() / ".clawwork"
+        if not base.exists() and (Path.home() / ".hexagent").exists():
+            base = Path.home() / ".hexagent"
         return base / "wsl" / self._instance
 
     @property

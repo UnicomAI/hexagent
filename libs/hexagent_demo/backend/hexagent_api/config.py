@@ -21,7 +21,7 @@ def _resolve_config_path() -> Path:
     """
     from hexagent_api.paths import data_dir
 
-    data = os.environ.get("HEXAGENT_DATA_DIR")
+    data = os.environ.get("CLAWWORK_DATA_DIR") or os.environ.get("HEXAGENT_DATA_DIR")
     if data:
         return data_dir() / "config.json"
     return Path(__file__).resolve().parent.parent / "config.json"
