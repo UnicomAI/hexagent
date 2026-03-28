@@ -860,4 +860,3 @@ class TestApplyBindMounts:
         ):
             await vm._apply_bind_mounts()
             mock_shell.assert_not_awaited()
-

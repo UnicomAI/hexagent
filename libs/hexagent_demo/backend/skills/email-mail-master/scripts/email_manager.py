@@ -102,8 +102,8 @@ class EmailManager:
         from html import unescape
         
         # 移除 script 和 style 标签及其内容
-        text = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<script[^>]*>.*?</script\s*>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<style[^>]*>.*?</style\s*>', '', text, flags=re.DOTALL | re.IGNORECASE)
         
         # 移除所有 HTML 标签
         text = re.sub(r'<[^>]+>', ' ', text)
