@@ -46,10 +46,37 @@ _PLATFORM = sys.platform
 
 
 def _decode_wsl_output(raw: bytes) -> str:
-    """Decode WSL output that may be UTF-16-LE on some Windows builds."""
-    if raw[:2] == b"\xff\xfe" or b"\x00" in raw:
-        return raw.decode("utf-16-le", errors="replace").replace("\x00", "")
-    return raw.decode("utf-8", errors="replace")
+    """Decode WSL output that may mix UTF-16-LE and UTF-8 bytes.
+
+    Some Windows builds emit UTF-16-LE diagnostics from ``wsl.exe`` and then
+    append plain UTF-8 stderr from the invoked shell in the same stream.
+    """
+    if not raw:
+        return ""
+
+    # Handle BOM-prefixed UTF-16-LE while preserving the remaining bytes for
+    # mixed-stream recovery below.
+    if raw.startswith(b"\xff\xfe"):
+        raw = raw[2:]
+
+    # Fast path: regular UTF-8 output.
+    if b"\x00" not in raw:
+        return raw.decode("utf-8", errors="replace")
+
+    # Mixed-path: decode the UTF-16-LE prefix up to the last NUL byte, then
+    # decode any trailing bytes as UTF-8 (common bash stderr tail).
+    last_nul = raw.rfind(b"\x00")
+    split = last_nul + 1
+    if split % 2 != 0:
+        split += 1
+
+    head = raw[:split]
+    tail = raw[split:]
+
+    text = head.decode("utf-16-le", errors="replace").replace("\x00", "")
+    if tail:
+        text += tail.decode("utf-8", errors="replace")
+    return text
 
 
 def _resolve_wsl_exe() -> str | None:

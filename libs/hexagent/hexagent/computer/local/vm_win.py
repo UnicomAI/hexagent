@@ -30,7 +30,7 @@ import asyncio
 import os
 import shlex
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 import petname
@@ -154,20 +154,33 @@ class _VMSessionComputer(AsyncComputerMixin):
             msg = f"Source is not a file: {src}"
             raise CLIError(msg)
 
-        dst_parent = str(Path(dst).parent)
+        # Destination path is always a Linux path; keep POSIX semantics on Windows.
+        dst_parent = str(PurePosixPath(dst).parent)
+        tmp = f"/tmp/.upload-{uuid.uuid4().hex}"  # noqa: S108
+        sudo_prefix = ""
         try:
-            await self._vm.shell(f"sudo mkdir -p {shlex.quote(dst_parent)}")
+            sudo_probe = await self._vm.shell("command -v sudo >/dev/null 2>&1")
+            sudo_prefix = "sudo " if sudo_probe.exit_code == 0 else ""
+            mk_result = await self._vm.shell(f"{sudo_prefix}mkdir -p {shlex.quote(dst_parent)}")
+            if mk_result.exit_code != 0:
+                msg = mk_result.stderr or mk_result.stdout or f"Failed to create upload directory: {dst_parent}"
+                raise CLIError(msg)
             # Copy to /tmp first (always writable), then sudo mv into place.
             # This works regardless of destination directory ownership.
-            tmp = f"/tmp/.upload-{uuid.uuid4().hex}"  # noqa: S108
             await self._vm.copy(src, tmp, host_to_guest=True)
-            await self._vm.shell(
-                f"sudo mv {tmp} {shlex.quote(dst)} && "
-                f"sudo chown {self._session_name}:{self._session_name} {shlex.quote(dst)} && "
-                f"sudo chmod 644 {shlex.quote(dst)}"
+            stage_result = await self._vm.shell(
+                f"{sudo_prefix}mv {tmp} {shlex.quote(dst)} && "
+                f"{sudo_prefix}chown {self._session_name}:{self._session_name} {shlex.quote(dst)} && "
+                f"{sudo_prefix}chmod 644 {shlex.quote(dst)}"
             )
+            if stage_result.exit_code != 0:
+                msg = stage_result.stderr or stage_result.stdout or f"Failed to stage uploaded file: {dst}"
+                raise CLIError(msg)
         except VMError as e:
             raise CLIError(str(e)) from e
+        finally:
+            # Best-effort cleanup when stage command failed before move.
+            await self._vm.shell(f"{sudo_prefix}rm -f {tmp}")
 
     async def download(self, src: str, dst: str) -> None:
         """Transfer a file from the WSL session to the host.
@@ -179,8 +192,11 @@ class _VMSessionComputer(AsyncComputerMixin):
         self._check_active()
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
         tmp = f"/tmp/.download-{uuid.uuid4().hex}"  # noqa: S108
+        sudo_prefix = ""
         try:
-            result = await self._vm.shell(f"sudo cp {shlex.quote(src)} {tmp} && sudo chmod 644 {tmp}")
+            sudo_probe = await self._vm.shell("command -v sudo >/dev/null 2>&1")
+            sudo_prefix = "sudo " if sudo_probe.exit_code == 0 else ""
+            result = await self._vm.shell(f"{sudo_prefix}cp {shlex.quote(src)} {tmp} && {sudo_prefix}chmod 644 {tmp}")
             if result.exit_code != 0:
                 msg = result.stderr or result.stdout or f"Failed to stage {src} for download"
                 raise CLIError(msg)
@@ -189,7 +205,7 @@ class _VMSessionComputer(AsyncComputerMixin):
             raise CLIError(str(e)) from e
         finally:
             # Best-effort cleanup of the temp file inside the guest.
-            await self._vm.shell(f"sudo rm -f {tmp}")
+            await self._vm.shell(f"{sudo_prefix}rm -f {tmp}")
 
     def _check_active(self) -> None:
         """Raise if handle is inactive."""

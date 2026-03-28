@@ -165,6 +165,16 @@ class TestBuildCommand:
         cmd = _build_command(["/a.txt"], "/out")
         assert "\r" not in cmd
 
+    def test_uses_inner_bash_c_without_positional_arg_shim(self) -> None:
+        cmd = _build_command(["/a.txt"], "/out")
+        assert "bash -c" in cmd
+        assert " _ " not in cmd
+        assert "OUTPUT_DIR=/out" in cmd
+
+    def test_escapes_dollar_for_wsl_outer_shell(self) -> None:
+        cmd = _build_command(["/a.txt"], "/out")
+        assert r"\$OUTPUT_DIR" in cmd
+
 
 # ---------------------------------------------------------------------------
 # _EXT_MIME_MAP / generated script tests

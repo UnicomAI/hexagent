@@ -125,11 +125,10 @@ def _build_case_block() -> str:
     return "\n".join(arms)
 
 
-# The bash script body template.  ``{case_arms}`` is replaced at import
-# time with the generated case block.  $1 is the output directory;
-# $2.. are file paths.
+# The bash script body template. ``{case_arms}`` is replaced at import
+# time with the generated case block. ``OUTPUT_DIR`` is injected by
+# ``_build_command`` and file paths are passed via ``$@``.
 _SCRIPT_BODY = r"""
-OUTPUT_DIR="$1"; shift
 mkdir -p "$OUTPUT_DIR"
 REAL_OUT="$(realpath "$OUTPUT_DIR")"
 
@@ -204,8 +203,14 @@ def _build_command(filepaths: list[str], output_dir: str) -> str:
     Returns:
         A shell command string safe for ``Computer.run()``.
     """
-    quoted_args = " ".join(shlex.quote(p) for p in [output_dir, *filepaths])
-    return f"bash -c {shlex.quote(_SCRIPT_BODY_LF)} _ {quoted_args}"
+    quoted_file_args = " ".join(shlex.quote(p) for p in filepaths)
+    set_args = f"set -- {quoted_file_args}" if quoted_file_args else "set --"
+    script = f"OUTPUT_DIR={shlex.quote(output_dir)}\n{set_args}\n{_SCRIPT_BODY_LF}"
+    # WSL can evaluate one outer shell layer before the intended ``bash -c``
+    # command, which would eagerly expand ``$...`` and break the script.
+    # Pre-escape dollars so expansion happens only in the inner bash.
+    script_for_outer = script.replace("$", r"\$")
+    return f"bash -c {shlex.quote(script_for_outer)}"
 
 
 class PresentToUserTool(BaseAgentTool[PresentToUserToolParams]):

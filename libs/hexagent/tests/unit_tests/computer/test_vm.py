@@ -216,7 +216,7 @@ class TestUpload:
         assert copy_call.kwargs.get("host_to_guest") is True
 
         # Should sudo mv from tmp to destination, chown to session user, and chmod 644
-        mv_call = vm.shell.call_args_list[1]
+        mv_call = next(c for c in vm.shell.call_args_list if " mv " in c.args[0])
         assert "sudo mv" in mv_call.args[0]
         assert "/remote/file.txt" in mv_call.args[0]
         assert "chown test-session:test-session" in mv_call.args[0]
@@ -232,7 +232,7 @@ class TestUpload:
 
         await computer.upload(str(src), "/remote/deep/file.txt")
 
-        mkdir_call = vm.shell.call_args_list[0]
+        mkdir_call = next(c for c in vm.shell.call_args_list if "mkdir -p" in c.args[0])
         assert "sudo mkdir -p" in mkdir_call.args[0]
         assert "/remote/deep" in mkdir_call.args[0]
 

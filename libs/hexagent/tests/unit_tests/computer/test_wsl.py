@@ -1,7 +1,7 @@
 # ruff: noqa: PLR2004 S108 ARG005 UP012
 """Tests for WslVM and _VMSessionComputer (Windows variant).
 
-All tests mock the WSL backend — no wsl.exe or WSL2 required.
+All tests mock the WSL backend - no wsl.exe or WSL2 required.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from hexagent.computer.base import BASH_MAX_TIMEOUT_MS, Computer
 from hexagent.computer.local._types import ResolvedMount
 from hexagent.computer.local._wsl import (
     WslVM,
+    _decode_wsl_output,
     _parse_status_output,
     _session_user_from_guest_mount_path,
     _win_path_to_wsl,
@@ -243,11 +244,25 @@ class TestUpload:
         assert copy_call.args[1].startswith("/tmp/.upload-")
         assert copy_call.kwargs.get("host_to_guest") is True
 
-        mv_call = vm.shell.call_args_list[1]
+        mv_call = next(c for c in vm.shell.call_args_list if " mv " in c.args[0])
         assert "sudo mv" in mv_call.args[0]
         assert "/remote/file.txt" in mv_call.args[0]
         assert "chown test-session:test-session" in mv_call.args[0]
         assert "chmod 644" in mv_call.args[0]
+
+    async def test_upload_uses_posix_parent_for_session_paths(self, tmp_path: Path) -> None:
+        vm = _mock_vm()
+        vm.copy = AsyncMock()
+        computer = _make_computer(vm)
+
+        src = tmp_path / "file.txt"
+        src.write_text("data")
+
+        await computer.upload(str(src), "/sessions/alice/mnt/uploads/file.txt")
+
+        mkdir_call = next(c for c in vm.shell.call_args_list if "mkdir -p" in c.args[0])
+        assert "/sessions/alice/mnt/uploads" in mkdir_call.args[0]
+        assert "\\sessions\\alice\\mnt\\uploads" not in mkdir_call.args[0]
 
     async def test_upload_missing_src_raises_file_not_found(self, tmp_path: Path) -> None:
         vm = _mock_vm()
@@ -288,7 +303,7 @@ class TestDownload:
         await computer.download("/remote/file.txt", str(dst))
 
         # First shell call: sudo cp to tmp + chmod
-        stage_call = vm.shell.call_args_list[0]
+        stage_call = next(c for c in vm.shell.call_args_list if " cp " in c.args[0])
         assert "sudo cp" in stage_call.args[0]
         assert "chmod 644" in stage_call.args[0]
 
@@ -340,7 +355,7 @@ class TestProtocolCompliance:
 
 
 # ===========================================================================
-# WslVM — pure logic only (no subprocess)
+# WslVM - pure logic only (no subprocess)
 # ===========================================================================
 
 
@@ -417,6 +432,30 @@ class TestWslVMStart:
             await vm.start()
 
         mock_apply.assert_not_awaited()
+
+
+# ===========================================================================
+# WSL output decoding
+# ===========================================================================
+
+
+class TestDecodeWslOutput:
+    """Tests for mixed-encoding stderr decoding."""
+
+    def test_utf8_plain(self) -> None:
+        assert _decode_wsl_output("hello".encode("utf-8")) == "hello"
+
+    def test_utf16le_with_bom(self) -> None:
+        raw = b"\xff\xfe" + "warning: test".encode("utf-16-le")
+        assert "warning: test" in _decode_wsl_output(raw)
+
+    def test_mixed_utf16le_prefix_and_utf8_tail(self) -> None:
+        prefix = "wsl: localhost proxy config detected but not mirrored to WSL.\r\n".encode("utf-16-le")
+        tail = b"/bin/bash: line 1: _mime_by_ext: command not found\n"
+        text = _decode_wsl_output(prefix + tail)
+
+        assert "localhost proxy config detected" in text
+        assert "_mime_by_ext: command not found" in text
 
 
 # ===========================================================================
@@ -821,3 +860,4 @@ class TestApplyBindMounts:
         ):
             await vm._apply_bind_mounts()
             mock_shell.assert_not_awaited()
+
