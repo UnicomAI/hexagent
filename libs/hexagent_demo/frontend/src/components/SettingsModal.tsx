@@ -13,7 +13,7 @@ import type { PhaseStatus } from "../vmSetup";
 /** Available languages. Add new entries here to support more languages. */
 const LANGUAGES = [
   { code: "en", label: "English" },
-  { code: "zh-CN", label: "绠€浣撲腑鏂? },
+  { code: "zh-CN", label: "简体中文" },
 ] as const;
 
 interface SettingsModalProps {
@@ -39,7 +39,7 @@ export default function SettingsModal({ open, onClose, settings, onSettingsChang
   const { t } = useTranslation("settings");
   const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? "general");
 
-  // 鈹€鈹€ Shared ServerConfig draft 鈹€鈹€
+  // ── Shared ServerConfig draft ──
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const originalRef = useRef("");
   const [saving, setSaving] = useState(false);
@@ -94,7 +94,7 @@ export default function SettingsModal({ open, onClose, settings, onSettingsChang
     }
   }, [config, dispatch]);
 
-  // 鈹€鈹€ Close animation 鈹€鈹€
+  // ── Close animation ──
   const [animState, setAnimState] = useState<"open" | "closing">("open");
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -357,7 +357,7 @@ function GeneralTab({
   );
 }
 
-// 鈹€鈹€ Provider Presets 鈹€鈹€
+// ── Provider Presets ──
 
 interface ProviderPreset {
   id: string;
@@ -396,7 +396,7 @@ function presetIdFromProvider(provider: string): string {
   return match ? match.id : "openai-compatible";
 }
 
-// 鈹€鈹€ Model Tab (compact accordion) 鈹€鈹€
+// ── Model Tab (compact accordion) ──
 
 function ModelTab({ config, onConfigChange }: ConfigTabProps) {
   const { t } = useTranslation("settings");
@@ -489,7 +489,7 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
         {t("model.hint")}
       </p>
 
-      {/* 鈹€鈹€ Compact Model List 鈹€鈹€ */}
+      {/* ── Compact Model List ── */}
       <div className="ml-list">
         {config.models.map((m, idx) => {
           const presetId = presetIdFromProvider(m.provider);
@@ -633,7 +633,7 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
                     />
                   </div>
 
-                  {/* Context Window & Modalities 鈥?visually separated */}
+                  {/* Context Window & Modalities —visually separated */}
                   <div className="mc-separator" />
                   <div className="mc-row">
                     <div className="mc-field" style={{ maxWidth: 200 }}>
@@ -679,7 +679,7 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
         })}
       </div>
 
-      {/* 鈹€鈹€ Add Model 鈹€鈹€ */}
+      {/* ── Add Model ── */}
       {showAddPicker ? (
         <div className="add-picker">
           <div className="add-picker-label">{t("model.chooseProvider")}</div>
@@ -700,7 +700,7 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
         </div>
       )}
 
-      {/* 鈹€鈹€ Summarizer Model 鈹€鈹€ */}
+      {/* ── Summarizer Model ── */}
       {config.models.length > 0 && (
         <div className="tools-summarizer">
           <div className="tools-summarizer-left">
@@ -744,7 +744,7 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
   );
 }
 
-// 鈹€鈹€ Key-Value Pair Editor 鈹€鈹€
+// ── Key-Value Pair Editor ──
 // Stores data as JSON string but presents a friendly key/value row UI.
 
 interface KVPair { key: string; value: string }
@@ -879,7 +879,7 @@ function KeyValueEditor({
   );
 }
 
-// 鈹€鈹€ MCP Tab 鈹€鈹€
+// ── MCP Tab ──
 
 function McpTab({ config, onConfigChange }: ConfigTabProps) {
   const { t } = useTranslation("settings");
@@ -955,7 +955,7 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
         if (debounceTimers.current[id]) clearTimeout(debounceTimers.current[id]);
       }
     }
-  }); // Intentionally no deps 鈥?runs on every render to compare fingerprints
+  }); // Intentionally no deps —runs on every render to compare fingerprints
 
   // Cleanup debounce timers on unmount
   useEffect(() => () => {
@@ -1019,7 +1019,7 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
         return;
       }
 
-      // Toggling ON 鈥?validate first
+      // Toggling ON —validate first
       setValidatingIds((prev) => new Set(prev).add(server.id));
       setTestStatus((prev) => ({ ...prev, [server.id]: { loading: true } }));
 
@@ -1275,7 +1275,7 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
   );
 }
 
-// 鈹€鈹€ Tools Tab 鈹€鈹€
+// ── Tools Tab ──
 
 const SEARCH_PROVIDERS = [
   { id: "", label: "None" },
@@ -1454,7 +1454,7 @@ function ToolsTab({ config, onConfigChange }: ConfigTabProps) {
   );
 }
 
-// 鈹€鈹€ Custom Dropdown 鈹€鈹€
+// ── Custom Dropdown ──
 
 function CustomSelect({
   value,
@@ -1510,7 +1510,7 @@ function CustomSelect({
   );
 }
 
-// 鈹€鈹€ Subagent Tab 鈹€鈹€
+// ── Subagent Tab ──
 
 function SubagentTab({ config, onConfigChange }: ConfigTabProps) {
   const { t } = useTranslation("settings");
@@ -1721,7 +1721,7 @@ function SubagentTab({ config, onConfigChange }: ConfigTabProps) {
   );
 }
 
-// 鈹€鈹€ Sandbox Tab 鈹€鈹€
+// ── Sandbox Tab ──
 
 function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
   const { t } = useTranslation("settings");
@@ -1790,7 +1790,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
 
   return (
     <div className="settings-section">
-      {/* 鈹€鈹€ Virtual Machine 鈹€鈹€ */}
+      {/* ── Virtual Machine ── */}
       <div className="sb-card">
         <div className="sb-card-header">
           <div className="sb-card-icon"><Monitor size={18} /></div>
@@ -1816,14 +1816,14 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
           )}
         </div>
         <div className="sb-card-body">
-          {/* 鈹€鈹€ All done: clean summary 鈹€鈹€ */}
+          {/* ── All done: clean summary ── */}
           {vmStatus && vmStatus.supported && allDone && (
             <p className="vm-ready-summary">
               <CircleCheck size={13} className="vm-phase-icon--done" /> {t("sandbox.vmReady")}
             </p>
           )}
 
-          {/* 鈹€鈹€ Setup in progress or not yet started 鈹€鈹€ */}
+          {/* ── Setup in progress or not yet started ── */}
           {vmStatus && vmStatus.supported && !allDone && (
             <div className="vm-setup-phases">
               {/* Phase 1: VM backend */}
@@ -1925,7 +1925,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
                   )}
                 </div>
 
-                {/* Step list 鈥?visible during setup */}
+                {/* Step list —visible during setup */}
                 {(phase3 === "running" || phase3 === "error" || (phase3 === "pending" && Object.keys(provStepStatus).length > 0)) && provSteps.length > 0 && (
                   <div className="vm-provision-steps">
                     {provSteps.map((step) => {
@@ -1964,7 +1964,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
             <p className="vm-install-hint">{t("sandbox.vmNotSupported")}</p>
           )}
 
-          {/* Folder list 鈥?shown once VM is usable (phases 1+2 done) */}
+          {/* Folder list —shown once VM is usable (phases 1+2 done) */}
           {vmUsable && (
             <div className="vm-folder-list">
               <label className="mc-label" style={{ marginBottom: 2 }}>{t("sandbox.recentFolders")}</label>
@@ -2012,7 +2012,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
         </div>
       </div>
 
-      {/* 鈹€鈹€ Chat Mode (legacy) 鈹€鈹€ */}
+      {/* ── Chat Mode (legacy) ── */}
       <div className="sb-card">
         <div className="sb-card-header">
           <div className="sb-card-icon"><Server size={18} /></div>
@@ -2081,7 +2081,7 @@ function SandboxTab({ config, onConfigChange }: ConfigTabProps) {
   );
 }
 
-// 鈹€鈹€ Skills Tab 鈹€鈹€
+// ── Skills Tab ──
 
 function SkillsTab() {
   const { t } = useTranslation("settings");
