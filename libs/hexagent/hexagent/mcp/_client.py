@@ -166,7 +166,10 @@ class McpClient:
         if transport_type == "http":
             http_cfg = cast("McpHttpServerConfig", config)
             http_client = await self._exit_stack.enter_async_context(
-                httpx.AsyncClient(headers=dict(http_cfg.get("headers", {}))),
+                httpx.AsyncClient(
+                    headers=dict(http_cfg.get("headers", {})),
+                    timeout=httpx.Timeout(300, connect=10),
+                ),
             )
             read_stream, write_stream, _ = await self._exit_stack.enter_async_context(
                 streamable_http_client(http_cfg["url"], http_client=http_client),
