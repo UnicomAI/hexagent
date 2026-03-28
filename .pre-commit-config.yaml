@@ -17,9 +17,9 @@ repos:
 
   - repo: local
     hooks:
-      - id: hexagent
-        name: format and lint hexagent
+      - id: clawwork
+        name: format and lint clawwork
         language: system
-        entry: make -C libs/hexagent format lint
-        files: ^libs/hexagent/
+        entry: make -C libs/clawwork format lint
+        files: ^libs/clawwork/
         pass_filenames: false

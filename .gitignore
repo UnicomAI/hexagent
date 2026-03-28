@@ -215,14 +215,14 @@ __marimo__/
 /tmp/
 */tmp/
 
-# HexAgent Sandbox
+# ClawWork Sandbox
 mounts/
 
 # Git worktrees
 .trees/
 
 # Electron build artifact
-libs/hexagent_demo/electron/dist.zip
+libs/clawwork_demo/electron/dist.zip
 
 # Vite dev-server cache
 **/.vite/

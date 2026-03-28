@@ -6,7 +6,7 @@ export interface RecentFolder {
   alwaysAllowed: boolean;
 }
 
-const STORAGE_KEY = "hexagent_recent_folders";
+const STORAGE_KEY = "clawwork_recent_folders";
 
 export function loadRecentFolders(): RecentFolder[] {
   try {

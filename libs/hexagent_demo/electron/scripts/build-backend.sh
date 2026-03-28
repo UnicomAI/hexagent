@@ -15,7 +15,7 @@ TARGET_ARCH="${1:-}"
 
 # ── PyInstaller flags (shared) ──
 PYINSTALLER_ARGS=(
-    --name hexagent_api_server
+    --name clawwork_api_server
     --onedir
     --noconfirm
     --clean
@@ -35,12 +35,12 @@ PYINSTALLER_ARGS=(
     --hidden-import uvicorn.lifespan
     --hidden-import uvicorn.lifespan.on
     --hidden-import uvicorn.lifespan.off
-    --collect-submodules hexagent_api
-    --collect-submodules hexagent
-    --collect-data hexagent
+    --collect-submodules clawwork_api
+    --collect-submodules clawwork
+    --collect-data clawwork
     --add-data "skills:skills"
-    --add-data "../../hexagent/sandbox/vm:sandbox/vm"
-    hexagent_api/server.py
+    --add-data "../../clawwork/sandbox/vm:sandbox/vm"
+    clawwork_api/server.py
 )
 
 # Ensure the skills directory exists so --add-data doesn't fail
@@ -70,7 +70,7 @@ run_pyinstaller() {
 
     echo "==> Copying dist to electron/backend_dist..."
     rm -rf "$ELECTRON_DIR/backend_dist"
-    cp -r "$BACKEND_DIR/dist/hexagent_api_server" "$ELECTRON_DIR/backend_dist"
+    cp -r "$BACKEND_DIR/dist/clawwork_api_server" "$ELECTRON_DIR/backend_dist"
 }
 
 run_pyinstaller_arch() {
@@ -113,7 +113,7 @@ run_pyinstaller_arch() {
     unset UV_PROJECT_ENVIRONMENT
 
     rm -rf "$ELECTRON_DIR/backend_dist"
-    cp -r "$BACKEND_DIR/dist/hexagent_api_server" "$ELECTRON_DIR/backend_dist"
+    cp -r "$BACKEND_DIR/dist/clawwork_api_server" "$ELECTRON_DIR/backend_dist"
 }
 
 # ── Build based on target architecture ──
@@ -139,9 +139,9 @@ case "$TARGET_ARCH" in
         echo "==> Creating universal binary with lipo..."
         cp -r "$ELECTRON_DIR/backend_dist_arm64" "$ELECTRON_DIR/backend_dist"
         lipo -create \
-            "$ELECTRON_DIR/backend_dist_arm64/hexagent_api_server" \
-            "$ELECTRON_DIR/backend_dist_x64/hexagent_api_server" \
-            -output "$ELECTRON_DIR/backend_dist/hexagent_api_server"
+            "$ELECTRON_DIR/backend_dist_arm64/clawwork_api_server" \
+            "$ELECTRON_DIR/backend_dist_x64/clawwork_api_server" \
+            -output "$ELECTRON_DIR/backend_dist/clawwork_api_server"
         rm -rf "$ELECTRON_DIR/backend_dist_arm64" "$ELECTRON_DIR/backend_dist_x64"
         ;;
     *)

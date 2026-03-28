@@ -5,5 +5,5 @@
 !macroend
 
 !macro customUnInstall
-  RMDir /r "$PROFILE\.hexagent"
+  RMDir /r "$PROFILE\.clawwork"
 !macroend

@@ -7,7 +7,7 @@ export interface Settings {
   language: string;
 }
 
-const STORAGE_KEY = "hexagent-settings";
+const STORAGE_KEY = "clawwork-settings";
 
 const DEFAULT_SETTINGS: Settings = {
   fullName: "",

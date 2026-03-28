@@ -1,15 +1,15 @@
 [project]
-name = "hexagent-demo-backend"
+name = "clawwork-demo-backend"
 version = "0.1.0"
-description = "FastAPI backend for HexAgent demo"
+description = "FastAPI backend for ClawWork demo"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
     "python-dotenv>=1.0.0",
     "langchain-deepseek>=0.1.0",
-    "hexagent",
+    "clawwork",
 ]
 
 [tool.uv.sources]
-hexagent = { path = "../../hexagent", editable = true }
+clawwork = { path = "../../clawwork", editable = true }

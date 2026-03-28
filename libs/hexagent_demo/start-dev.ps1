@@ -34,7 +34,7 @@ if (-not (Test-Path '.venv')) {
     uv sync
 }
 Write-Host '[backend] starting on http://127.0.0.1:8000' -ForegroundColor Cyan
-uv run uvicorn hexagent_api.main:app --host 127.0.0.1 --port 8000
+uv run uvicorn clawwork_api.main:app --host 127.0.0.1 --port 8000
 "@
 
 $frontendCmd = @"
@@ -49,7 +49,7 @@ npm run dev
 
 if ($CurrentWindow) {
     Write-Host "Starting backend in a background job (CurrentWindow mode)..." -ForegroundColor Green
-    Start-Job -Name "hexagent-backend" -ScriptBlock {
+    Start-Job -Name "clawwork-backend" -ScriptBlock {
         param($cmd)
         powershell -NoProfile -NoExit -Command $cmd
     } -ArgumentList $backendCmd | Out-Null
@@ -64,7 +64,7 @@ Start-Process powershell -ArgumentList "-NoProfile", "-NoExit", "-ExecutionPolic
 Start-Process powershell -ArgumentList "-NoProfile", "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", $frontendCmd | Out-Null
 
 Write-Host ""
-Write-Host "HexAgent dev services launched." -ForegroundColor Green
+Write-Host "ClawWork dev services launched." -ForegroundColor Green
 Write-Host "Frontend: http://localhost:3000"
 Write-Host "Backend : http://127.0.0.1:8000/health"
 Write-Host ""

@@ -85,7 +85,7 @@ function stepIndex(s: Step): number {
   return STEPS.indexOf(s);
 }
 
-const ONBOARDING_DRAFT_KEY = "hexagent-onboarding-draft-v1";
+const ONBOARDING_DRAFT_KEY = "clawwork-onboarding-draft-v1";
 
 interface OnboardingDraft {
   step?: Step;

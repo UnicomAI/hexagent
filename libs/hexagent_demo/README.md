@@ -1,6 +1,6 @@
-# HexAgent Demo
+# ClawWork Demo
 
-A ready-to-use desktop application built on [HexAgent](../hexagent/), demonstrating what you can build with an agent harness. This is not a toy example — it's a full-featured Chat + Cowork app that showcases HexAgent's ability to power real products.
+A ready-to-use desktop application built on [ClawWork](../clawwork/), demonstrating what you can build with an agent harness. This is not a toy example — it's a full-featured Chat + Cowork app that showcases ClawWork's ability to power real products.
 
 > See it as a reference implementation: fork it, restyle it, or use it as the foundation for your own agent product.
 
@@ -39,9 +39,9 @@ A full-featured local mode with per-conversation isolation using [Lima](https://
 ## Architecture
 
 ```
-hexagent_demo/
+clawwork_demo/
 ├── backend/           # FastAPI backend (Python 3.12+)
-│   └── hexagent_api/
+│   └── clawwork_api/
 │       ├── main.py              # FastAPI app and router registration
 │       ├── agent_manager.py     # Agent lifecycle and caching
 │       ├── config.py            # Configuration persistence
@@ -74,19 +74,19 @@ hexagent_demo/
 ### Backend
 
 ```bash
-cd libs/hexagent_demo/backend
+cd libs/clawwork_demo/backend
 
 # Install dependencies
 uv sync
 
 # Run the server
-uv run uvicorn hexagent_api.main:app --host 127.0.0.1 --port 8000
+uv run uvicorn clawwork_api.main:app --host 127.0.0.1 --port 8000
 ```
 
 ### Frontend
 
 ```bash
-cd libs/hexagent_demo/frontend
+cd libs/clawwork_demo/frontend
 
 # Install dependencies
 npm install
@@ -100,7 +100,7 @@ The frontend runs on `http://localhost:5173` and connects to the backend on port
 ### Desktop App (Electron)
 
 ```bash
-cd libs/hexagent_demo/electron
+cd libs/clawwork_demo/electron
 
 # Install dependencies
 npm install
@@ -123,15 +123,15 @@ Configuration is persisted in the platform-specific user data directory:
 
 | Platform | Path |
 |----------|------|
-| macOS | `~/Library/Application Support/HexAgent/config.json` |
-| Windows | `%APPDATA%/HexAgent/config.json` |
-| Linux | `~/.config/HexAgent/config.json` |
+| macOS | `~/Library/Application Support/ClawWork/config.json` |
+| Windows | `%APPDATA%/ClawWork/config.json` |
+| Linux | `~/.config/ClawWork/config.json` |
 
 ## Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `HEXAGENT_DATA_DIR` | Override user data directory |
+| `CLAWWORK_DATA_DIR` | Override user data directory |
 | `E2B_API_KEY` | E2B sandbox API key (Chat mode) |
 | `HOST` | Backend host (default: `127.0.0.1`) |
 | `PORT` | Backend port (default: `8000`) |
@@ -191,14 +191,14 @@ The demo is designed to be forked and customized. Key extension points:
 ### Package the backend
 
 ```bash
-cd libs/hexagent_demo/backend
-pyinstaller --name hexagent_api_server ...  # Creates standalone binary
+cd libs/clawwork_demo/backend
+pyinstaller --name clawwork_api_server ...  # Creates standalone binary
 ```
 
 ### Build the desktop app
 
 ```bash
-cd libs/hexagent_demo/electron
+cd libs/clawwork_demo/electron
 
 # macOS
 npm run build:mac           # ARM64

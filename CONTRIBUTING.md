@@ -1,6 +1,6 @@
-# Contributing to HexAgent
+# Contributing to ClawWork
 
-Thank you for your interest in contributing to HexAgent! We believe agent infrastructure should be open, vendor-neutral, and community-driven — and every contribution moves that forward.
+Thank you for your interest in contributing to ClawWork! We believe agent infrastructure should be open, vendor-neutral, and community-driven — and every contribution moves that forward.
 
 Whether you're fixing a typo, adding a new tool, implementing a computer backend, or improving documentation, you're helping build the agent harness the community needs.
 
@@ -16,11 +16,11 @@ Whether you're fixing a typo, adding a new tool, implementing a computer backend
 
 ```bash
 # Clone the repository
-git clone https://github.com/an7tang/hexagent.git
-cd hexagent
+git clone https://github.com/an7tang/clawwork.git
+cd clawwork
 
 # Set up the core library
-cd libs/hexagent
+cd libs/clawwork
 uv sync --group test
 
 # Verify everything works
@@ -31,15 +31,15 @@ make test
 ### Project Structure
 
 ```
-hexagent/
+clawwork/
 ├── libs/
-│   ├── hexagent/          # Core agent harness library
-│   │   ├── hexagent/      #   Package source
+│   ├── clawwork/          # Core agent harness library
+│   │   ├── clawwork/      #   Package source
 │   │   ├── tests/         #   Unit + integration tests
 │   │   ├── sandbox/       #   Docker/VM sandbox configs
 │   │   ├── Makefile       #   Build targets
 │   │   └── pyproject.toml #   Package config
-│   └── hexagent_demo/     # Demo desktop application
+│   └── clawwork_demo/     # Demo desktop application
 │       ├── backend/       #   FastAPI backend
 │       ├── frontend/      #   React frontend
 │       └── electron/      #   Electron shell
@@ -52,7 +52,7 @@ hexagent/
 ### Running Tests
 
 ```bash
-cd libs/hexagent
+cd libs/clawwork
 
 make test              # Unit tests with coverage
 make integration_test  # Integration tests (requires API keys)
@@ -94,14 +94,14 @@ pre-commit install
 - Test behavior, not implementation details
 - Prefer testing public APIs over internal functions
 - Descriptive test names: `test_<action>_<condition>_<expected_result>`
-- Unit tests in `tests/unit_tests/` — mirror the `hexagent/` directory structure
+- Unit tests in `tests/unit_tests/` — mirror the `clawwork/` directory structure
 - Integration tests in `tests/integration_tests/`
 
 ## Making Changes
 
 ### Before You Start
 
-1. Check existing [issues](https://github.com/an7tang/hexagent/issues) to see if someone is already working on it
+1. Check existing [issues](https://github.com/an7tang/clawwork/issues) to see if someone is already working on it
 2. For significant changes, open an issue first to discuss the approach
 3. Fork the repository and create a feature branch
 
@@ -116,7 +116,7 @@ pre-commit install
 
 3. Ensure all checks pass:
    ```bash
-   cd libs/hexagent
+   cd libs/clawwork
    make format
    make lint
    make test
@@ -151,31 +151,31 @@ When contributing, keep these principles in mind:
 
 ### Framework-Agnostic Core
 
-The core library (`hexagent/`) is framework-agnostic — LangChain integration lives in `hexagent/langchain/`. Don't introduce LangChain imports outside of that directory.
+The core library (`clawwork/`) is framework-agnostic — LangChain integration lives in `clawwork/langchain/`. Don't introduce LangChain imports outside of that directory.
 
 ### Where to Contribute
 
 | Area | Good for | Location |
 |------|----------|----------|
-| New tools | Adding capabilities to agents | `hexagent/tools/` |
-| Computer implementations | New execution environments | `hexagent/computer/` |
-| Web providers | New search/fetch backends | `hexagent/tools/web/providers/` |
-| MCP improvements | Protocol support | `hexagent/mcp/` |
-| Prompt fragments | Better agent instructions | `hexagent/prompts/fragments/` |
-| Demo features | UI/UX improvements | `libs/hexagent_demo/` |
+| New tools | Adding capabilities to agents | `clawwork/tools/` |
+| Computer implementations | New execution environments | `clawwork/computer/` |
+| Web providers | New search/fetch backends | `clawwork/tools/web/providers/` |
+| MCP improvements | Protocol support | `clawwork/mcp/` |
+| Prompt fragments | Better agent instructions | `clawwork/prompts/fragments/` |
+| Demo features | UI/UX improvements | `libs/clawwork_demo/` |
 | Tests | Improving coverage | `tests/` |
 | Documentation | Clarity and examples | `README.md`, `libs/*/README.md` |
 
 ## Good First Issues
 
-New to the project? Look for issues tagged [`good first issue`](https://github.com/an7tang/hexagent/labels/good%20first%20issue). These are scoped to be approachable without deep knowledge of the codebase.
+New to the project? Look for issues tagged [`good first issue`](https://github.com/an7tang/clawwork/labels/good%20first%20issue). These are scoped to be approachable without deep knowledge of the codebase.
 
 ## Reporting Issues
 
-- Use [GitHub Issues](https://github.com/an7tang/hexagent/issues)
+- Use [GitHub Issues](https://github.com/an7tang/clawwork/issues)
 - Include steps to reproduce, expected behavior, and actual behavior
 - For bugs, include your Python version, OS, and relevant dependency versions
 
 ## Questions?
 
-Open a [Discussion](https://github.com/an7tang/hexagent/discussions) for questions, ideas, or feedback that don't fit neatly into an issue.
+Open a [Discussion](https://github.com/an7tang/clawwork/discussions) for questions, ideas, or feedback that don't fit neatly into an issue.

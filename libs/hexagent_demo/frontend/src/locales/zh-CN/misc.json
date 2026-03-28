@@ -3,8 +3,8 @@
     "workInFolder": "选择工作目录",
     "chooseNewFolder": "选择新文件夹",
     "recent": "最近使用",
-    "permissionTitle": "允许 HexAgent 访问 \"{{folder}}\" 中的文件？",
-    "permissionBody": "此操作将授权访问该文件夹及其所有子文件夹。HexAgent 将能够读取、编辑和删除此目录中的文件。文件内容可能会与已连接的 AI 模型和工具共享。请避免选择包含敏感或私密数据的文件夹。",
+    "permissionTitle": "允许 ClawWork 访问 \"{{folder}}\" 中的文件？",
+    "permissionBody": "此操作将授权访问该文件夹及其所有子文件夹。ClawWork 将能够读取、编辑和删除此目录中的文件。文件内容可能会与已连接的 AI 模型和工具共享。请避免选择包含敏感或私密数据的文件夹。",
     "cancel": "取消",
     "alwaysAllow": "始终允许",
     "allow": "允许"

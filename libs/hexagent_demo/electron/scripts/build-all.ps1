@@ -3,11 +3,11 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ElectronDir = Resolve-Path "$ScriptDir\.."
 $Target = if ($args.Count -gt 0) { $args[0] } else { 'win' }
-$EmbedWslPrebuilt = ($env:HEXAGENT_EMBED_WSL_PREBUILT -eq "1" -or $env:OPENAGENT_EMBED_WSL_PREBUILT -eq "1")
-$PrepareOfflineWsl = ($env:HEXAGENT_PREPARE_OFFLINE_WSL -ne "0")
+$EmbedWslPrebuilt = ($env:CLAWWORK_EMBED_WSL_PREBUILT -eq "1" -or $env:OPENAGENT_EMBED_WSL_PREBUILT -eq "1")
+$PrepareOfflineWsl = ($env:CLAWWORK_PREPARE_OFFLINE_WSL -ne "0")
 
 Write-Host '========================================='
-Write-Host '  HexAgent Desktop - Build ('$Target')'
+Write-Host '  ClawWork Desktop - Build ('$Target')'
 Write-Host '========================================='
 Write-Host ''
 

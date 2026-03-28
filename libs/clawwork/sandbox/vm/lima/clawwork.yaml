@@ -1,0 +1,71 @@
+# =============================================================================
+# Lima VM config: CLI-based sandbox for LLM Agent execution
+# =============================================================================
+# Multi-session sandbox for LLM agents. Each agent gets an isolated Linux user
+# under /sessions/<name>/. This YAML defines only the VM itself (engine,
+# resources, networking). Software provisioning is handled separately by
+# ../setup/setup.sh, which is copied into the VM and run after first boot.
+#
+# Usage:
+#   limactl start --name=clawwork clawwork.yaml   # Create & boot VM
+#   limactl shell clawwork                          # Open shell
+#   limactl stop clawwork                           # Stop VM
+#   limactl delete clawwork                         # Delete VM
+#
+# After creating the VM, run provisioning:
+#   limactl copy setup/ clawwork:/tmp/setup/
+#   limactl shell clawwork -- sudo bash /tmp/setup/setup.sh
+# =============================================================================
+
+# --- VM Engine ---
+vmType: "vz"
+mountType: "virtiofs"
+
+# --- Base Image (Ubuntu Minimal 24.04 LTS) ---
+images:
+  - location: "https://cloud-images.ubuntu.com/minimal/releases/noble/release/ubuntu-24.04-minimal-cloudimg-amd64.img"
+    arch: "x86_64"
+  - location: "https://cloud-images.ubuntu.com/minimal/releases/noble/release/ubuntu-24.04-minimal-cloudimg-arm64.img"
+    arch: "aarch64"
+
+# --- Resources ---
+cpus: 4
+memory: "8GiB"
+disk: "50GiB"
+
+# --- User ---
+user:
+  name: "clawwork"
+
+# --- Mounts ---
+mounts: []
+
+# --- Environments ---
+env:
+  PYTHONUNBUFFERED: "1"
+  PLAYWRIGHT_BROWSERS_PATH: "/opt/pw-browsers"
+  NODE_PATH: "/usr/lib/node_modules"
+
+# --- Network ---
+networks: []
+
+# --- Port Forwarding ---
+portForwards:
+  - guestPortRange: [1, 65535]
+    hostIP: "127.0.0.1"
+
+# --- Containerd ---
+containerd:
+  system: false
+  user: false
+
+# =============================================================================
+# Provisioning
+# =============================================================================
+# Software provisioning is handled by setup/setup.sh (copied into the VM
+# after first boot). This YAML intentionally has NO provision blocks so that
+# `limactl start` only boots the base image without running any scripts.
+#
+# See setup/setup.sh for the full provisioning orchestrator.
+# =============================================================================
+provision: []

@@ -22,10 +22,10 @@ jobs:
       matrix:
         include:
           # Core package
-          - working-directory: "libs/hexagent"
+          - working-directory: "libs/clawwork"
             python-version: "3.11"
           # Other packages in monorepo
-          # - working-directory: "libs/hexagent-cli"
+          # - working-directory: "libs/clawwork-cli"
           #   python-version: "3.11"
       fail-fast: false
     uses: ./.github/workflows/_lint.yml
@@ -38,16 +38,16 @@ jobs:
       matrix:
         include:
           # Core package
-          - working-directory: "libs/hexagent"
+          - working-directory: "libs/clawwork"
             python-version: "3.11"
-          - working-directory: "libs/hexagent"
+          - working-directory: "libs/clawwork"
             python-version: "3.12"
-          - working-directory: "libs/hexagent"
+          - working-directory: "libs/clawwork"
             python-version: "3.13"
           # Other packages
-          # - working-directory: "libs/hexagent-cli"
+          # - working-directory: "libs/clawwork-cli"
           #   python-version: "3.11"
-          # - working-directory: "libs/hexagent-cli"
+          # - working-directory: "libs/clawwork-cli"
           #   python-version: "3.13"
       fail-fast: false
     uses: ./.github/workflows/_test.yml
@@ -59,7 +59,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - working-directory: "libs/hexagent"
+          - working-directory: "libs/clawwork"
             python-version: "3.11"
       fail-fast: false
     uses: ./.github/workflows/_integration_test.yml

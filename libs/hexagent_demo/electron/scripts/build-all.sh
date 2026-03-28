@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build HexAgent desktop app for specified platforms.
+# Build ClawWork desktop app for specified platforms.
 #
 # Usage:
 #   bash build-all.sh                    # macOS arm64 (default)
@@ -14,7 +14,7 @@ ELECTRON_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TARGET="${1:-mac-arm64}"
 
 echo "========================================="
-echo "  HexAgent Desktop — Build ($TARGET)"
+echo "  ClawWork Desktop — Build ($TARGET)"
 echo "========================================="
 
 echo ""

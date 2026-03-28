@@ -7,7 +7,7 @@ $BackendDir = Resolve-Path "$ElectronDir\..\backend"
 Write-Host "==> Installing PyInstaller..."
 Set-Location $BackendDir
 $pyinstallerArgs = @(
-    "--name", "hexagent_api_server",
+    "--name", "clawwork_api_server",
     "--onedir",
     "--noconfirm",
     "--hidden-import", "uvicorn.logging",
@@ -26,13 +26,13 @@ $pyinstallerArgs = @(
     "--hidden-import", "uvicorn.lifespan",
     "--hidden-import", "uvicorn.lifespan.on",
     "--hidden-import", "uvicorn.lifespan.off",
-    "--collect-all", "hexagent_api",
-    "--collect-all", "hexagent",
-    "--paths", "../../hexagent",
+    "--collect-all", "clawwork_api",
+    "--collect-all", "clawwork",
+    "--paths", "../../clawwork",
     "--paths", ".",
-    "--add-data", "../../hexagent/sandbox/vm;sandbox/vm",
+    "--add-data", "../../clawwork/sandbox/vm;sandbox/vm",
     "--add-data", "skills;skills",
-    "hexagent_api/server.py"
+    "clawwork_api/server.py"
 )
 
 # Ensure the skills directory exists so --add-data doesn't fail
@@ -57,6 +57,6 @@ Write-Host "==> Copying dist to electron/backend_dist..."
 if (Test-Path "$ElectronDir\backend_dist") {
     Remove-Item -Recurse -Force "$ElectronDir\backend_dist"
 }
-Copy-Item -Recurse "$BackendDir\dist\hexagent_api_server" "$ElectronDir\backend_dist"
+Copy-Item -Recurse "$BackendDir\dist\clawwork_api_server" "$ElectronDir\backend_dist"
 
 Write-Host "==> Backend build complete."

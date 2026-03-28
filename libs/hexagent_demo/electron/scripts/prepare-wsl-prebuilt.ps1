@@ -1,12 +1,12 @@
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$HexagentRoot = Resolve-Path "$ScriptDir\..\..\.."
-$PrebuiltDir = Join-Path $HexagentRoot "hexagent\sandbox\vm\wsl\prebuilt"
-$PrebuiltTar = Join-Path $PrebuiltDir "hexagent-prebuilt.tar"
+$ClawworkRoot = Resolve-Path "$ScriptDir\..\..\.."
+$PrebuiltDir = Join-Path $ClawworkRoot "clawwork\sandbox\vm\wsl\prebuilt"
+$PrebuiltTar = Join-Path $PrebuiltDir "clawwork-prebuilt.tar"
 $LegacyPrebuiltTar = Join-Path $PrebuiltDir "openagent-prebuilt.tar"
-$DistroName = if ($env:HEXAGENT_WSL_DISTRO) { $env:HEXAGENT_WSL_DISTRO } else { "hexagent" }
-$ForceRebuild = ($env:HEXAGENT_FORCE_REBUILD_WSL_PREBUILT -eq "1")
+$DistroName = if ($env:CLAWWORK_WSL_DISTRO) { $env:CLAWWORK_WSL_DISTRO } else { "clawwork" }
+$ForceRebuild = ($env:CLAWWORK_FORCE_REBUILD_WSL_PREBUILT -eq "1")
 
 if ($env:OS -ne "Windows_NT") {
     Write-Host "Skipping WSL prebuilt export: non-Windows environment."
@@ -16,7 +16,7 @@ if ($env:OS -ne "Windows_NT") {
 New-Item -ItemType Directory -Force -Path $PrebuiltDir | Out-Null
 
 if ((-not (Test-Path $PrebuiltTar)) -and (Test-Path $LegacyPrebuiltTar)) {
-    Write-Host "==> Found legacy prebuilt tar name, renaming to hexagent-prebuilt.tar ..."
+    Write-Host "==> Found legacy prebuilt tar name, renaming to clawwork-prebuilt.tar ..."
     Move-Item -Force $LegacyPrebuiltTar $PrebuiltTar
 }
 
@@ -33,7 +33,7 @@ if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) {
 Write-Host "==> Ensuring distro '$DistroName' can start..."
 & wsl -d $DistroName -- echo ok | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    throw "WSL distro '$DistroName' is not available/runnable. Please initialize VM Instance first, or provide an existing hexagent-prebuilt.tar."
+    throw "WSL distro '$DistroName' is not available/runnable. Please initialize VM Instance first, or provide an existing clawwork-prebuilt.tar."
 }
 
 if (Test-Path $PrebuiltTar) {

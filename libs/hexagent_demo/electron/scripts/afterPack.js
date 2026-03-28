@@ -34,7 +34,7 @@ exports.default = async function afterPack(context) {
         `find "${backendDir}" -type f \\( -name "*.dylib" -o -name "*.so" \\) -exec codesign --force --sign - {} \\;`,
         { stdio: "inherit" }
       );
-      const backendBin = path.join(backendDir, "hexagent_api_server");
+      const backendBin = path.join(backendDir, "clawwork_api_server");
       if (fs.existsSync(backendBin)) {
         execSync(`codesign --force --sign - "${backendBin}"`, {
           stdio: "inherit",
@@ -58,7 +58,7 @@ exports.default = async function afterPack(context) {
   //    Step 2 overwrote limactl's signature without entitlements — we must
   //    apply it again AFTER the deep sign.
   const limaBin = path.join(appPath, "Contents", "Resources", "lima", "bin", "limactl");
-  const entitlements = path.join(__dirname, "..", "..", "..", "hexagent", "sandbox", "vm", "lima", "entitlements.plist");
+  const entitlements = path.join(__dirname, "..", "..", "..", "clawwork", "sandbox", "vm", "lima", "entitlements.plist");
   if (fs.existsSync(limaBin)) {
     if (!fs.existsSync(entitlements)) {
       console.error("[afterPack] FATAL: entitlements.plist not found at", entitlements);

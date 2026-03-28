@@ -3,8 +3,8 @@
     "workInFolder": "Work in a folder",
     "chooseNewFolder": "Choose a new folder",
     "recent": "Recent",
-    "permissionTitle": "Allow HexAgent to access files in \"{{folder}}\"?",
-    "permissionBody": "This grants access to all files and subfolders. HexAgent will be able to read, edit, and delete files in this directory. File contents may be shared with connected AI models and tools. Avoid selecting folders containing sensitive or private data.",
+    "permissionTitle": "Allow ClawWork to access files in \"{{folder}}\"?",
+    "permissionBody": "This grants access to all files and subfolders. ClawWork will be able to read, edit, and delete files in this directory. File contents may be shared with connected AI models and tools. Avoid selecting folders containing sensitive or private data.",
     "cancel": "Cancel",
     "alwaysAllow": "Always Allow",
     "allow": "Allow"

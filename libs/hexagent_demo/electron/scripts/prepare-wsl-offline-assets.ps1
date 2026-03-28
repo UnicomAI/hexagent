@@ -6,7 +6,7 @@ $OfflineDir = Join-Path $ElectronDir "resources\wsl"
 
 $WslMsiName = "wsl.2.6.3.0.x64.msi"
 $UbuntuRootfsName = "ubuntu-base-24.04-amd64.tar.gz"
-$UseCnMirrors = ($env:HEXAGENT_USE_CN_MIRRORS -ne "0")
+$UseCnMirrors = ($env:CLAWWORK_USE_CN_MIRRORS -ne "0")
 
 if ($env:OS -ne "Windows_NT") {
     Write-Host "Skipping offline WSL asset preparation: non-Windows environment."
@@ -102,11 +102,11 @@ function Ensure-DownloadedFile {
 $wslMsiUrls = @()
 $rootfsUrls = @()
 
-if ($env:HEXAGENT_WSL_MSI_URL) {
-    $wslMsiUrls += $env:HEXAGENT_WSL_MSI_URL
+if ($env:CLAWWORK_WSL_MSI_URL) {
+    $wslMsiUrls += $env:CLAWWORK_WSL_MSI_URL
 }
-if ($env:HEXAGENT_UBUNTU_ROOTFS_URL) {
-    $rootfsUrls += $env:HEXAGENT_UBUNTU_ROOTFS_URL
+if ($env:CLAWWORK_UBUNTU_ROOTFS_URL) {
+    $rootfsUrls += $env:CLAWWORK_UBUNTU_ROOTFS_URL
 }
 
 if ($UseCnMirrors) {

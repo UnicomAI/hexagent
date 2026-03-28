@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/images/logo.svg" alt="HexAgent" width="300"/>
+  <img src=".github/images/logo.svg" alt="ClawWork" width="300"/>
 </p>
 
 <p align="center">
@@ -7,26 +7,26 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/an7tang/hexagent/actions/workflows/ci.yml"><img src="https://github.com/an7tang/hexagent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/an7tang/clawwork/actions/workflows/ci.yml"><img src="https://github.com/an7tang/clawwork/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"></a>
 </p>
 
 ---
 
-**HexAgent** is an open-source **agent harness**: the production runtime that gives any LLM a fully-equipped computer — terminal, filesystem, and shell — to complete tasks autonomously.
+**ClawWork** is an open-source **agent harness**: the production runtime that gives any LLM a fully-equipped computer — terminal, filesystem, and shell — to complete tasks autonomously.
 
-Unlike every other agent framework, HexAgent **separates the agent runtime from the computer it operates on**. Your agent gets a sandboxed machine; your runtime keeps its API keys, config, and source code private.
+Unlike every other agent framework, ClawWork **separates the agent runtime from the computer it operates on**. Your agent gets a sandboxed machine; your runtime keeps its API keys, config, and source code private.
 
 > **Why "harness" and not "framework"?** A framework gives you building blocks and says "assemble your own agent." A harness gives the agent a fully equipped runtime — tools, context management, safety, execution environments — so you focus on *what* the agent does, not *how* it executes. ([Read more](#agent-harness-vs-agent-framework))
 
 ## The Computer Layer
 
-In Claude Code, Codex, and every LangChain agent, the agent runtime and the computer it controls are the same process. The agent can read its own source code, config files, and API keys. HexAgent's `Computer` protocol makes this separation explicit and pluggable — swap execution environments without changing a line of agent code.
+In Claude Code, Codex, and every LangChain agent, the agent runtime and the computer it controls are the same process. The agent can read its own source code, config files, and API keys. ClawWork's `Computer` protocol makes this separation explicit and pluggable — swap execution environments without changing a line of agent code.
 
 ```python
-from hexagent import create_agent
-from hexagent.computer import LocalNativeComputer, LocalVM, RemoteE2BComputer
+from clawwork import create_agent
+from clawwork.computer import LocalNativeComputer, LocalVM, RemoteE2BComputer
 
 # Development — run on your machine
 agent = await create_agent(model="anthropic/claude-sonnet-4-20250514", computer=LocalNativeComputer())
@@ -64,15 +64,15 @@ Implement the `Computer` protocol to add your own — Docker, Kubernetes pods, o
 ## Quick Start
 
 ```bash
-pip install hexagent
+pip install clawwork
 ```
 
 ### Minimal example
 
 ```python
 import asyncio
-from hexagent import create_agent
-from hexagent.computer import LocalNativeComputer
+from clawwork import create_agent
+from clawwork.computer import LocalNativeComputer
 
 async def main():
     async with await create_agent(
@@ -90,8 +90,8 @@ asyncio.run(main())
 ### Use any model
 
 ```python
-from hexagent import create_agent, ModelProfile
-from hexagent.computer import LocalNativeComputer
+from clawwork import create_agent, ModelProfile
+from clawwork.computer import LocalNativeComputer
 
 # DeepSeek, Qwen, Llama, Mistral — anything OpenAI-compatible
 model = ModelProfile(
@@ -107,8 +107,8 @@ agent = await create_agent(model=model, computer=LocalNativeComputer())
 ### Add subagents, MCP servers, web tools
 
 ```python
-from hexagent import create_agent, AgentDefinition
-from hexagent.computer import LocalNativeComputer
+from clawwork import create_agent, AgentDefinition
+from clawwork.computer import LocalNativeComputer
 
 agent = await create_agent(
     model="anthropic/claude-sonnet-4-20250514",
@@ -134,8 +134,8 @@ agent = await create_agent(
 ### Run in a cloud sandbox
 
 ```python
-from hexagent import create_agent
-from hexagent.computer import RemoteE2BComputer
+from clawwork import create_agent
+from clawwork.computer import RemoteE2BComputer
 
 # Fully isolated cloud execution — no local risk
 agent = await create_agent(
@@ -144,7 +144,7 @@ agent = await create_agent(
 )
 ```
 
-See [`libs/hexagent/README.md`](libs/hexagent/README.md) for the full API reference.
+See [`libs/clawwork/README.md`](libs/clawwork/README.md) for the full API reference.
 
 ## What Can You Build?
 
@@ -157,7 +157,7 @@ One harness powers four product types — no other agent SDK does this:
 | **Cowork** | Desktop agent that works on your local files, folders, and apps — completing knowledge work tasks autonomously while you steer | [Claude Cowork](https://www.anthropic.com/product/claude-cowork) |
 | **Autonomous Agent** | Headless agent that runs tasks end-to-end without supervision | [OpenClaw](https://github.com/openclaw/openclaw), [Devin](https://devin.ai/) |
 
-The [`hexagent_demo`](libs/hexagent_demo/) app ships with ready-to-use **Chat** and **Cowork** modes as concrete examples.
+The [`clawwork_demo`](libs/clawwork_demo/) app ships with ready-to-use **Chat** and **Cowork** modes as concrete examples.
 
 ## Features
 
@@ -178,9 +178,9 @@ The [`hexagent_demo`](libs/hexagent_demo/) app ships with ready-to-use **Chat** 
 - **Web providers** — Pluggable search (Tavily/Brave) and fetch (Jina/Firecrawl) backends
 - **Composable, not magical** — Small modules with explicit I/O. No hidden state. Every piece is testable and replaceable.
 
-### How HexAgent Compares
+### How ClawWork Compares
 
-| | HexAgent | Claude Agent SDK | LangChain Deep Agents |
+| | ClawWork | Claude Agent SDK | LangChain Deep Agents |
 |---|---|---|---|
 | **Open source** | MIT | MIT | MIT |
 | **Model-agnostic** | Any LLM | Claude only | Any LLM |
@@ -243,23 +243,23 @@ The AI agent ecosystem has converged on a [clear taxonomy](https://blog.langchai
 | **What it is** | Building blocks (tools, prompts, memory) | Durable execution engine | Complete agent operating system |
 | **Analogy** | A toolkit | A job scheduler | An OS for the agent |
 | **You build** | Everything from scratch | Orchestration logic | Your agent's purpose |
-| **Examples** | LangChain, CrewAI, Semantic Kernel | LangGraph, Temporal | HexAgent, Claude Code, OpenHands |
+| **Examples** | LangChain, CrewAI, Semantic Kernel | LangGraph, Temporal | ClawWork, Claude Code, OpenHands |
 
 A framework says: *"Here are components. Assemble your agent."*
 
 A harness says: *"Here is a fully equipped computer. Tell the agent what to do."*
 
-HexAgent is a harness you can embed as a library — giving you the batteries-included runtime of products like Claude Code, with the flexibility to build any agent product you want.
+ClawWork is a harness you can embed as a library — giving you the batteries-included runtime of products like Claude Code, with the flexibility to build any agent product you want.
 
 ## Project Structure
 
 | Package | Description |
 |---------|-------------|
-| [`libs/hexagent`](libs/hexagent/) | **Core framework** — the agent harness library ([API docs](libs/hexagent/README.md)) |
-| [`libs/hexagent_demo`](libs/hexagent_demo/) | **Demo app** — desktop Chat + Cowork built on the framework ([setup guide](libs/hexagent_demo/README.md)) |
+| [`libs/clawwork`](libs/clawwork/) | **Core framework** — the agent harness library ([API docs](libs/clawwork/README.md)) |
+| [`libs/clawwork_demo`](libs/clawwork_demo/) | **Demo app** — desktop Chat + Cowork built on the framework ([setup guide](libs/clawwork_demo/README.md)) |
 
 ```
-libs/hexagent/hexagent/
+libs/clawwork/clawwork/
 ├── computer/       # Computer protocol — local, VM, or cloud (E2B) execution
 ├── harness/        # Runtime augmentation: environment, permissions, skills, reminders
 ├── tools/          # Built-in tools: CLI, web, subagents, skills, todos

@@ -1,5 +1,5 @@
 {
-  "name": "hexagent",
+  "name": "clawwork",
   "version": "0.0.1",
   "description": "ClawWork Desktop App",
   "main": "main.js",
@@ -22,7 +22,7 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "appId": "com.hexagent.app",
+    "appId": "com.clawwork.app",
     "productName": "ClawWork",
     "directories": {
       "buildResources": "resources",

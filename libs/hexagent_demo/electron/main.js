@@ -15,9 +15,9 @@ let backendStderr = ""; // capture stderr for error reporting
 
 // ── User data directory ─────────────────────────────────────────────────────
 // Store config.json, .env, etc. in a persistent location:
-//   macOS:   ~/Library/Application Support/HexAgent/
-//   Windows: %APPDATA%/HexAgent/
-//   Linux:   ~/.config/HexAgent/
+//   macOS:   ~/Library/Application Support/ClawWork/
+//   Windows: %APPDATA%/ClawWork/
+//   Linux:   ~/.config/ClawWork/
 const userDataDir = app.getPath("userData");
 
 function ensureUserData() {
@@ -118,7 +118,7 @@ async function spawnBackend() {
       [
         "run",
         "uvicorn",
-        "hexagent_api.main:app",
+        "clawwork_api.main:app",
         "--host",
         "127.0.0.1",
         "--port",
@@ -127,7 +127,7 @@ async function spawnBackend() {
       { cwd: backendDir, stdio: "pipe" }
     );
   } else {
-    let binaryName = "hexagent_api_server";
+    let binaryName = "clawwork_api_server";
     if (process.platform === "win32") binaryName += ".exe";
     const binaryPath = path.join(
       process.resourcesPath,
@@ -169,8 +169,8 @@ async function spawnBackend() {
         PATH: newPath,
         HOST: "127.0.0.1",
         PORT: String(port),
-        HEXAGENT_DATA_DIR: userDataDir,
-        HEXAGENT_WSL_OFFLINE_DIR: wslOfflineDir,
+        CLAWWORK_DATA_DIR: userDataDir,
+        CLAWWORK_WSL_OFFLINE_DIR: wslOfflineDir,
       },
     });
   }

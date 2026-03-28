@@ -652,7 +652,7 @@
   display: inline-block;
 }
 
-/* Chat mode — phase 1: "HexAgent," centers, then phase 2: rest expands in */
+/* Chat mode — phase 1: "ClawWork," centers, then phase 2: rest expands in */
 .wh-first {
   animation: chatFirstWord 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }

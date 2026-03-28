@@ -1,5 +1,5 @@
 /**
- * i18n initialization for HexAgent frontend.
+ * i18n initialization for ClawWork frontend.
  *
  * ## Adding a new language
  * 1. Create a new folder under `src/locales/{locale}/` (e.g. `ja/`)
@@ -33,7 +33,7 @@ import zhCNOnboarding from "./locales/zh-CN/onboarding.json";
 // Read initial language from localStorage to avoid flash of wrong language
 function getInitialLanguage(): string {
   try {
-    const raw = localStorage.getItem("hexagent-settings");
+    const raw = localStorage.getItem("clawwork-settings");
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed.language) return parsed.language;
