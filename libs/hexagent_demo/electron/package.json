@@ -57,7 +57,7 @@
           ]
         }
       ],
-      "icon": "resources/icon.icns",
+      "icon": "icon.icns",
       "category": "public.app-category.developer-tools",
       "identity": null,
       "signIgnore": []
@@ -78,7 +78,7 @@
           ]
         }
       ],
-      "icon": "resources/icon.ico",
+      "icon": "icon.ico",
       "signAndEditExecutable": false
     },
     "nsis": {
