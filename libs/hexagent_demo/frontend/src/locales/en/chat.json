@@ -1,0 +1,20 @@
+{
+  "mode": {
+    "chat": "Chat",
+    "cowork": "Cowork"
+  },
+  "toggleSidePanel": "Toggle side panel",
+  "askAnything": "Ask anything...",
+  "attachFile": "Attach file",
+  "scrollToBottom": "Scroll to bottom",
+  "sendMessage": "Send message",
+  "preparingRequest": "Preparing request...",
+  "configureModel": "Configure a model in Settings first",
+  "e2bKeyRequired": "E2B API key required",
+  "setInSettings": "Set in Settings",
+  "copyMessage": "Copy message",
+  "disclaimer": "AI responses may be inaccurate. Please double-check important information.",
+  "uploadFailed": "Upload failed",
+  "failedToUpload": "Failed to upload {{filename}}: {{message}}",
+  "alreadyAttached": "\"{{filename}}\" already attached. Rename the file and try again."
+}

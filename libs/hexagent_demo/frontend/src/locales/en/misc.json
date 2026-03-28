@@ -1,0 +1,37 @@
+{
+  "folderPicker": {
+    "workInFolder": "Work in a folder",
+    "chooseNewFolder": "Choose a new folder",
+    "recent": "Recent",
+    "permissionTitle": "Allow HexAgent to access files in \"{{folder}}\"?",
+    "permissionBody": "This grants access to all files and subfolders. HexAgent will be able to read, edit, and delete files in this directory. File contents may be shared with connected AI models and tools. Avoid selecting folders containing sensitive or private data.",
+    "cancel": "Cancel",
+    "alwaysAllow": "Always Allow",
+    "allow": "Allow"
+  },
+  "modelPicker": {
+    "noModel": "No model configured",
+    "selectModel": "Select model"
+  },
+  "rightPanel": {
+    "progress": "Progress",
+    "artifacts": "Artifacts"
+  },
+  "restartRequired": {
+    "title": "Restart Required",
+    "wslComplete": "WSL runtime installation is complete, but Windows must restart before OpenAgent can continue.",
+    "pleaseRestart": "Please restart your computer now, otherwise VM/Cowork features will not work.",
+    "openSandboxSettings": "Open Sandbox Settings",
+    "recheck": "I have restarted, Re-check"
+  },
+  "vmSetup": {
+    "settingUp": "Setting up VM",
+    "installingEngine": "Installing VM Engine",
+    "buildingInstance": "Building VM Instance",
+    "installingDeps": "Installing Dependencies",
+    "clickToView": "Click to view details"
+  },
+  "sessionSetupFailed": "Session setup failed. You can still send messages.",
+  "failedToCreateConversation": "Failed to create conversation",
+  "failedToMountFolder": "Failed to mount folder"
+}
