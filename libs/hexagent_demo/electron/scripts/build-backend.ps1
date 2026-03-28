@@ -26,9 +26,10 @@ $pyinstallerArgs = @(
     "--hidden-import", "uvicorn.lifespan",
     "--hidden-import", "uvicorn.lifespan.on",
     "--hidden-import", "uvicorn.lifespan.off",
-    "--collect-submodules", "hexagent_api",
-    "--collect-submodules", "hexagent",
-    "--collect-data", "hexagent",
+    "--collect-all", "hexagent_api",
+    "--collect-all", "hexagent",
+    "--paths", "../../hexagent",
+    "--paths", ".",
     "--add-data", "../../hexagent/sandbox/vm;sandbox/vm",
     "--add-data", "skills;skills",
     "hexagent_api/server.py"

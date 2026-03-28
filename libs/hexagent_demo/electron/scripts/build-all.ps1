@@ -23,8 +23,9 @@ npm install
 npm run build
 
 Write-Host ''
-Write-Host '[2/3] Skipping electron dependencies (already installed)...'
+Write-Host '[2/3] Installing electron dependencies...'
 Set-Location $ElectronDir
+npm install
 
 if ($Target -eq 'win') {
     if ($PrepareOfflineWsl) {

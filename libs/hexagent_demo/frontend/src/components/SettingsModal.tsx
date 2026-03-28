@@ -1,4 +1,4 @@
-﻿import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { X, Plus, Trash2, Monitor, Moon, Sun, Unplug, SlidersHorizontal, Cpu, ChevronDown, ChevronRight, Check, Loader2, Eye, EyeOff, GripVertical, Bot, Wrench, Globe, ScrollText, Zap, FolderOpen, FolderPlus, Server, CircleCheck, CircleAlert, Upload, Package, Download, AppWindow, TriangleAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Settings } from "../hooks/useSettings";
@@ -13,7 +13,7 @@ import type { PhaseStatus } from "../vmSetup";
 /** Available languages. Add new entries here to support more languages. */
 const LANGUAGES = [
   { code: "en", label: "English" },
-  { code: "zh-CN", label: "绠€浣撲腑鏂? },
+  { code: "zh-CN", label: "简体中文" },
 ] as const;
 
 interface SettingsModalProps {

@@ -4,7 +4,7 @@
   "description": "ClawWork Desktop App",
   "main": "main.js",
   "scripts": {
-    "dev": "ELECTRON_DEV=1 electron .",
+    "dev": "cross-env ELECTRON_DEV=1 electron .",
     "build:mac": "electron-builder --mac --arm64",
     "build:mac-x64": "electron-builder --mac --x64",
     "build:mac-universal": "electron-builder --mac --universal",
@@ -17,7 +17,8 @@
     "tree-kill": "^1.2.2"
   },
   "devDependencies": {
-    "electron": "^33.4.11",
+    "cross-env": "^10.1.0",
+    "electron": "33.4.11",
     "electron-builder": "^25.1.8"
   },
   "build": {
@@ -40,10 +41,6 @@
       {
         "from": "backend_dist/",
         "to": "backend"
-      },
-      {
-        "from": "lima_dist/",
-        "to": "lima"
       }
     ],
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
@@ -60,7 +57,13 @@
       "icon": "icon.icns",
       "category": "public.app-category.developer-tools",
       "identity": null,
-      "signIgnore": []
+      "signIgnore": [],
+      "extraResources": [
+        {
+          "from": "lima_dist/",
+          "to": "lima"
+        }
+      ]
     },
     "afterPack": "./scripts/afterPack.js",
     "win": {

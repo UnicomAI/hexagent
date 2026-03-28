@@ -435,7 +435,7 @@ function createWindow() {
   });
 
   if (IS_DEV) {
-    mainWindow.loadURL("http://localhost:3000");
+    mainWindow.loadURL("http://127.0.0.1:3000");
   } else {
     const indexPath = path.join(
       process.resourcesPath,

@@ -427,7 +427,7 @@ class AgentManager:
 
         from hexagent_api.paths import bundled_skills_dir, skills_dir
 
-        existing_guests = {m.guest_path for m in self._vm_manager.list_mounts()}
+        existing_mounts = {m.guest_path: m for m in self._vm_manager.list_mounts()}
 
         # (subdir_name, host_root)
         mount_sources = {
@@ -438,7 +438,14 @@ class AgentManager:
         for subdir, host_path in mount_sources.items():
             if host_path.is_dir():
                 guest = f"/mnt/skills/{subdir}"
-                if guest not in existing_guests:
+                existing = existing_mounts.get(guest)
+                if existing is None or existing.host_path != str(host_path):
+                    if existing is not None:
+                        # Must unmount old one first because LocalVM.mount
+                        # throws VMMountConflictError on guest path conflicts.
+                        # target is 'skills/public' if guest is '/mnt/skills/public'
+                        target = f"skills/{subdir}"
+                        await self._vm_manager.unmount(target, defer=True)
                     skill_mounts.append(
                         Mount(source=str(host_path), target=f"skills/{subdir}")
                     )
