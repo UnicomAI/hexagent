@@ -3,11 +3,26 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $HexagentRoot = Resolve-Path "$ScriptDir\..\..\.."
 $PrebuiltDir = Join-Path $HexagentRoot "hexagent\sandbox\vm\wsl\prebuilt"
-$PrebuiltTar = Join-Path $PrebuiltDir "openagent-prebuilt.tar"
-$DistroName = "openagent"
+$PrebuiltTar = Join-Path $PrebuiltDir "hexagent-prebuilt.tar"
+$LegacyPrebuiltTar = Join-Path $PrebuiltDir "openagent-prebuilt.tar"
+$DistroName = if ($env:HEXAGENT_WSL_DISTRO) { $env:HEXAGENT_WSL_DISTRO } else { "hexagent" }
+$ForceRebuild = ($env:HEXAGENT_FORCE_REBUILD_WSL_PREBUILT -eq "1")
 
 if ($env:OS -ne "Windows_NT") {
     Write-Host "Skipping WSL prebuilt export: non-Windows environment."
+    exit 0
+}
+
+New-Item -ItemType Directory -Force -Path $PrebuiltDir | Out-Null
+
+if ((-not (Test-Path $PrebuiltTar)) -and (Test-Path $LegacyPrebuiltTar)) {
+    Write-Host "==> Found legacy prebuilt tar name, renaming to hexagent-prebuilt.tar ..."
+    Move-Item -Force $LegacyPrebuiltTar $PrebuiltTar
+}
+
+if ((Test-Path $PrebuiltTar) -and (-not $ForceRebuild)) {
+    $sizeMb = [math]::Round(((Get-Item $PrebuiltTar).Length / 1MB), 1)
+    Write-Host "==> Reusing existing WSL prebuilt image: $PrebuiltTar (${sizeMb} MB)"
     exit 0
 }
 
@@ -18,10 +33,9 @@ if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) {
 Write-Host "==> Ensuring distro '$DistroName' can start..."
 & wsl -d $DistroName -- echo ok | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    throw "WSL distro '$DistroName' is not available/runnable. Please initialize VM Instance first."
+    throw "WSL distro '$DistroName' is not available/runnable. Please initialize VM Instance first, or provide an existing hexagent-prebuilt.tar."
 }
 
-New-Item -ItemType Directory -Force -Path $PrebuiltDir | Out-Null
 if (Test-Path $PrebuiltTar) {
     Remove-Item -Force $PrebuiltTar
 }

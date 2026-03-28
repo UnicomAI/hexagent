@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+﻿import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { PanelRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAppContext } from "../store";
@@ -91,7 +91,7 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
     [dispatch]
   );
 
-  // Keyboard shortcuts: Cmd/Ctrl+Shift+1 → Chat, Cmd/Ctrl+Shift+2 → Cowork
+  // Keyboard shortcuts: Cmd/Ctrl+Shift+1 鈫?Chat, Cmd/Ctrl+Shift+2 鈫?Cowork
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const mod = isMac ? e.metaKey : e.ctrlKey;
@@ -160,7 +160,7 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
                 {t(`mode.${mode}`)}
                 <span className="custom-tooltip">
                   {t(`mode.${mode}`)}
-                  <span className="custom-tooltip-shortcut">{isMac ? "⇧⌘" : "Ctrl+Shift+"}{idx + 1}</span>
+                  <span className="custom-tooltip-shortcut">{isMac ? "鈬р寴" : "Ctrl+Shift+"}{idx + 1}</span>
                 </span>
               </button>
             ))}

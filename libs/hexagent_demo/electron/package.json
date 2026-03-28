@@ -1,7 +1,7 @@
 {
   "name": "hexagent",
   "version": "0.0.1",
-  "description": "HexAgent Desktop App",
+  "description": "ClawWork Desktop App",
   "main": "main.js",
   "scripts": {
     "dev": "ELECTRON_DEV=1 electron .",
@@ -22,7 +22,7 @@
   },
   "build": {
     "appId": "com.hexagent.app",
-    "productName": "HexAgent",
+    "productName": "ClawWork",
     "directories": {
       "buildResources": "resources",
       "output": "dist"
@@ -57,13 +57,23 @@
           ]
         }
       ],
-      "icon": "resources/icon.icns",
+      "icon": "icon.icns",
       "category": "public.app-category.developer-tools",
       "identity": null,
       "signIgnore": []
     },
     "afterPack": "./scripts/afterPack.js",
     "win": {
+      "extraResources": [
+        {
+          "from": "resources/wsl/",
+          "to": "wsl"
+        },
+        {
+          "from": "resources/icon.ico",
+          "to": "app-icon.ico"
+        }
+      ],
       "target": [
         {
           "target": "nsis",
@@ -72,7 +82,7 @@
           ]
         }
       ],
-      "icon": "resources/icon.ico",
+      "icon": "icon.ico",
       "signAndEditExecutable": false
     },
     "nsis": {

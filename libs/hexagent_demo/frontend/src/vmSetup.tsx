@@ -109,6 +109,7 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
   const [provStepMsg, setProvStepMsg] = useState<Record<string, string>>({});
   const [provLog, setProvLog] = useState<string | null>(null);
   const autoBootstrapTriggeredRef = useRef(false);
+  const autoProvisionTriggeredRef = useRef(false);
   const [autoBootstrapping, setAutoBootstrapping] = useState(false);
 
   // SSE abort controllers (kept alive across renders, never aborted on unmount)
@@ -549,6 +550,18 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
       setAutoBootstrapping(false);
     }
   }, [autoBootstrapping, phase1, phase2]);
+
+  // Windows-first run: once VM instance is ready, auto start dependency provision
+  // in background so users don't need to click "Install in background" manually.
+  useEffect(() => {
+    if (!IS_WINDOWS) return;
+    if (autoProvisionTriggeredRef.current) return;
+    if (phase1 !== "done" || phase2 !== "done") return;
+    if (phase3 !== "pending") return;
+    autoProvisionTriggeredRef.current = true;
+    notify("VM instance is ready. Starting system dependency installation in background...", "info");
+    doStartProvision(false);
+  }, [phase1, phase2, phase3]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const value: VMSetupContextValue = {
     vmStatus,

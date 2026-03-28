@@ -45,6 +45,13 @@ _UNC_PREFIXES = (r"\\wsl.localhost", r"\\wsl$")
 _PLATFORM = sys.platform
 
 
+def _decode_wsl_output(raw: bytes) -> str:
+    """Decode WSL output that may be UTF-16-LE on some Windows builds."""
+    if raw[:2] == b"\xff\xfe" or b"\x00" in raw:
+        return raw.decode("utf-16-le", errors="replace").replace("\x00", "")
+    return raw.decode("utf-8", errors="replace")
+
+
 def _resolve_wsl_exe() -> str | None:
     """Return a usable ``wsl.exe`` path.
 
@@ -453,8 +460,8 @@ class WslVM:
             msg = f"timed out after {timeout}s"
             raise WslError(msg) from None
 
-        stdout = stdout_bytes.decode("utf-8", errors="replace").removesuffix("\n")
-        stderr = stderr_bytes.decode("utf-8", errors="replace").removesuffix("\n")
+        stdout = _decode_wsl_output(stdout_bytes).removesuffix("\n")
+        stderr = _decode_wsl_output(stderr_bytes).removesuffix("\n")
 
         rc: int = process.returncode if process.returncode is not None else -1
         return CLIResult(
@@ -530,11 +537,11 @@ class WslVM:
             raise WslError(msg) from None
 
         if proc.returncode != 0:
-            stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
+            stderr = _decode_wsl_output(stderr_bytes).strip()
             msg = f"wsl.exe failed (exit {proc.returncode}): {stderr}"
             raise WslError(msg)
 
-        return stdout_bytes.decode("utf-8", errors="replace")
+        return _decode_wsl_output(stdout_bytes)
 
     async def _apply_bind_mounts(self) -> None:
         """Apply all bind mounts from ``mounts.json`` inside the distro.

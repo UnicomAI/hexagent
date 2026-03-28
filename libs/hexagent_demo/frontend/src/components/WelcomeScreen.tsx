@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+﻿import { useState, useCallback, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Paperclip, ArrowUp, X, FileText, Loader2, CircleAlert } from "lucide-react";
 import { useAppContext } from "../store";
@@ -224,7 +224,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
         })
         .finally(() => setMountingFolder(false));
     }
-    // Only trigger when warmSessionId changes (not on every folder change —
+    // Only trigger when warmSessionId changes (not on every folder change 鈥?
     // handleFolderChange already handles that when the session is ready)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [warmSessionId]);
@@ -386,7 +386,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
                 )}
                 {sandboxBlocked && (
                   <div className={`e2b-hint${value.trim() || e2bHintFlash ? " e2b-hint-visible" : ""}`}>
-                    {missingE2bKey ? t("e2bKeyRequired") : t("vmSetupRequired")} —{" "}
+                    {missingE2bKey ? t("e2bKeyRequired") : t("vmSetupRequired")} 鈥攞" "}
                     <button className="e2b-hint-link" onClick={() => onOpenSettings("sandbox")}>
                       {t("setupInSettings")}
                     </button>

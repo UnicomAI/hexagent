@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import faviconSvg from "../assets/favicon.svg";
 import {
@@ -66,7 +66,7 @@ const PROVIDERS: ProviderOption[] = [
 /** Generate a human-friendly display name from a model ID. */
 function autoDisplayName(modelId: string): string {
   if (!modelId) return "";
-  // Strip provider prefix (e.g. "anthropic/claude-sonnet-4" → "claude-sonnet-4")
+  // Strip provider prefix (e.g. "anthropic/claude-sonnet-4" 鈫?"claude-sonnet-4")
   const base = modelId.includes("/") ? modelId.split("/").pop()! : modelId;
   return base
     .replace(/[-_]/g, " ")
@@ -132,7 +132,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [error, setError] = useState("");
   const [config, setConfig] = useState<ServerConfig | null>(null);
 
-  // ── Step 1: Model ──
+  // 鈹€鈹€ Step 1: Model 鈹€鈹€
   const [selectedProvider, setSelectedProvider] = useState<ProviderOption | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [modelId, setModelId] = useState("");
@@ -141,7 +141,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [showKey, setShowKey] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // ── Step 2: Summarizer ──
+  // 鈹€鈹€ Step 2: Summarizer 鈹€鈹€
   const [sumProvider, setSumProvider] = useState<ProviderOption | null>(null);
   const [sumApiKey, setSumApiKey] = useState("");
   const [sumModelId, setSumModelId] = useState("");
@@ -151,7 +151,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [sumSameAsMain, setSumSameAsMain] = useState(true);
   const [sumShowAdvanced, setSumShowAdvanced] = useState(false);
 
-  // ── Step 3: Web Tools ──
+  // 鈹€鈹€ Step 3: Web Tools 鈹€鈹€
   const [searchProvider, setSearchProvider] = useState("");
   const [searchKey, setSearchKey] = useState("");
   const [fetchProvider, setFetchProvider] = useState("");
@@ -159,9 +159,9 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [showSearchKey, setShowSearchKey] = useState(false);
   const [showFetchKey, setShowFetchKey] = useState(false);
 
-  // ── Step 4: Compute ──
+  // 鈹€鈹€ Step 4: Compute 鈹€鈹€
 
-  // VM setup — shared with Settings via VMSetupProvider (single source of truth)
+  // VM setup 鈥?shared with Settings via VMSetupProvider (single source of truth)
   const vm = useVMSetup();
   const vmAutoBootstrapping = vm.autoBootstrapping;
   const [vmSkipped, setVmSkipped] = useState(false);
@@ -244,7 +244,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
 
   if (!open) return null;
 
-  // ── Navigation ──
+  // 鈹€鈹€ Navigation 鈹€鈹€
   const goNext = () => {
     const idx = stepIndex(step);
     if (idx < STEPS.length - 1) {
@@ -260,7 +260,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
     }
   };
 
-  // ── Save all config at the end ──
+  // 鈹€鈹€ Save all config at the end 鈹€鈹€
   const handleFinish = async () => {
     if (!config) return;
     if (!selectedProvider || !apiKey.trim() || !modelId.trim()) {
@@ -329,7 +329,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
     }
   };
 
-  // ── Validation for model step ──
+  // 鈹€鈹€ Validation for model step 鈹€鈹€
   const isCustomProvider = selectedProvider?.id === "custom";
   const canProceedFromModel =
     selectedProvider &&
@@ -341,7 +341,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
     <div className="setup-overlay">
       <div className="setup-modal">
 
-        {/* ── Step 0: Welcome — Name & Theme ── */}
+        {/* 鈹€鈹€ Step 0: Welcome 鈥?Name & Theme 鈹€鈹€ */}
         {step === "welcome" && (
           <div className="setup-step setup-welcome">
             <div className="setup-welcome-brand">
@@ -390,7 +390,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           </div>
         )}
 
-        {/* ── Step 1: Provider selection ── */}
+        {/* 鈹€鈹€ Step 1: Provider selection 鈹€鈹€ */}
         {step === "provider" && (
           <div className="setup-step">
             <div className="setup-step-header">
@@ -430,7 +430,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           </div>
         )}
 
-        {/* ── Step 2: Model credentials ── */}
+        {/* 鈹€鈹€ Step 2: Model credentials 鈹€鈹€ */}
         {step === "model" && selectedProvider && (
           <div className="setup-step">
             <div className="setup-step-header">
@@ -555,7 +555,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           </div>
         )}
 
-        {/* ── Step 2: Summarizer ── */}
+        {/* 鈹€鈹€ Step 2: Summarizer 鈹€鈹€ */}
         {step === "summarizer" && (
           <div className="setup-step">
             <div className="setup-step-header">
@@ -722,7 +722,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           </div>
         )}
 
-        {/* ── Step 3: Web Tools ── */}
+        {/* 鈹€鈹€ Step 3: Web Tools 鈹€鈹€ */}
         {step === "tools" && (
           <div className="setup-step">
             <div className="setup-step-header">
@@ -838,7 +838,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           </div>
         )}
 
-        {/* ── Step 4: Compute ── */}
+        {/* 鈹€鈹€ Step 4: Compute 鈹€鈹€ */}
         {step === "compute" && (
           <div className="setup-step">
             <div className="setup-step-header">
@@ -1079,7 +1079,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           </div>
         )}
 
-        {/* ── Step 5: Done ── */}
+        {/* 鈹€鈹€ Step 5: Done 鈹€鈹€ */}
         {step === "done" && (
           <div className="setup-step">
             <div className="setup-done-icon">
