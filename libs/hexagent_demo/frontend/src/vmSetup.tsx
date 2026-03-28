@@ -27,12 +27,30 @@ import {
 import type { VMStatus, ProvisionStepDef } from "./api";
 import { useAppContext } from "./store";
 
+const WSL_MANUAL_INSTALL_CMD = "wsl --install --no-distribution";
+const IS_WINDOWS = navigator.platform.toUpperCase().includes("WIN");
+const RESTART_REQUIRED_PATTERN = /restart windows|restart your computer|reboot/i;
+
+function buildWslInstallRecoveryMessage(detail?: string): string {
+  const base =
+    `Automatic runtime installation failed. Run this in an Administrator PowerShell: ${WSL_MANUAL_INSTALL_CMD}. ` +
+    "Then restart Windows and click Retry. You can skip Local VM for now and use E2B Sandbox (chat mode).";
+  const trimmed = (detail || "").trim();
+  if (!trimmed) return base;
+  return `${base} Details: ${trimmed}`;
+}
+
+function isRestartRequiredMessage(detail?: string | null): boolean {
+  return RESTART_REQUIRED_PATTERN.test((detail || "").trim());
+}
+
 // ── Types ──
 
 export type PhaseStatus = "checking" | "pending" | "running" | "done" | "error";
 
 export interface VMSetupContextValue {
   vmStatus: VMStatus | null;
+  autoBootstrapping: boolean;
 
   phase1: PhaseStatus;
   phase1Msg: string;
@@ -50,6 +68,7 @@ export interface VMSetupContextValue {
   provLog: string | null;
 
   installLima: () => void;
+  recheckVmEngine: () => void;
   buildVMInstance: () => void;
   startProvision: (force?: boolean) => void;
   stopProvision: () => void;
@@ -89,6 +108,9 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
   const [provStepStatus, setProvStepStatus] = useState<Record<string, PhaseStatus>>({});
   const [provStepMsg, setProvStepMsg] = useState<Record<string, string>>({});
   const [provLog, setProvLog] = useState<string | null>(null);
+  const autoBootstrapTriggeredRef = useRef(false);
+  const autoProvisionTriggeredRef = useRef(false);
+  const [autoBootstrapping, setAutoBootstrapping] = useState(false);
 
   // SSE abort controllers (kept alive across renders, never aborted on unmount)
   const installCtrl = useRef<AbortController | null>(null);
@@ -105,6 +127,53 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
 
   const notify = (message: string, type: "error" | "info" | "success") => {
     dispatch({ type: "SHOW_NOTIFICATION", payload: { message, type } });
+  };
+
+  const showRestartRequiredModal = (message: string) => {
+    dispatch({ type: "SHOW_RESTART_REQUIRED_MODAL", payload: { message } });
+  };
+
+  const hideRestartRequiredModal = () => {
+    dispatch({ type: "HIDE_RESTART_REQUIRED_MODAL" });
+  };
+
+  const doRecheckVmEngine = async () => {
+    hideRestartRequiredModal();
+    setPhase1("checking");
+    setPhase1Msg("Re-checking runtime status...");
+    setPhase1Error("");
+    try {
+      const vs = await getVMStatus();
+      setVmStatus(vs);
+      dispatch({ type: "SET_VM_STATUS", payload: vs });
+      if (!vs.supported) {
+        setPhase1("error");
+        setPhase1Msg("");
+        setPhase1Error("Not supported on this platform");
+        return;
+      }
+      if (vs.installed) {
+        hideRestartRequiredModal();
+        setPhase1("done");
+        setPhase1Msg("");
+        setPhase1Error("");
+        setPhase2("pending");
+        attachBuild();
+      } else if (vs.reason) {
+        setPhase1("error");
+        setPhase1Msg("");
+        setPhase1Error(vs.reason);
+        if (isRestartRequiredMessage(vs.reason)) showRestartRequiredModal(vs.reason);
+      } else {
+        setPhase1("pending");
+        setPhase1Msg("");
+        setPhase1Error("");
+      }
+    } catch {
+      setPhase1("error");
+      setPhase1Msg("");
+      setPhase1Error("Could not check VM status");
+    }
   };
 
   // ── Phase 3: Provision ──
@@ -184,7 +253,97 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
 
   // ── Phase 1: Install Lima ──
 
-  const doInstallLima = () => {
+  const doInstallLima = async () => {
+    hideRestartRequiredModal();
+    const inferredBackend = navigator.platform.toUpperCase().includes("WIN") ? "wsl" : "lima";
+    const currentBackend = vmStatus?.backend ?? inferredBackend;
+    const canAssistWslInstall =
+      currentBackend === "wsl" &&
+      typeof window !== "undefined" &&
+      typeof window.electronAPI?.installWslRuntime === "function";
+
+    if (canAssistWslInstall) {
+      setPhase1("checking");
+      setPhase1Error("");
+      setPhase1Msg("Checking Windows virtualization prerequisites...");
+
+      try {
+        if (typeof window.electronAPI?.checkWslPrerequisites === "function") {
+          const pre = await window.electronAPI.checkWslPrerequisites();
+          const autoFixable =
+            pre?.code === "WINDOWS_FEATURES_DISABLED" ||
+            pre?.code === "HYPERVISOR_DISABLED";
+          if (!pre.ok && !autoFixable) {
+            setPhase1("error");
+            setPhase1Msg("");
+            setPhase1Error(pre.message || "WSL prerequisites are not ready.");
+            notify(pre.message || "WSL prerequisites are not ready.", "error");
+            return;
+          }
+          if (!pre.ok && autoFixable) {
+            notify("Windows features are not enabled yet. OpenAgent will try to enable them with admin permission.", "info");
+          }
+          if (pre.rebootPending) {
+            const msg = "Windows restart is pending. Please restart first, then continue VM setup.";
+            setPhase1("error");
+            setPhase1Msg("");
+            setPhase1Error(msg);
+            notify(msg, "info");
+            showRestartRequiredModal(msg);
+            return;
+          }
+        }
+
+        setPhase1("running");
+        setPhase1Error("");
+        setPhase1Msg("Installing required Windows runtime (admin permission needed)...");
+
+        const res = await window.electronAPI!.installWslRuntime!();
+        if (!res.ok) {
+          const raw = res.message || "Runtime installation failed.";
+          const msg = buildWslInstallRecoveryMessage(raw);
+          setPhase1("error");
+          setPhase1Error(msg);
+          notify("Automatic runtime installation failed. See VM Engine details for manual steps.", "error");
+          return;
+        }
+
+        if (res.rebootRequired) {
+          const msg = res.message || "Runtime installed. Please restart Windows before continuing VM setup.";
+          setPhase1("error");
+          setPhase1Msg("");
+          setPhase1Error(msg);
+          notify(msg, "info");
+          showRestartRequiredModal(msg);
+          return;
+        }
+
+        const vs = await getVMStatus();
+        setVmStatus(vs);
+        dispatch({ type: "SET_VM_STATUS", payload: vs });
+
+        if (vs.installed) {
+          hideRestartRequiredModal();
+          setPhase1("done");
+          setPhase1Msg("");
+          notify("Runtime installed", "success");
+          setPhase2("pending");
+          attachBuild();
+        } else {
+          setPhase1("pending");
+          setPhase1Msg("Runtime install command completed. Click Retry if needed.");
+          notify("Runtime install command completed", "info");
+        }
+      } catch (err: unknown) {
+        const raw = err instanceof Error ? err.message : String(err);
+        const msg = buildWslInstallRecoveryMessage(raw);
+        setPhase1("error");
+        setPhase1Error(msg);
+        notify("Automatic runtime installation failed. See VM Engine details for manual steps.", "error");
+      }
+      return;
+    }
+
     setPhase1("running");
     setPhase1Error("");
     setPhase1Msg("Starting installation...");
@@ -250,23 +409,33 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
         }
       } catch { /* best effort */ }
 
-      // Phase 1: check if Lima is installed
+      // Phase 1: VM engine (Lima / WSL)
       let limaInstalled = false;
+      let vmStatusSnapshot: Awaited<ReturnType<typeof getVMStatus>> | null = null;
       try {
         const vs = await getVMStatus();
+        vmStatusSnapshot = vs;
         if (cancelled) return;
         setVmStatus(vs);
-        if (!vs.supported) {
-          setPhase1("error");
-          setPhase1Error("Not supported on this platform");
-          return;
-        }
-        if (vs.installed) {
-          setPhase1("done");
-          limaInstalled = true;
-        } else {
-          setPhase1("pending");
-        }
+        dispatch({ type: "SET_VM_STATUS", payload: vs });
+      if (!vs.supported) {
+        hideRestartRequiredModal();
+        setPhase1("error");
+        setPhase1Error("Not supported on this platform");
+        return;
+      }
+      if (vs.installed) {
+        hideRestartRequiredModal();
+        setPhase1("done");
+        limaInstalled = true;
+      } else if (vs.reason) {
+        setPhase1("error");
+        setPhase1Error(vs.reason);
+        if (isRestartRequiredMessage(vs.reason)) showRestartRequiredModal(vs.reason);
+      } else {
+        hideRestartRequiredModal();
+        setPhase1("pending");
+      }
       } catch {
         if (cancelled) return;
         setPhase1("error");
@@ -276,26 +445,42 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
 
       if (!limaInstalled) return;
 
-      // Phase 2: check VM instance
-      let vmReady = false;
-      try {
-        const bs = await getVMBuildStatus();
-        if (cancelled) return;
-        if (bs.status === "running") {
-          // Re-attach to an in-progress build
-          attachBuild();
-        } else if (bs.vm_state === "Running") {
-          setPhase2("done");
-          vmReady = true;
-        } else if (bs.vm_state === "Stopped") {
-          setPhase2("pending");
-          setPhase2Msg("VM exists but is stopped");
-        } else {
+      // Phase 2: VM instance (Lima must be Running; WSL is on-demand — Stopped is OK)
+      const runningLabels = ["Running"];
+      const wslStoppedLabels = ["Stopped"];
+      let vmReady = vmStatusSnapshot?.vm_ready === true;
+      if (vmReady) {
+        setPhase2("done");
+      } else if (vmStatusSnapshot?.instance_error) {
+        setPhase2("error");
+        setPhase2Error(vmStatusSnapshot.instance_error);
+      } else {
+        try {
+          const bs = await getVMBuildStatus();
+          if (cancelled) return;
+          if (bs.status === "running") {
+            // Re-attach to an in-progress build
+            attachBuild();
+          } else if (bs.vm_state && runningLabels.includes(bs.vm_state)) {
+            setPhase2("done");
+            vmReady = true;
+          } else if (
+            vmStatusSnapshot?.backend === "wsl" &&
+            bs.vm_state &&
+            wslStoppedLabels.includes(bs.vm_state)
+          ) {
+            setPhase2("done");
+            vmReady = true;
+          } else if (bs.vm_state === "Stopped") {
+            setPhase2("pending");
+            setPhase2Msg("VM exists but is stopped");
+          } else {
+            setPhase2("pending");
+          }
+        } catch {
+          if (cancelled) return;
           setPhase2("pending");
         }
-      } catch {
-        if (cancelled) return;
-        setPhase2("pending");
       }
 
       if (!vmReady) return;
@@ -333,13 +518,60 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
 
   // ── Context value ──
 
+  // Windows-only auto setup:
+  // automatically trigger VM Engine + VM Instance on startup so users
+  // don't need to click "Install" manually after app installation.
+  useEffect(() => {
+    if (!IS_WINDOWS) return;
+    if (autoBootstrapTriggeredRef.current) return;
+    if (!vmStatus?.supported) return;
+    if (phase1 === "checking") return;
+    if (phase1 === "running" || phase2 === "running") return;
+
+    if (phase1 === "pending") {
+      autoBootstrapTriggeredRef.current = true;
+      setAutoBootstrapping(true);
+      notify("Detected first-time Windows setup. Starting VM runtime install automatically...", "info");
+      void doInstallLima();
+      return;
+    }
+
+    if (phase1 === "done" && phase2 === "pending") {
+      autoBootstrapTriggeredRef.current = true;
+      setAutoBootstrapping(true);
+      notify("Runtime is ready. Starting VM instance setup automatically...", "info");
+      attachBuild();
+    }
+  }, [vmStatus, phase1, phase2]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!autoBootstrapping) return;
+    if (phase2 === "done" || phase1 === "error" || phase2 === "error") {
+      setAutoBootstrapping(false);
+    }
+  }, [autoBootstrapping, phase1, phase2]);
+
+  // Windows-first run: once VM instance is ready, auto start dependency provision
+  // in background so users don't need to click "Install in background" manually.
+  useEffect(() => {
+    if (!IS_WINDOWS) return;
+    if (autoProvisionTriggeredRef.current) return;
+    if (phase1 !== "done" || phase2 !== "done") return;
+    if (phase3 !== "pending") return;
+    autoProvisionTriggeredRef.current = true;
+    notify("VM instance is ready. Starting system dependency installation in background...", "info");
+    doStartProvision(false);
+  }, [phase1, phase2, phase3]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const value: VMSetupContextValue = {
     vmStatus,
+    autoBootstrapping,
     phase1, phase1Msg, phase1Error,
     phase2, phase2Msg, phase2Error,
     phase3, phase3Error,
     provSteps, provStepStatus, provStepMsg, provLog,
     installLima: doInstallLima,
+    recheckVmEngine: doRecheckVmEngine,
     buildVMInstance: attachBuild,
     startProvision: doStartProvision,
     stopProvision: doStopProvision,

@@ -64,6 +64,7 @@ class ToolsConfig:
 @dataclass
 class SandboxConfig:
     e2b_api_key: str = ""
+    chat_enabled: bool = False
 
 
 @dataclass
@@ -91,6 +92,7 @@ class AppConfig:
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
     disabled_skills: list[str] = field(default_factory=list)
     mcp_servers: list[McpServerConfig] = field(default_factory=list)
+    language: str = "en"
 
     @property
     def main_model(self) -> ModelConfig | None:
@@ -119,7 +121,8 @@ def load_config() -> AppConfig:
         sandbox = SandboxConfig(**file_data["sandbox"]) if "sandbox" in file_data else SandboxConfig()
         disabled_skills = file_data.get("disabled_skills", [])
         mcp_servers = [McpServerConfig(**m) for m in file_data.get("mcp_servers", [])]
-        return AppConfig(models=models, main_model_id=main_id, fast_model_id=fast_id, agents=agents, tools=tools, sandbox=sandbox, disabled_skills=disabled_skills, mcp_servers=mcp_servers)
+        language = file_data.get("language", "en")
+        return AppConfig(models=models, main_model_id=main_id, fast_model_id=fast_id, agents=agents, tools=tools, sandbox=sandbox, disabled_skills=disabled_skills, mcp_servers=mcp_servers, language=language)
 
     # No config.json — return empty config (frontend will show setup flow)
     config = AppConfig()

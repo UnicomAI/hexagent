@@ -15,6 +15,11 @@ export interface Notification {
   type: "error" | "info" | "success";
 }
 
+export interface RestartRequiredModalState {
+  open: boolean;
+  message: string;
+}
+
 export interface StreamingEntry {
   messageId: string;
   blocks: ContentBlock[];
@@ -25,6 +30,8 @@ export interface AppState {
   activeConversationId: string | null;
   /** Pre-conversation warm session ID (exists before first message). */
   warmSessionId: string | null;
+  /** True after user submits until SSE stream starts (or request fails). */
+  isRequestPending: boolean;
   /** Per-conversation streaming state. A key exists iff that conversation is streaming. */
   streamingByConversation: Record<string, StreamingEntry>;
   sidebarCollapsed: boolean;
@@ -39,6 +46,7 @@ export interface AppState {
   /** Remembers the last active conversation (or null=welcome) per mode. */
   lastActiveByMode: Record<ConversationMode, string | null>;
   notifications: Notification[];
+  restartRequiredModal: RestartRequiredModalState;
   filePreview: { path: string; mimeType: string; conversationId: string } | null;
   filePreviewVisible: boolean;
   /** Saved right-panel state before file preview opened (for restore on close). */
@@ -49,6 +57,7 @@ export const initialState: AppState = {
   conversations: [],
   activeConversationId: null,
   warmSessionId: null,
+  isRequestPending: false,
   streamingByConversation: {},
   sidebarCollapsed: true,
   rightPanelByConversation: {},
@@ -58,10 +67,11 @@ export const initialState: AppState = {
   selectedModelId: "",
   selectedMode: (() => {
     const m = window.location.pathname.match(/^\/(chat|cowork)/);
-    return (m ? m[1] : "chat") as ConversationMode;
+    return (m ? m[1] : "cowork") as ConversationMode;
   })(),
   lastActiveByMode: { chat: null, cowork: null },
   notifications: [],
+  restartRequiredModal: { open: false, message: "" },
   filePreview: null,
   filePreviewVisible: false,
   rightPanelBeforePreview: null,
@@ -73,12 +83,14 @@ export type Action =
   | { type: "DELETE_CONVERSATION"; payload: string }
   | { type: "SET_ACTIVE_CONVERSATION"; payload: string | null }
   | { type: "SET_WARM_SESSION"; payload: string | null }
+  | { type: "REQUEST_START" }
+  | { type: "REQUEST_END" }
   | { type: "ADD_USER_MESSAGE"; payload: { conversationId: string; message: Message } }
   | { type: "STREAM_START"; payload: { messageId: string; conversationId: string } }
-  | { type: "STREAM_TEXT_DELTA"; payload: { conversationId: string; delta: string } }
-  | { type: "STREAM_REASONING_DELTA"; payload: { conversationId: string; delta: string } }
-  | { type: "STREAM_TOOL_CALL_DELTA"; payload: { conversationId: string; index: number; name?: string; id?: string; args?: string } }
-  | { type: "STREAM_TOOL_USE_START"; payload: { conversationId: string; tool: ToolCall } }
+  | { type: "STREAM_TEXT_DELTA"; payload: { conversationId: string; delta: string; ts?: number } }
+  | { type: "STREAM_REASONING_DELTA"; payload: { conversationId: string; delta: string; ts?: number } }
+  | { type: "STREAM_TOOL_CALL_DELTA"; payload: { conversationId: string; index: number; name?: string; id?: string; args?: string; ts?: number } }
+  | { type: "STREAM_TOOL_USE_START"; payload: { conversationId: string; tool: ToolCall & { ts?: number } } }
   | { type: "STREAM_TOOL_RESULT"; payload: { conversationId: string; id: string; output: string } }
   | { type: "STREAM_SUBAGENT_TEXT_DELTA"; payload: { conversationId: string; task_id: string; delta: string } }
   | { type: "STREAM_SUBAGENT_REASONING_DELTA"; payload: { conversationId: string; task_id: string; delta: string } }
@@ -98,6 +110,8 @@ export type Action =
   | { type: "SET_SELECTED_MODE"; payload: ConversationMode }
   | { type: "SHOW_NOTIFICATION"; payload: { message: string; type: "error" | "info" | "success" } }
   | { type: "DISMISS_NOTIFICATION"; payload: string }
+  | { type: "SHOW_RESTART_REQUIRED_MODAL"; payload: { message: string } }
+  | { type: "HIDE_RESTART_REQUIRED_MODAL" }
   | { type: "SET_FILE_PREVIEW"; payload: { path: string; mimeType: string; conversationId: string } | null }
   | { type: "SET_FILE_PREVIEW_VISIBLE"; payload: boolean };
 
@@ -117,8 +131,8 @@ function finalizeStreamingTool(blocks: ContentBlock[]): ContentBlock[] {
   return blocks;
 }
 
-function appendTextDelta(blocks: ContentBlock[], delta: string): ContentBlock[] {
-  const finalized = finalizeStreamingTool(finalizeThinking(blocks));
+function appendTextDelta(blocks: ContentBlock[], delta: string, ts?: number): ContentBlock[] {
+  const finalized = finalizeStreamingTool(finalizeThinking(blocks, ts));
   const last = finalized[finalized.length - 1];
   if (last && last.type === "text") {
     return [...finalized.slice(0, -1), { type: "text", text: last.text + delta }];
@@ -126,22 +140,22 @@ function appendTextDelta(blocks: ContentBlock[], delta: string): ContentBlock[] 
   return [...finalized, { type: "text", text: delta }];
 }
 
-function appendReasoningDelta(blocks: ContentBlock[], delta: string): ContentBlock[] {
+function appendReasoningDelta(blocks: ContentBlock[], delta: string, ts?: number): ContentBlock[] {
   const finalized = finalizeStreamingTool(blocks);
   const last = finalized[finalized.length - 1];
   if (last && last.type === "thinking") {
     return [...finalized.slice(0, -1), { ...last, text: last.text + delta }];
   }
-  return [...finalized, { type: "thinking", text: delta, startedAt: Date.now() }];
+  return [...finalized, { type: "thinking", text: delta, startedAt: ts ?? Date.now() }];
 }
 
 /** Mark the last thinking block as ended (if it has no endedAt yet). */
-function finalizeThinking(blocks: ContentBlock[]): ContentBlock[] {
+function finalizeThinking(blocks: ContentBlock[], ts?: number): ContentBlock[] {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i];
     if (b.type === "thinking" && !b.endedAt) {
       const updated = [...blocks];
-      updated[i] = { ...b, endedAt: Date.now() };
+      updated[i] = { ...b, endedAt: ts ?? Date.now() };
       return updated;
     }
     // Only finalize the most recent thinking block — stop searching once we hit a non-thinking block
@@ -152,9 +166,9 @@ function finalizeThinking(blocks: ContentBlock[]): ContentBlock[] {
 
 function appendToolCallDelta(
   blocks: ContentBlock[],
-  delta: { index: number; name?: string; id?: string; args?: string },
+  delta: { index: number; name?: string; id?: string; args?: string; ts?: number },
 ): ContentBlock[] {
-  blocks = finalizeThinking(blocks);
+  blocks = finalizeThinking(blocks, delta.ts);
   const last = blocks[blocks.length - 1];
   // Append to existing streaming block only if same index
   if (last && last.type === "tool_call" && last.tool.streaming && last.tool.streamIndex === delta.index) {
@@ -224,8 +238,8 @@ function subAppendToolCallDelta(
   ];
 }
 
-function appendToolStart(blocks: ContentBlock[], tool: ToolCall): ContentBlock[] {
-  blocks = finalizeThinking(blocks);
+function appendToolStart(blocks: ContentBlock[], tool: ToolCall & { ts?: number }): ContentBlock[] {
+  blocks = finalizeThinking(blocks, tool.ts);
   blocks = finalizeStreamingTool(blocks);
 
   // Find existing block: match by id first, then by name (first incomplete one)
@@ -525,6 +539,12 @@ export function reducer(state: AppState, action: Action): AppState {
     case "SET_WARM_SESSION":
       return { ...state, warmSessionId: action.payload };
 
+    case "REQUEST_START":
+      return { ...state, isRequestPending: true };
+
+    case "REQUEST_END":
+      return { ...state, isRequestPending: false };
+
     case "ADD_USER_MESSAGE":
       return {
         ...state,
@@ -537,6 +557,10 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case "STREAM_START": {
       const { conversationId: cid, messageId } = action.payload;
+      // Check if a message with this ID already exists (reconnect replay).
+      // If so, just re-create the streaming entry without adding a duplicate.
+      const conv = state.conversations.find((c) => c.id === cid);
+      const alreadyExists = conv?.messages?.some((m) => m.id === messageId) ?? false;
       const placeholder: Message = {
         id: messageId,
         role: "assistant",
@@ -545,26 +569,29 @@ export function reducer(state: AppState, action: Action): AppState {
       };
       return {
         ...state,
+        isRequestPending: false,
         streamingByConversation: {
           ...state.streamingByConversation,
           [cid]: { messageId, blocks: [] },
         },
-        conversations: state.conversations.map((c) =>
-          c.id === cid
-            ? { ...c, messages: [...(c.messages ?? []), placeholder] }
-            : c
-        ),
+        conversations: alreadyExists
+          ? state.conversations
+          : state.conversations.map((c) =>
+              c.id === cid
+                ? { ...c, messages: [...(c.messages ?? []), placeholder] }
+                : c
+            ),
       };
     }
 
     case "STREAM_TEXT_DELTA":
       return updateStreamBlocks(state, action.payload.conversationId, (blocks) =>
-        appendTextDelta(blocks, action.payload.delta),
+        appendTextDelta(blocks, action.payload.delta, action.payload.ts),
       );
 
     case "STREAM_REASONING_DELTA":
       return updateStreamBlocks(state, action.payload.conversationId, (blocks) =>
-        appendReasoningDelta(blocks, action.payload.delta),
+        appendReasoningDelta(blocks, action.payload.delta, action.payload.ts),
       );
 
     case "STREAM_TOOL_CALL_DELTA":
@@ -629,6 +656,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const { [endCid]: _, ...restStreaming } = state.streamingByConversation;
       return {
         ...state,
+        isRequestPending: false,
         streamingByConversation: restStreaming,
         conversations: state.conversations.map((c) =>
           c.id === endCid
@@ -657,6 +685,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const { [errCid]: __, ...restStreamingErr } = state.streamingByConversation;
       return {
         ...state,
+        isRequestPending: false,
         streamingByConversation: restStreamingErr,
         // Persist the error blocks into the message so user can see them
         conversations: errEntry
@@ -769,6 +798,24 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         notifications: state.notifications.filter((n) => n.id !== action.payload),
+      };
+
+    case "SHOW_RESTART_REQUIRED_MODAL":
+      return {
+        ...state,
+        restartRequiredModal: {
+          open: true,
+          message: action.payload.message,
+        },
+      };
+
+    case "HIDE_RESTART_REQUIRED_MODAL":
+      return {
+        ...state,
+        restartRequiredModal: {
+          open: false,
+          message: "",
+        },
       };
 
     case "SET_FILE_PREVIEW": {

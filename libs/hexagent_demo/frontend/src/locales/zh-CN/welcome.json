@@ -1,0 +1,29 @@
+{
+  "heading": {
+    "chatWords": ["ClawWork，", "随时为你效劳。"],
+    "coworkWords": ["ClawWork，", "助你高效完成任务。"]
+  },
+  "placeholders": {
+    "chat": [
+      "想象一下，我来实现...",
+      "你有什么想法？",
+      "描述那些不可能的事...",
+      "从一个想法开始..."
+    ],
+    "cowork": [
+      "今天我能帮你什么？",
+      "描述你想完成的任务...",
+      "我们一起做点什么？"
+    ]
+  },
+  "attachFile": "添加附件",
+  "sendMessage": "发送消息",
+  "mountingDirectory": "正在挂载目录...",
+  "preparingRequest": "正在准备请求...",
+  "configureModel": "请先在设置中配置模型",
+  "mountingFolder": "正在挂载文件夹...",
+  "sandboxRequired": "需要设置沙盒",
+  "e2bKeyRequired": "需要 E2B API 密钥",
+  "vmSetupRequired": "需要设置虚拟机",
+  "setupInSettings": "前往设置"
+}

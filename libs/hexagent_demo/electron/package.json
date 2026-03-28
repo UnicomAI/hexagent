@@ -1,7 +1,7 @@
 {
   "name": "hexagent",
   "version": "0.0.1",
-  "description": "HexAgent Desktop App",
+  "description": "ClawWork Desktop App",
   "main": "main.js",
   "scripts": {
     "dev": "ELECTRON_DEV=1 electron .",
@@ -17,12 +17,12 @@
     "tree-kill": "^1.2.2"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
+    "electron": "^33.4.11",
     "electron-builder": "^25.1.8"
   },
   "build": {
     "appId": "com.hexagent.app",
-    "productName": "HexAgent",
+    "productName": "ClawWork",
     "directories": {
       "buildResources": "resources",
       "output": "dist"
@@ -50,29 +50,46 @@
     "mac": {
       "target": [
         {
-          "target": "dir",
-          "arch": ["arm64", "x64"]
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ],
-      "icon": "resources/icon.icns",
+      "icon": "icon.icns",
       "category": "public.app-category.developer-tools",
       "identity": null,
       "signIgnore": []
     },
     "afterPack": "./scripts/afterPack.js",
     "win": {
+      "extraResources": [
+        {
+          "from": "resources/wsl/",
+          "to": "wsl"
+        },
+        {
+          "from": "resources/icon.ico",
+          "to": "app-icon.ico"
+        }
+      ],
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
-      "icon": "resources/icon.ico",
+      "icon": "icon.ico",
       "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": true,
+      "include": "resources/installer.nsh"
     }
   }
 }

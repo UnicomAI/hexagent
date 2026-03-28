@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+﻿import { useState, useCallback, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Paperclip, ArrowUp, X, FileText, Loader2, CircleAlert } from "lucide-react";
 import { useAppContext } from "../store";
 import { uploadSessionFile, deleteSessionFile, updateWarmSession } from "../api";
@@ -23,8 +24,10 @@ interface WelcomeScreenProps {
 }
 
 export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: WelcomeScreenProps) {
+  const { t } = useTranslation("welcome");
   const { state, dispatch } = useAppContext();
   const warmSessionId = state.warmSessionId;
+  const isPreparingRequest = state.isRequestPending;
   const isCowork = mode === "cowork";
   const noModels = !state.serverConfig?.models?.length;
   const missingE2bKey = !isCowork && !state.serverConfig?.sandbox?.e2b_api_key;
@@ -33,23 +36,13 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
   const [e2bHintFlash, setE2bHintFlash] = useState(false);
   const e2bHintTimer = useRef<ReturnType<typeof setTimeout>>(null);
 
-  const chatPlaceholders = [
-    "Imagine it, I'll make it happen...",
-    "What's your idea?",
-    "Describe the impossible...",
-    "Start with an idea...",
-  ];
-  const coworkPlaceholders = [
-    "How can I help you today?",
-    "Describe the task you'd like to accomplish...",
-    "What should we work on together?",
-  ];
-  const placeholders = isCowork ? coworkPlaceholders : chatPlaceholders;
+  const placeholders = t(isCowork ? "placeholders.cowork" : "placeholders.chat", { returnObjects: true }) as string[];
 
   const [value, setValue] = useState("");
   const [current, setCurrent] = useState(0);
   const [prev, setPrev] = useState<number | null>(null);
   const [selectedFolder, setSelectedFolder] = useState("");
+  const [mountingFolder, setMountingFolder] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -111,12 +104,22 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
 
   const doneFiles = pendingFiles.filter((f) => f.status === "done");
   const anyUploading = pendingFiles.some((f) => f.status === "uploading");
+  const sendDisabled = (!value.trim() && doneFiles.length === 0) || anyUploading || mountingFolder || isPreparingRequest || noModels || sandboxBlocked;
+  const sendTitle = noModels
+    ? t("configureModel")
+    : mountingFolder
+      ? t("mountingFolder")
+      : isPreparingRequest
+        ? t("preparingRequest")
+      : sandboxBlocked
+        ? t("sandboxRequired")
+        : t("sendMessage");
 
   const handleSubmit = useCallback(() => {
     if (sandboxBlocked) { flashE2bHint(); return; }
     const trimmed = value.trim();
     const hasContent = trimmed || doneFiles.length > 0;
-    if (!hasContent || anyUploading) return;
+    if (!hasContent || anyUploading || mountingFolder || isPreparingRequest) return;
     const opts: { workingDir?: string; attachments?: Attachment[] } = {};
     if (selectedFolder) opts.workingDir = selectedFolder;
     if (doneFiles.length > 0) {
@@ -125,7 +128,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     onSubmit(trimmed, Object.keys(opts).length > 0 ? opts : undefined);
     setValue("");
     setPendingFiles([]);
-  }, [value, onSubmit, selectedFolder, doneFiles, anyUploading, sandboxBlocked, flashE2bHint]);
+  }, [value, onSubmit, selectedFolder, doneFiles, anyUploading, mountingFolder, isPreparingRequest, sandboxBlocked, flashE2bHint]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -156,7 +159,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     // Check for name collision
     const collision = pendingFilesRef.current.some((f) => f.name === file.name && f.status !== "failed");
     if (collision) {
-      const error = `"${file.name}" already attached. Rename the file and try again.`;
+      const error = t("chat:alreadyAttached", { filename: file.name });
       setPendingFiles((prev) => [...prev, { id, name: file.name, status: "failed" as const, error }]);
       dispatch({ type: "SHOW_NOTIFICATION", payload: { message: error, type: "error" } });
       return;
@@ -171,13 +174,13 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
         );
       })
       .catch((err) => {
-        const message = err instanceof Error ? err.message : "Upload failed";
+        const message = err instanceof Error ? err.message : t("chat:uploadFailed");
         setPendingFiles((prev) =>
           prev.map((f) => f.id === id ? { ...f, status: "failed" as const, error: message } : f)
         );
         dispatch({
           type: "SHOW_NOTIFICATION",
-          payload: { message: `Failed to upload ${file.name}: ${message}`, type: "error" },
+          payload: { message: t("chat:failedToUpload", { filename: file.name, message }), type: "error" },
         });
       });
   }, [warmSessionId, dispatch, sandboxBlocked, flashE2bHint]);
@@ -196,9 +199,15 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     setSelectedFolder(folder);
     if (warmSessionId && folder) {
       // Mount the folder in the warm session
-      updateWarmSession(warmSessionId, { working_dir: folder }).catch(() => {
-        dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to mount folder", type: "error" } });
-      });
+      setMountingFolder(true);
+      updateWarmSession(warmSessionId, { working_dir: folder })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          // Benign race: warm session may be claimed by conversation creation.
+          if (msg.includes("(404)") && msg.includes("Session was claimed")) return;
+          dispatch({ type: "SHOW_NOTIFICATION", payload: { message: t("misc:failedToMountFolder"), type: "error" } });
+        })
+        .finally(() => setMountingFolder(false));
     }
     // If warmSessionId isn't ready yet, the effect below will flush when it arrives
   }, [warmSessionId, dispatch, vmNotReady, flashE2bHint]);
@@ -206,11 +215,16 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
   // Flush pending folder mount when warm session becomes available
   useEffect(() => {
     if (warmSessionId && selectedFolder) {
-      updateWarmSession(warmSessionId, { working_dir: selectedFolder }).catch(() => {
-        dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to mount folder", type: "error" } });
-      });
+      setMountingFolder(true);
+      updateWarmSession(warmSessionId, { working_dir: selectedFolder })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes("(404)") && msg.includes("Session was claimed")) return;
+          dispatch({ type: "SHOW_NOTIFICATION", payload: { message: t("misc:failedToMountFolder"), type: "error" } });
+        })
+        .finally(() => setMountingFolder(false));
     }
-    // Only trigger when warmSessionId changes (not on every folder change —
+    // Only trigger when warmSessionId changes (not on every folder change 鈥?
     // handleFolderChange already handles that when the session is ready)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [warmSessionId]);
@@ -249,13 +263,12 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
     }, [dispatch]),
   );
 
-  const chatHeading = "HexAgent, ready when you are.";
-  const coworkHeading = "HexAgent, here to get things done.";
+  const headingWords = t(isCowork ? "heading.coworkWords" : "heading.chatWords", { returnObjects: true }) as string[];
 
   return (
     <div className="welcome-screen" key={mode}>
       <h1 className={`welcome-heading ${isCowork ? "welcome-heading--cowork" : ""}`}>
-        {(isCowork ? coworkHeading : chatHeading).split(" ").map((word, i, arr) => {
+        {headingWords.map((word, i, arr) => {
           if (isCowork) {
             return (
               <span key={i} style={{ animationDelay: `${i * 80}ms` }}>
@@ -333,7 +346,7 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
               />
               <button
                 className="input-tool-btn"
-                title="Attach file"
+                title={t("attachFile")}
                 onClick={() => { if (sandboxBlocked || !warmSessionId) { flashE2bHint(); return; } fileRef.current?.click(); }}
               >
                 <Paperclip />
@@ -354,16 +367,28 @@ export default function WelcomeScreen({ onSubmit, mode, onOpenSettings }: Welcom
                 <button
                   className="input-send"
                   onClick={handleSubmit}
-                  disabled={(!value.trim() && doneFiles.length === 0) || anyUploading || noModels || sandboxBlocked}
-                  title={noModels ? "Configure a model in Settings first" : sandboxBlocked ? "Sandbox setup required" : "Send message"}
+                  disabled={sendDisabled}
+                  title={sendTitle}
                 >
-                  <ArrowUp />
+                  {mountingFolder || isPreparingRequest ? <Loader2 className="model-save-spinner" /> : <ArrowUp />}
                 </button>
+                {mountingFolder && (
+                  <div className="mount-hint mount-hint-visible">
+                    <Loader2 size={12} className="model-save-spinner" />
+                    <span>{t("mountingDirectory")}</span>
+                  </div>
+                )}
+                {!mountingFolder && isPreparingRequest && (
+                  <div className="mount-hint mount-hint-visible">
+                    <Loader2 size={12} className="model-save-spinner" />
+                    <span>{t("preparingRequest")}</span>
+                  </div>
+                )}
                 {sandboxBlocked && (
                   <div className={`e2b-hint${value.trim() || e2bHintFlash ? " e2b-hint-visible" : ""}`}>
-                    {missingE2bKey ? "E2B API key required" : "VM setup required"} —{" "}
+                    {missingE2bKey ? t("e2bKeyRequired") : t("vmSetupRequired")} 鈥攞" "}
                     <button className="e2b-hint-link" onClick={() => onOpenSettings("sandbox")}>
-                      Set up in Settings
+                      {t("setupInSettings")}
                     </button>
                   </div>
                 )}

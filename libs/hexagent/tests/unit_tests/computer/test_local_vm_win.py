@@ -80,7 +80,9 @@ class TestStart:
         await mgr.start()
         await mgr.start()
 
-        vm.start.assert_not_awaited()
+        # Even when Running, LocalVM delegates to WslVM.start() so bind
+        # mounts from mounts.json are re-applied.
+        assert vm.start.await_count == 2
 
     async def test_start_does_not_apply_mounts(self) -> None:
         vm = _mock_vm(status="Stopped")
@@ -173,6 +175,28 @@ class TestMount:
         await mgr.mount(Mount(source=str(d), target="code"))
 
         vm.apply_mounts.assert_not_awaited()
+
+    async def test_mount_idempotent_self_heals_missing_live_mount(self, tmp_path: Any) -> None:
+        vm = _mock_vm()
+        mgr = _make_manager(vm)
+        d = tmp_path / "code"
+        d.mkdir()
+
+        vm.read_mounts = lambda: [ResolvedMount(host_path=str(d), guest_path="/mnt/code", writable=False)]
+        vm.shell = AsyncMock(
+            side_effect=[
+                _fail(),  # findmnt -n /mnt/code -> missing
+                _ok(),  # mount --bind
+                _ok(stdout="/mnt/code /mnt/c/code"),  # verify findmnt
+            ]
+        )
+
+        with patch("hexagent.computer.local._wsl._win_path_to_wsl", return_value="/mnt/c/code"):
+            await mgr.mount(Mount(source=str(d), target="code"))
+
+        vm.apply_mounts.assert_not_awaited()
+        assert vm.shell.await_count == 3
+        assert "mount --bind" in vm.shell.call_args_list[1].args[0]
 
     async def test_mount_empty_list_is_noop(self) -> None:
         vm = _mock_vm()
@@ -270,7 +294,7 @@ class TestSession:
     async def test_creates_new_session(self) -> None:
         vm = _mock_vm()
         mgr = _make_manager(vm)
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
 
         computer = await mgr.computer()
 
@@ -304,7 +328,7 @@ class TestSession:
     async def test_auto_starts_if_needed(self) -> None:
         vm = _mock_vm(status="Stopped")
         mgr = _make_manager(vm)
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
 
         await mgr.computer()
 
@@ -438,11 +462,11 @@ class TestCreateUser:
     async def test_creates_session_dirs(self) -> None:
         vm = _mock_vm()
         mgr = _make_manager(vm)
-        vm.shell = AsyncMock(side_effect=[_ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_ok(), _ok(), _ok()])
 
         await mgr._create_user("test-user")
 
-        setup_call = vm.shell.call_args_list[1].args[0]
+        setup_call = vm.shell.call_args_list[2].args[0]
         home = "/sessions/test-user"
         for d in SESSION_DIRS:
             assert f"{home}/{d}" in setup_call
@@ -455,6 +479,26 @@ class TestCreateUser:
 
         with pytest.raises(VMError, match="Failed to create session user"):
             await mgr._create_user("test-user")
+
+    async def test_useradd_retries_without_k_flags(self) -> None:
+        vm = _mock_vm()
+        mgr = _make_manager(vm)
+        vm.shell = AsyncMock(
+            side_effect=[
+                _ok(),  # sudo probe
+                _fail(stderr="localized subordinate uid failure"),  # useradd with -K...
+                _ok(),  # fallback useradd without -K...
+                _ok(),  # mkdir/chown
+            ]
+        )
+
+        await mgr._create_user("test-user")
+
+        first_useradd = vm.shell.call_args_list[1].args[0]
+        fallback_useradd = vm.shell.call_args_list[2].args[0]
+        assert "-K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0" in first_useradd
+        assert "-K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0" not in fallback_useradd
+        assert "--no-log-init" in fallback_useradd
 
 
 class TestNameGeneration:
@@ -487,7 +531,7 @@ class TestSessionAtomicity:
         mgr = _make_manager(vm)
         d = tmp_path / "nope"
 
-        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok()])
+        vm.shell = AsyncMock(side_effect=[_fail(), _ok(), _ok(), _ok(), _ok()])
 
         with pytest.raises(ValueError, match="does not exist"):
             await mgr.computer(mounts=[Mount(source=str(d), target="proj")])

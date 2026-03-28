@@ -6,6 +6,8 @@ to populate an ``EnvironmentContext`` used by prompt section functions.
 
 from __future__ import annotations
 
+import logging
+import shlex
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -13,6 +15,8 @@ from hexagent.types import EnvironmentContext
 
 if TYPE_CHECKING:
     from hexagent.computer.base import Computer
+
+logger = logging.getLogger(__name__)
 
 
 class EnvironmentResolver:
@@ -38,6 +42,47 @@ class EnvironmentResolver:
         """
         self._computer = computer
 
+    async def _probe_datetime(self) -> datetime:
+        """Best-effort datetime probe that never raises.
+
+        Returns:
+            Timezone-aware datetime when possible; falls back to UTC now.
+        """
+        # Primary probe: timezone-aware ISO-8601 from shell date.
+        probe = await self._computer.run("date '+%Y-%m-%dT%H:%M:%S%z'")
+        raw = (probe.stdout or "").strip()
+        if raw:
+            try:
+                return datetime.strptime(raw, "%Y-%m-%dT%H:%M:%S%z")
+            except ValueError:
+                try:
+                    return datetime.strptime(raw[:19], "%Y-%m-%dT%H:%M:%S")  # noqa: DTZ007
+                except ValueError:
+                    logger.warning("Unparseable environment datetime probe: %r", raw)
+
+        # Secondary probe: Python inside guest (if available).
+        py_probe = await self._computer.run(
+            "python3 -c \"from datetime import datetime as d; print(d.now().astimezone().strftime('%Y-%m-%dT%H:%M:%S%z'))\""
+        )
+        py_raw = (py_probe.stdout or "").strip()
+        if py_raw:
+            try:
+                return datetime.strptime(py_raw, "%Y-%m-%dT%H:%M:%S%z")
+            except ValueError:
+                try:
+                    return datetime.strptime(py_raw[:19], "%Y-%m-%dT%H:%M:%S")  # noqa: DTZ007
+                except ValueError:
+                    logger.warning("Unparseable python datetime probe: %r", py_raw)
+
+        logger.warning(
+            "Environment datetime probes failed; falling back to UTC now. date.stdout=%r date.stderr=%r python3.stdout=%r python3.stderr=%r",
+            probe.stdout,
+            probe.stderr,
+            py_probe.stdout,
+            py_probe.stderr,
+        )
+        return datetime.now().astimezone()
+
     async def resolve(self) -> EnvironmentContext:
         """Detect environment properties from the computer.
 
@@ -46,19 +91,19 @@ class EnvironmentResolver:
         """
         # Single batched command: 6 values separated by a unique delimiter.
         delimiter = "___ENV___"
+        qd = shlex.quote(delimiter)
         cmd = (
-            f'printf "%s\\n" '
-            f'"$(pwd)" '
-            f'"{delimiter}" '
-            f'"$(git rev-parse --is-inside-work-tree 2>/dev/null || echo false)" '
-            f'"{delimiter}" '
-            f'"$(uname -s | tr "[:upper:]" "[:lower:]")" '
-            f'"{delimiter}" '
-            f'"$(basename "$SHELL")" '
-            f'"{delimiter}" '
-            f'"$(uname -sr)" '
-            f'"{delimiter}" '
-            f"\"$(date '+%Y-%m-%dT%H:%M:%S%z')\""
+            "pwd; "
+            f"printf '%s\\n' {qd}; "
+            "(git rev-parse --is-inside-work-tree 2>/dev/null || echo false); "
+            f"printf '%s\\n' {qd}; "
+            "uname -s | tr '[:upper:]' '[:lower:]'; "
+            f"printf '%s\\n' {qd}; "
+            'basename "${SHELL:-bash}"; '
+            f"printf '%s\\n' {qd}; "
+            "uname -sr; "
+            f"printf '%s\\n' {qd}; "
+            "date '+%Y-%m-%dT%H:%M:%S%z'"
         )
         result = await self._computer.run(cmd)
         parts = result.stdout.strip().split(delimiter)
@@ -69,16 +114,22 @@ class EnvironmentResolver:
         while len(values) < _EXPECTED_PARTS:
             values.append("")
 
-        # Parse into a timezone-aware datetime.
-        # Shell outputs ISO 8601 with numeric offset, e.g. "2026-02-14T10:30:00-0800".
+        # Parse into a datetime. Shell usually outputs timezone-aware ISO 8601,
+        # e.g. "2026-02-14T10:30:00-0800". If missing, probe separately.
         raw_dt = values[5]
-        if not raw_dt:
-            msg = f"Environment shell returned empty datetime (raw output: {result.stdout!r})"
-            raise ValueError(msg)
-        try:
-            now = datetime.strptime(raw_dt, "%Y-%m-%dT%H:%M:%S%z")
-        except ValueError:
-            now = datetime.strptime(raw_dt[:19], "%Y-%m-%dT%H:%M:%S")  # noqa: DTZ007
+        if raw_dt:
+            try:
+                now = datetime.strptime(raw_dt, "%Y-%m-%dT%H:%M:%S%z")
+            except ValueError:
+                now = datetime.strptime(raw_dt[:19], "%Y-%m-%dT%H:%M:%S")  # noqa: DTZ007
+        else:
+            logger.warning(
+                "Environment shell returned empty datetime; falling back probe. stdout=%r stderr=%r exit=%s",
+                result.stdout,
+                result.stderr,
+                result.exit_code,
+            )
+            now = await self._probe_datetime()
 
         return EnvironmentContext(
             working_dir=values[0],

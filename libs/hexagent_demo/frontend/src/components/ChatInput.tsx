@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Paperclip, ArrowUp, ArrowDown, X, FileText, Loader2, CircleAlert } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAppContext } from "../store";
 import { uploadChatFile, deleteChatFile } from "../api";
 import { useFileDrop } from "../hooks/useFileDrop";
@@ -37,9 +38,11 @@ function shouldShowScrollButton(container: HTMLElement, inputContainer: HTMLElem
 }
 
 export default function ChatInput({ conversationId, onSend, scrollContainerRef, onOpenSettings }: ChatInputProps) {
+  const { t } = useTranslation("chat");
   const { state, dispatch } = useAppContext();
   const noModels = !state.serverConfig?.models?.length;
   const missingE2bKey = state.selectedMode === "chat" && !state.serverConfig?.sandbox?.e2b_api_key;
+  const isPreparingRequest = state.isRequestPending;
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -94,7 +97,7 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
     if (missingE2bKey) { flashE2bHint(); return; }
     const trimmed = value.trim();
     const hasContent = trimmed || doneFiles.length > 0;
-    if (!hasContent || !!state.streamingByConversation[conversationId] || anyUploading) return;
+    if (!hasContent || !!state.streamingByConversation[conversationId] || isPreparingRequest || anyUploading) return;
 
     const attachments = doneFiles.map((f) => f.result!);
     onSend(trimmed, attachments.length > 0 ? { attachments } : undefined);
@@ -103,7 +106,7 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [value, doneFiles, anyUploading, state.streamingByConversation, conversationId, onSend, missingE2bKey, flashE2bHint]);
+  }, [value, doneFiles, anyUploading, state.streamingByConversation, conversationId, isPreparingRequest, onSend, missingE2bKey, flashE2bHint]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -151,7 +154,7 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
     // Check for name collision against existing pending files
     const collision = pendingFilesRef.current.some((f) => f.name === file.name && f.status !== "failed");
     if (collision) {
-      const error = `"${file.name}" already attached. Rename the file and try again.`;
+      const error = t("alreadyAttached", { filename: file.name });
       setPendingFiles((prev) => [...prev, { id, name: file.name, status: "failed" as const, error }]);
       dispatch({ type: "SHOW_NOTIFICATION", payload: { message: error, type: "error" } });
       return;
@@ -166,13 +169,13 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
         );
       })
       .catch((err) => {
-        const message = err instanceof Error ? err.message : "Upload failed";
+        const message = err instanceof Error ? err.message : t("uploadFailed");
         setPendingFiles((prev) =>
           prev.map((f) => f.id === id ? { ...f, status: "failed" as const, error: message } : f)
         );
         dispatch({
           type: "SHOW_NOTIFICATION",
-          payload: { message: `Failed to upload ${file.name}: ${message}`, type: "error" },
+          payload: { message: t("failedToUpload", { filename: file.name, message }), type: "error" },
         });
       });
   }, [conversationId, dispatch]);
@@ -230,7 +233,7 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
   return (
     <div className="input-container" ref={inputContainerRef}>
       <button
-        aria-label="Scroll to bottom"
+        aria-label={t("scrollToBottom")}
         className={`scroll-to-bottom ${showScrollBtn ? "" : "hidden"}`}
         onClick={scrollToBottom}
       >
@@ -265,7 +268,7 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
         <textarea
             ref={textareaRef}
             className="input-textarea"
-            placeholder="Ask anything..."
+            placeholder={t("askAnything")}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -286,7 +289,7 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
               />
               <button
                 className="input-tool-btn"
-                title="Attach file"
+                title={t("attachFile")}
                 onClick={() => { if (missingE2bKey) { flashE2bHint(); return; } fileRef.current?.click(); }}
               >
                 <Paperclip />
@@ -299,16 +302,22 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
                 <button
                   className="input-send"
                   onClick={handleSubmit}
-                  disabled={(!value.trim() && doneFiles.length === 0) || !!state.streamingByConversation[conversationId] || anyUploading || noModels || missingE2bKey}
-                  title={noModels ? "Configure a model in Settings first" : "Send message"}
+                  disabled={(!value.trim() && doneFiles.length === 0) || !!state.streamingByConversation[conversationId] || isPreparingRequest || anyUploading || noModels || missingE2bKey}
+                  title={noModels ? t("configureModel") : isPreparingRequest ? t("preparingRequest") : t("sendMessage")}
                 >
-                  <ArrowUp />
+                  {isPreparingRequest ? <Loader2 className="model-save-spinner" /> : <ArrowUp />}
                 </button>
+                {isPreparingRequest && (
+                  <div className="mount-hint mount-hint-visible">
+                    <Loader2 size={12} className="model-save-spinner" />
+                    <span>{t("preparingRequest")}</span>
+                  </div>
+                )}
                 {missingE2bKey && (
                   <div className={`e2b-hint${value.trim() || e2bHintFlash ? " e2b-hint-visible" : ""}`}>
-                    E2B API key required —{" "}
+                    {t("e2bKeyRequired")} —{" "}
                     <button className="e2b-hint-link" onClick={() => onOpenSettings("sandbox")}>
-                      Set in Settings
+                      {t("setInSettings")}
                     </button>
                   </div>
                 )}
@@ -317,7 +326,7 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
           </div>
         </div>
       <div className="input-disclaimer" role="note">
-        AI responses may be inaccurate. Please double-check important information.
+        {t("disclaimer")}
       </div>
     </div>
   );

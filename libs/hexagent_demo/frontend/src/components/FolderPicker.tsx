@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { FolderOpen, FolderPlus, ChevronDown, Check, ShieldAlert } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { browseFolder } from "../api";
 import { loadRecentFolders, saveRecentFolders, shortenPath } from "../recentFolders";
 import type { RecentFolder } from "../recentFolders";
@@ -13,6 +14,7 @@ interface FolderPickerProps {
 }
 
 export default function FolderPicker({ value, onChange, disabled, onDisabledClick }: FolderPickerProps) {
+  const { t } = useTranslation("misc");
   const [open, setOpen] = useState(false);
   const [recentFolders, setRecentFolders] = useState<RecentFolder[]>(loadRecentFolders);
   const [pendingFolder, setPendingFolder] = useState<string | null>(null);
@@ -96,7 +98,7 @@ export default function FolderPicker({ value, onChange, disabled, onDisabledClic
     [onChange, requestAccess, value]
   );
 
-  const label = value ? value.split("/").pop() || value : "Work in a folder";
+  const label = value ? value.split("/").pop() || value : t("folderPicker.workInFolder");
 
   return (
     <>
@@ -105,7 +107,7 @@ export default function FolderPicker({ value, onChange, disabled, onDisabledClic
           className="input-tool-btn input-folder-btn"
           onClick={handleButtonClick}
           type="button"
-          title={value || "Work in a folder"}
+          title={value || t("folderPicker.workInFolder")}
         >
           <FolderOpen size={16} />
           <span>{label}</span>
@@ -115,12 +117,12 @@ export default function FolderPicker({ value, onChange, disabled, onDisabledClic
           <div className="dd-panel fp-dropdown">
             <button className="dd-item fp-browse" onClick={handleBrowse}>
               <FolderPlus size={14} className="fp-option-icon" />
-              <span className="dd-item-label">Choose a new folder</span>
+              <span className="dd-item-label">{t("folderPicker.chooseNewFolder")}</span>
             </button>
             {recentFolders.length > 0 && (
               <>
                 <div className="dd-divider" />
-                <div className="fp-section-label">Recent</div>
+                <div className="fp-section-label">{t("folderPicker.recent")}</div>
                 {recentFolders.map((folder) => (
                   <button
                     key={folder.path}
@@ -149,29 +151,29 @@ export default function FolderPicker({ value, onChange, disabled, onDisabledClic
               <ShieldAlert size={28} />
             </div>
             <h3 className="fp-permission-title">
-              Allow HexAgent to access files in "{pendingFolder}"?
+              {t("folderPicker.permissionTitle", { folder: pendingFolder })}
             </h3>
             <p className="fp-permission-body">
-              This grants access to all files and subfolders. HexAgent will be able to read, edit, and delete files in this directory. File contents may be shared with connected AI models and tools. Avoid selecting folders containing sensitive or private data.
+              {t("folderPicker.permissionBody")}
             </p>
             <div className="fp-permission-actions">
               <button
                 className="fp-permission-btn fp-permission-btn--cancel"
                 onClick={() => setPendingFolder(null)}
               >
-                Cancel
+                {t("folderPicker.cancel")}
               </button>
               <button
                 className="fp-permission-btn fp-permission-btn--always"
                 onClick={() => confirmFolder(pendingFolder, true)}
               >
-                Always Allow
+                {t("folderPicker.alwaysAllow")}
               </button>
               <button
                 className="fp-permission-btn fp-permission-btn--allow"
                 onClick={() => confirmFolder(pendingFolder, false)}
               >
-                Allow
+                {t("folderPicker.allow")}
               </button>
             </div>
           </div>

@@ -1,6 +1,8 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+﻿import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { PanelRight } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAppContext } from "../store";
+import { getVMStatus } from "../api";
 import WelcomeScreen from "./WelcomeScreen";
 import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
@@ -17,6 +19,7 @@ interface ChatAreaProps {
 }
 
 export default function ChatArea({ conversation, onSendMessage, onOpenSettings, rightPanel }: ChatAreaProps) {
+  const { t } = useTranslation("chat");
   const { state, dispatch } = useAppContext();
   const [editingTitle, setEditingTitle] = useState(false);
   const chatAreaRef = useRef<HTMLDivElement>(null);
@@ -71,20 +74,29 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
   const currentMode = conversation?.mode || state.selectedMode;
 
   const isMac = navigator.platform.toUpperCase().includes("MAC");
+  const isChatAvailable = !!state.serverConfig?.sandbox?.chat_enabled && !!state.serverConfig?.sandbox?.e2b_api_key;
 
   const handleModeChange = useCallback(
-    (mode: ConversationMode) => {
+    async (mode: ConversationMode) => {
+      if (mode === "cowork") {
+        try {
+          const vs = await getVMStatus();
+          dispatch({ type: "SET_VM_STATUS", payload: vs });
+        } catch {
+          // Best-effort refresh; keep UX responsive.
+        }
+      }
       dispatch({ type: "SET_SELECTED_MODE", payload: mode });
     },
     [dispatch]
   );
 
-  // Keyboard shortcuts: Cmd/Ctrl+Shift+1 → Chat, Cmd/Ctrl+Shift+2 → Cowork
+  // Keyboard shortcuts: Cmd/Ctrl+Shift+1 鈫?Chat, Cmd/Ctrl+Shift+2 鈫?Cowork
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const mod = isMac ? e.metaKey : e.ctrlKey;
       if (!mod || !e.shiftKey) return;
-      if (e.key === "1" || e.key === "!") {
+      if ((e.key === "1" || e.key === "!") && isChatAvailable) {
         e.preventDefault();
         handleModeChange("chat");
       } else if (e.key === "2" || e.key === "@") {
@@ -94,7 +106,7 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isMac, handleModeChange]);
+  }, [isMac, handleModeChange, isChatAvailable]);
 
   const handleTitleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -136,29 +148,31 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
           />
         )}
 
-        <div className="mode-toggle" data-active={currentMode}>
-          {(["chat", "cowork"] as ConversationMode[]).map((mode, idx) => (
-            <button
-              key={mode}
-              className={`mode-toggle-btn custom-tooltip-trigger ${currentMode === mode ? "mode-toggle-btn--active" : ""}`}
-              onClick={() => handleModeChange(mode)}
-              type="button"
-            >
-              {mode === "chat" ? "Chat" : "Cowork"}
-              <span className="custom-tooltip">
-                {mode === "chat" ? "Chat" : "Cowork"}
-                <span className="custom-tooltip-shortcut">{isMac ? "⇧⌘" : "Ctrl+Shift+"}{idx + 1}</span>
-              </span>
-            </button>
-          ))}
-        </div>
+        {isChatAvailable && (
+          <div className="mode-toggle" data-active={currentMode}>
+            {(["chat", "cowork"] as ConversationMode[]).map((mode, idx) => (
+              <button
+                key={mode}
+                className={`mode-toggle-btn custom-tooltip-trigger ${currentMode === mode ? "mode-toggle-btn--active" : ""}`}
+                onClick={() => handleModeChange(mode)}
+                type="button"
+              >
+                {t(`mode.${mode}`)}
+                <span className="custom-tooltip">
+                  {t(`mode.${mode}`)}
+                  <span className="custom-tooltip-shortcut">{isMac ? "鈬р寴" : "Ctrl+Shift+"}{idx + 1}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {hasMessages && (
           <div className="header-panel-toggles">
             <button
               className="right-panel-toggle"
               onClick={() => dispatch({ type: "SET_RIGHT_PANEL", payload: !(state.rightPanelByConversation[conversation?.id ?? ""] ?? false) })}
-              title="Toggle side panel"
+              title={t("toggleSidePanel")}
             >
               <PanelRight />
             </button>

@@ -1,4 +1,4 @@
-import type { Conversation } from "./types";
+﻿import type { Conversation } from "./types";
 
 const API_BASE = (() => {
   if (typeof window !== 'undefined' && window.electronAPI?.backendPort) {
@@ -34,7 +34,7 @@ export async function getConversation(id: string): Promise<Conversation> {
   return res.json();
 }
 
-// ── Warm session (pre-conversation) ──
+// 鈹€鈹€ Warm session (pre-conversation) 鈹€鈹€
 
 export interface WarmSessionResponse {
   session_id: string;
@@ -63,7 +63,11 @@ export async function updateWarmSession(sessionId: string, updates: { working_di
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),
   });
-  if (!res.ok) throw new Error(`Failed to update session: ${res.statusText}`);
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    const msg = detail?.detail || res.statusText || `HTTP ${res.status}`;
+    throw new Error(`Failed to update session (${res.status}): ${msg}`);
+  }
   return res.json();
 }
 
@@ -107,10 +111,10 @@ export async function deleteConversation(id: string): Promise<void> {
 
 export interface StreamCallbacks {
   onMessageStart: (id: string) => void;
-  onTextDelta: (delta: string) => void;
-  onReasoningDelta: (delta: string) => void;
-  onToolCallDelta: (data: { index: number; name?: string; id?: string; args?: string }) => void;
-  onToolUseStart: (tool: { id: string; name: string; input: Record<string, unknown> }) => void;
+  onTextDelta: (delta: string, ts?: number) => void;
+  onReasoningDelta: (delta: string, ts?: number) => void;
+  onToolCallDelta: (data: { index: number; name?: string; id?: string; args?: string; ts?: number }) => void;
+  onToolUseStart: (tool: { id: string; name: string; input: Record<string, unknown>; ts?: number }) => void;
   onToolResult: (result: { id: string; output: string }) => void;
   onSubagentTextDelta: (data: { task_id: string; delta: string }) => void;
   onSubagentReasoningDelta: (data: { task_id: string; delta: string }) => void;
@@ -119,6 +123,82 @@ export interface StreamCallbacks {
   onSubagentToolResult: (data: { task_id: string; id: string; output: string }) => void;
   onMessageEnd: (id: string) => void;
   onError: (error: string) => void;
+}
+
+/**
+ * Parse an SSE stream and dispatch events to callbacks.
+ * Shared by sendMessage() and subscribeToStream().
+ */
+async function _parseSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  callbacks: StreamCallbacks,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let currentEvent = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (line.startsWith("event: ")) {
+        currentEvent = line.slice(7).trim();
+      } else if (line.startsWith("data: ") && currentEvent) {
+        try {
+          const data = JSON.parse(line.slice(6));
+          switch (currentEvent) {
+            case "message_start":
+              callbacks.onMessageStart(data.id);
+              break;
+            case "text_delta":
+              callbacks.onTextDelta(data.delta, data.ts);
+              break;
+            case "reasoning_delta":
+              callbacks.onReasoningDelta(data.delta, data.ts);
+              break;
+            case "tool_call_delta":
+              callbacks.onToolCallDelta(data);
+              break;
+            case "tool_use_start":
+              callbacks.onToolUseStart(data);
+              break;
+            case "tool_result":
+              callbacks.onToolResult(data);
+              break;
+            case "subagent_text_delta":
+              callbacks.onSubagentTextDelta(data);
+              break;
+            case "subagent_reasoning_delta":
+              callbacks.onSubagentReasoningDelta(data);
+              break;
+            case "subagent_tool_call_delta":
+              callbacks.onSubagentToolCallDelta(data);
+              break;
+            case "subagent_tool_start":
+              callbacks.onSubagentToolStart(data);
+              break;
+            case "subagent_tool_result":
+              callbacks.onSubagentToolResult(data);
+              break;
+            case "message_end":
+              callbacks.onMessageEnd(data.id);
+              break;
+            case "error":
+              callbacks.onError(data.message);
+              break;
+          }
+        } catch {
+          // skip malformed JSON
+        }
+        currentEvent = "";
+      }
+    }
+  }
 }
 
 export function sendMessage(
@@ -146,74 +226,7 @@ export function sendMessage(
         callbacks.onError(detail?.detail || `HTTP ${response.status}: ${response.statusText}`);
         return;
       }
-
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let currentEvent = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith("data: ") && currentEvent) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              switch (currentEvent) {
-                case "message_start":
-                  callbacks.onMessageStart(data.id);
-                  break;
-                case "text_delta":
-                  callbacks.onTextDelta(data.delta);
-                  break;
-                case "reasoning_delta":
-                  callbacks.onReasoningDelta(data.delta);
-                  break;
-                case "tool_call_delta":
-                  callbacks.onToolCallDelta(data);
-                  break;
-                case "tool_use_start":
-                  callbacks.onToolUseStart(data);
-                  break;
-                case "tool_result":
-                  callbacks.onToolResult(data);
-                  break;
-                case "subagent_text_delta":
-                  callbacks.onSubagentTextDelta(data);
-                  break;
-                case "subagent_reasoning_delta":
-                  callbacks.onSubagentReasoningDelta(data);
-                  break;
-                case "subagent_tool_call_delta":
-                  callbacks.onSubagentToolCallDelta(data);
-                  break;
-                case "subagent_tool_start":
-                  callbacks.onSubagentToolStart(data);
-                  break;
-                case "subagent_tool_result":
-                  callbacks.onSubagentToolResult(data);
-                  break;
-                case "message_end":
-                  callbacks.onMessageEnd(data.id);
-                  break;
-                case "error":
-                  callbacks.onError(data.message);
-                  break;
-              }
-            } catch {
-              // skip malformed JSON
-            }
-            currentEvent = "";
-          }
-        }
-      }
+      await _parseSSEStream(response.body!.getReader(), callbacks);
     })
     .catch((err: Error) => {
       if (err.name !== "AbortError") {
@@ -224,7 +237,34 @@ export function sendMessage(
   return controller;
 }
 
-// ── File upload ──
+/**
+ * Subscribe to an active (or recently finished) event stream for a conversation.
+ * Used to reconnect after page refresh.
+ */
+export function subscribeToStream(
+  conversationId: string,
+  callbacks: StreamCallbacks,
+  lastEventId: number = 0,
+): AbortController {
+  const controller = new AbortController();
+
+  fetch(`${API_BASE}/api/chat/${conversationId}/stream?last_event_id=${lastEventId}`, {
+    signal: controller.signal,
+  })
+    .then(async (response) => {
+      if (response.status === 204 || !response.ok) return; // no active stream
+      await _parseSSEStream(response.body!.getReader(), callbacks);
+    })
+    .catch((err: Error) => {
+      if (err.name !== "AbortError") {
+        callbacks.onError(err.message);
+      }
+    });
+
+  return controller;
+}
+
+// 鈹€鈹€ File upload 鈹€鈹€
 
 export interface UploadResult {
   filename: string;
@@ -255,7 +295,7 @@ export async function deleteChatFile(conversationId: string, filename: string): 
   }
 }
 
-// ── Folder picker ──
+// 鈹€鈹€ Folder picker 鈹€鈹€
 
 export async function browseFolder(): Promise<string | null> {
   const res = await fetch(`${API_BASE}/api/browse-folder`, { method: "POST" });
@@ -264,7 +304,7 @@ export async function browseFolder(): Promise<string | null> {
   return data.path || null;
 }
 
-// ── Server config ──
+// 鈹€鈹€ Server config 鈹€鈹€
 
 export interface ModelConfig {
   id: string;
@@ -296,6 +336,7 @@ export interface ToolsConfig {
 
 export interface SandboxConfig {
   e2b_api_key: string;
+  chat_enabled: boolean;
 }
 
 export interface McpServerEntry {
@@ -318,13 +359,14 @@ export interface ServerConfig {
   tools: ToolsConfig;
   sandbox: SandboxConfig;
   mcp_servers: McpServerEntry[];
+  language: string;
 }
 
 export async function getServerConfig(): Promise<ServerConfig> {
   const res = await fetch(`${API_BASE}/api/config`);
   if (!res.ok) throw new Error(`Failed to get config: ${res.statusText}`);
   const data = await res.json();
-  return { agents: [], tools: { search_provider: "", search_api_key: "", fetch_provider: "jina", fetch_api_key: "" }, sandbox: { e2b_api_key: "" }, mcp_servers: [], ...data };
+  return { agents: [], tools: { search_provider: "", search_api_key: "", fetch_provider: "jina", fetch_api_key: "" }, sandbox: { e2b_api_key: "", chat_enabled: false }, mcp_servers: [], language: "en", ...data };
 }
 
 export async function updateServerConfig(config: ServerConfig): Promise<ServerConfig> {
@@ -347,7 +389,7 @@ export async function testMcpConnection(server: McpServerEntry): Promise<{ ok: b
   return res.json();
 }
 
-// ── Skills ──
+// 鈹€鈹€ Skills 鈹€鈹€
 
 export interface SkillsList {
   public: string[];
@@ -405,7 +447,7 @@ export async function toggleSkill(name: string, enabled: boolean): Promise<void>
   if (!res.ok) throw new Error(`Failed to toggle skill: ${res.statusText}`);
 }
 
-// ── Setup / VM backend ──
+// 鈹€鈹€ Setup / VM backend 鈹€鈹€
 
 export interface VMStatus {
   supported: boolean;
@@ -415,6 +457,7 @@ export interface VMStatus {
   managed?: boolean;
   reason?: string;
   instance_status?: string | null;
+  instance_error?: string | null;
   vm_ready?: boolean;
 }
 
@@ -439,7 +482,7 @@ export function installVMBackend(
   });
 }
 
-// ── VM Build ──
+// 鈹€鈹€ VM Build 鈹€鈹€
 
 export interface VMBuildStatus {
   status: "idle" | "running" | "done" | "error";
@@ -520,7 +563,7 @@ export function buildVM(
   });
 }
 
-// ── VM Provision ──
+// 鈹€鈹€ VM Provision 鈹€鈹€
 
 export interface ProvisionStepDef {
   id: string;

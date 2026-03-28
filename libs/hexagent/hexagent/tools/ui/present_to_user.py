@@ -184,6 +184,11 @@ for fp in "$@"; do
 done
 """.format(case_arms=_build_case_block())  # noqa: UP032 — can't use f-string; bash ${} conflicts
 
+# WSL/bash is sensitive to CRLF in inline scripts (can break function
+# definitions/quoting with opaque parse errors). Normalize to LF at runtime so
+# behavior is stable regardless of host checkout EOL settings.
+_SCRIPT_BODY_LF = _SCRIPT_BODY.replace("\r\n", "\n").replace("\r", "\n")
+
 
 def _build_command(filepaths: list[str], output_dir: str) -> str:
     """Build a bash command that processes all file paths.
@@ -200,7 +205,7 @@ def _build_command(filepaths: list[str], output_dir: str) -> str:
         A shell command string safe for ``Computer.run()``.
     """
     quoted_args = " ".join(shlex.quote(p) for p in [output_dir, *filepaths])
-    return f"bash -c {shlex.quote(_SCRIPT_BODY)} _ {quoted_args}"
+    return f"bash -c {shlex.quote(_SCRIPT_BODY_LF)} _ {quoted_args}"
 
 
 class PresentToUserTool(BaseAgentTool[PresentToUserToolParams]):

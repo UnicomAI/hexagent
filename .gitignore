@@ -220,3 +220,15 @@ mounts/
 
 # Git worktrees
 .trees/
+
+# Electron build artifact
+libs/hexagent_demo/electron/dist.zip
+
+# Vite dev-server cache
+**/.vite/
+
+# WSL prebuilt VM image (build artifact — generate with prepare-wsl-prebuilt.ps1)
+**/wsl/prebuilt/*.tar
+
+# One-off investigation/diagnostic reports
+reports/

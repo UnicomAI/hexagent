@@ -6,8 +6,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
-import pytest
-
 from hexagent.harness.environment import EnvironmentResolver
 from hexagent.types import CLIResult
 
@@ -33,6 +31,12 @@ def _make_stdout(
 def _mock_computer(stdout: str) -> AsyncMock:
     computer = AsyncMock()
     computer.run = AsyncMock(return_value=CLIResult(stdout=stdout, stderr="", exit_code=0))
+    return computer
+
+
+def _mock_computer_sequence(results: list[CLIResult]) -> AsyncMock:
+    computer = AsyncMock()
+    computer.run = AsyncMock(side_effect=results)
     return computer
 
 
@@ -83,20 +87,47 @@ class TestResolve:
         assert env.today_date.year == 2026
         assert env.today_date.tzinfo is None
 
-    async def test_empty_datetime_raises(self) -> None:
-        computer = _mock_computer(_make_stdout(date=""))
-        with pytest.raises(ValueError, match="empty datetime"):
-            await EnvironmentResolver(computer).resolve()
+    async def test_empty_datetime_falls_back_to_secondary_probe(self) -> None:
+        """Empty datetime in batched output falls back to a secondary date probe."""
+        computer = _mock_computer_sequence(
+            [
+                CLIResult(stdout=_make_stdout(date=""), stderr="", exit_code=0),
+                CLIResult(stdout="2026-03-13T10:30:00+0000", stderr="", exit_code=0),
+            ]
+        )
+        env = await EnvironmentResolver(computer).resolve()
 
-    async def test_pads_missing_parts(self) -> None:
-        """When stdout has fewer delimiters, missing fields are padded."""
-        # Only cwd and git — missing platform, shell, os_version, date
+        assert env.today_date.tzinfo is not None
+        assert env.today_date == datetime(2026, 3, 13, 10, 30, 0, tzinfo=UTC)
+
+    async def test_pads_missing_parts_falls_back_to_secondary_probe(self) -> None:
+        """When stdout has fewer delimiters, resolver still recovers via date probe."""
+        # Only cwd and git; missing platform, shell, os_version, date
         stdout = f"/home/user\n{_DELIM}\ntrue"
-        computer = _mock_computer(stdout)
+        computer = _mock_computer_sequence(
+            [
+                CLIResult(stdout=stdout, stderr="", exit_code=0),
+                CLIResult(stdout="2026-03-13T10:30:00+0000", stderr="", exit_code=0),
+            ]
+        )
+        env = await EnvironmentResolver(computer).resolve()
 
-        # Date will be empty → raises ValueError
-        with pytest.raises(ValueError, match="empty datetime"):
-            await EnvironmentResolver(computer).resolve()
+        assert env.today_date.tzinfo is not None
+        assert env.today_date.year == 2026
+
+    async def test_all_datetime_probes_fail_uses_local_time(self) -> None:
+        """If both date probes fail, resolver should still return a usable context."""
+        computer = _mock_computer_sequence(
+            [
+                CLIResult(stdout=_make_stdout(date=""), stderr="", exit_code=0),
+                CLIResult(stdout="", stderr="date: command not found", exit_code=127),
+                CLIResult(stdout="", stderr="python3: command not found", exit_code=127),
+            ]
+        )
+        env = await EnvironmentResolver(computer).resolve()
+
+        assert env.today_date.tzinfo is not None
+        assert env.today_date.year >= 2020
 
     async def test_darwin_platform(self) -> None:
         computer = _mock_computer(_make_stdout(platform="darwin", os_version="Darwin 25.3.0"))

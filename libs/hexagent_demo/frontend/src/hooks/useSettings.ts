@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
+import i18n from "../i18n";
 
 export interface Settings {
   fullName: string;
   theme: "light" | "dark" | "system";
+  language: string;
 }
 
 const STORAGE_KEY = "hexagent-settings";
@@ -10,6 +12,7 @@ const STORAGE_KEY = "hexagent-settings";
 const DEFAULT_SETTINGS: Settings = {
   fullName: "",
   theme: "system",
+  language: "en",
 };
 
 function loadSettings(): Settings {
@@ -62,6 +65,14 @@ export function useSettings() {
       return () => mq.removeEventListener("change", handler);
     }
   }, [settings.theme]);
+
+  // Apply language to i18next and document
+  useEffect(() => {
+    if (i18n.language !== settings.language) {
+      i18n.changeLanguage(settings.language);
+    }
+    document.documentElement.lang = settings.language;
+  }, [settings.language]);
 
   return { settings, setSettings };
 }

@@ -94,7 +94,7 @@ class Conversation:
         self.id = conversation_id
         self.title = title
         self.model_id = model_id
-        self.mode = mode or "chat"
+        self.mode = mode or "cowork"
         self.session_name = session_name
         self.working_dir = working_dir
         self.messages: list[dict[str, Any]] = []
