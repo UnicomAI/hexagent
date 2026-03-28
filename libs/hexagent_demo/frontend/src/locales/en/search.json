@@ -1,0 +1,11 @@
+{
+  "placeholder": "Search conversations...",
+  "noMatches": "No matching conversations",
+  "noConversations": "No conversations yet",
+  "time": {
+    "justNow": "just now",
+    "minutesAgo": "{{count}}m ago",
+    "hoursAgo": "{{count}}h ago",
+    "daysAgo": "{{count}}d ago"
+  }
+}

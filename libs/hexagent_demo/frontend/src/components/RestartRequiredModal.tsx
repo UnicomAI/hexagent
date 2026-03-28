@@ -1,4 +1,5 @@
 import { AlertTriangle, RefreshCw, Settings } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useVMSetup } from "../vmSetup";
 
 interface RestartRequiredModalProps {
@@ -12,6 +13,7 @@ export default function RestartRequiredModal({
   message,
   onOpenSettings,
 }: RestartRequiredModalProps) {
+  const { t } = useTranslation("misc");
   const vm = useVMSetup();
 
   if (!open) return null;
@@ -22,24 +24,24 @@ export default function RestartRequiredModal({
         <div className="restart-required-header">
           <AlertTriangle size={18} className="restart-required-icon" />
           <h2 id="restart-required-title" className="restart-required-title">
-            Restart Required
+            {t("restartRequired.title")}
           </h2>
         </div>
         <p className="restart-required-text">
-          WSL runtime installation is complete, but Windows must restart before OpenAgent can continue.
+          {t("restartRequired.wslComplete")}
         </p>
         <p className="restart-required-text restart-required-text--strong">
-          Please restart your computer now, otherwise VM/Cowork features will not work.
+          {t("restartRequired.pleaseRestart")}
         </p>
         {message ? <p className="restart-required-detail">{message}</p> : null}
         <div className="restart-required-actions">
           <button className="restart-required-btn restart-required-btn--ghost" type="button" onClick={onOpenSettings}>
             <Settings size={14} />
-            <span>Open Sandbox Settings</span>
+            <span>{t("restartRequired.openSandboxSettings")}</span>
           </button>
           <button className="restart-required-btn restart-required-btn--primary" type="button" onClick={vm.recheckVmEngine}>
             <RefreshCw size={14} />
-            <span>I have restarted, Re-check</span>
+            <span>{t("restartRequired.recheck")}</span>
           </button>
         </div>
       </div>

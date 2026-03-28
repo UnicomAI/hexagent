@@ -1,0 +1,16 @@
+{
+  "brand": "ClawWork",
+  "openSidebar": "Open sidebar",
+  "closeSidebar": "Close sidebar",
+  "newChat": "New chat",
+  "newTask": "New task",
+  "search": "Search",
+  "settings": "Settings",
+  "recents": "Recents",
+  "noChats": "No chats yet",
+  "noTasks": "No tasks yet",
+  "untitledConversation": "Untitled conversation",
+  "rename": "Rename",
+  "delete": "Delete",
+  "user": "User"
+}

@@ -1,0 +1,20 @@
+{
+  "save": "Save",
+  "cancel": "Cancel",
+  "delete": "Delete",
+  "rename": "Rename",
+  "close": "Close",
+  "open": "Open",
+  "settings": "Settings",
+  "search": "Search",
+  "loading": "Loading...",
+  "untitled": "Untitled",
+  "add": "Add",
+  "remove": "Remove",
+  "default": "Default",
+  "show": "Show",
+  "hide": "Hide",
+  "mcp": "MCP",
+  "skills": "Skills",
+  "subagent": "Subagent"
+}
