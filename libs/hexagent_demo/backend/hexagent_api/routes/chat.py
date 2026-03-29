@@ -392,7 +392,17 @@ async def _generate_events(  # noqa: C901
     except Exception as exc:
         logger.exception("Error streaming agent response")
         detail = f"{type(exc).__name__}: {exc}"
+        
+        # If it's a known sensitive content error from Anthropic/Maas, make it user-friendly
+        error_msg = str(exc)
+        if "包含敏感内容" in error_msg or "403" in error_msg:
+            detail = "您当前的请求或历史信息中包含敏感内容，该轮对话已终止。请尝试清除历史信息或开启新对话。"
+            
         yield f"event: error\ndata: {json.dumps({'message': detail})}\n\n"
+        
+        # Ensure the error is also added to the message blocks so it's saved in history
+        blocks.append({"type": "text", "text": f"\n\n[系统错误: {detail}]"})
+        full_text += f"\n\n[系统错误: {detail}]"
 
     # Flush any trailing thinking
     if current_thinking:

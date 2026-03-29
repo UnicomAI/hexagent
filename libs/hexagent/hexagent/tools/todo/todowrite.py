@@ -50,7 +50,7 @@ class TodoWriteTool(BaseAgentTool[TodoWriteToolParams]):
         Returns:
             ToolResult with a summary of the updated todo list.
         """
-        logger.info("TodoWriteTool.execute called with %d items", len(params.todos))
+        logger.info("TodoWriteTool.execute called with %d items. Raw params: %s", len(params.todos), params)
         try:
             self._todos = list(params.todos)
 
