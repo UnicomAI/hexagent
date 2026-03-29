@@ -651,6 +651,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "STREAM_END": {
       const { conversationId: endCid, messageId: endMsgId } = action.payload;
       const entry = state.streamingByConversation[endCid];
+      if (!entry) return state; // Ignore if stream was already ended by error
       const finalBlocks = entry ? finalizeThinking(entry.blocks) : [];
       const finalContent = blocksToContent(finalBlocks);
       const { [endCid]: _, ...restStreaming } = state.streamingByConversation;

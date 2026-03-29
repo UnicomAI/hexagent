@@ -89,7 +89,7 @@ class AgentManager:
         raise RuntimeError(
             "Selected working directory is mounted but not writable for the cowork session user. "
             f"guest_dir={guest_dir} session={session_name} detail={detail}. "
-            "Please choose a writable local folder (recommended: D:\\code\\...), "
+            "Please choose a writable local folder, "
             "or adjust Windows folder ACL/WSL mount permissions."
         )
 
