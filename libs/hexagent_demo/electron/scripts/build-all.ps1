@@ -9,11 +9,23 @@ $SourcePrebuiltTar = Join-Path $ElectronDir "prebuilt\hexagent-prebuilt.tar"
 $DistDir = Join-Path $ElectronDir "dist"
 $DistPrebuiltTar = Join-Path $DistDir "hexagent-prebuilt.tar"
 $DistReadme = Join-Path $DistDir "INSTALL-WINDOWS.txt"
+$RulesFile = Join-Path $ScriptDir "WINDOWS_PACKAGING_RULES.md"
 
 Write-Host '========================================='
 Write-Host '  HexAgent Desktop - Build ('$Target')'
 Write-Host '========================================='
 Write-Host ''
+
+if ($Target -eq 'win') {
+    if (Test-Path $RulesFile) {
+        Write-Host '[Preflight] Reading Windows packaging rules...'
+        Write-Host ''
+        Get-Content $RulesFile | ForEach-Object { Write-Host $_ }
+        Write-Host ''
+    } else {
+        Write-Warning "Windows packaging rules file not found: $RulesFile"
+    }
+}
 
 Write-Host '[1/3] Building frontend...'
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
