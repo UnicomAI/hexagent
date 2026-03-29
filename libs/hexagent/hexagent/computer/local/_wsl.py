@@ -53,7 +53,6 @@ if not any(isinstance(h, logging.FileHandler) and h.baseFilename == str(_get_wsl
     _wsl_logger.addHandler(_fh)
     # Ensure logs are visible in the main logger too
     _wsl_logger.propagate = True
-    print(f"WSL LOG FILE: {log_file.resolve()}")
 
 def _truncate_log(s: str, limit: int = 50) -> str:
     """Truncate a string for logging, showing only the first part if long."""
@@ -250,14 +249,25 @@ class WslVM:
         Raises:
             WslError: If the distribution exists but is WSL version 1.
         """
-        proc = await asyncio.create_subprocess_exec(
-            self._wsl_exe,
-            "--list",
-            "--verbose",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout_bytes, _ = await proc.communicate()
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self._wsl_exe,
+                "--list",
+                "--verbose",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+        except (TimeoutError, asyncio.TimeoutError):
+            if proc:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                await proc.wait()
+            wsl_log("WSL status check TIMEOUT (30s)", level=logging.ERROR)
+            return None
+        except Exception as e:
+            wsl_log("WSL status check ERROR: %s", str(e), level=logging.ERROR)
+            return None
 
         if proc.returncode != 0:
             return None
