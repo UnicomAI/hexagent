@@ -1,7 +1,7 @@
-{
+﻿{
   "heading": {
-    "chatWords": ["ClawWork，", "随时为你效劳。"],
-    "coworkWords": ["ClawWork，", "助你高效完成任务。"]
+    "chatWords": ["UniClaw-工作虾，", "随时为你效劳。"],
+    "coworkWords": ["UniClaw-工作虾，", "助你高效完成任务。"]
   },
   "placeholders": {
     "chat": [
@@ -27,3 +27,4 @@
   "vmSetupRequired": "需要设置虚拟机",
   "setupInSettings": "前往设置"
 }
+

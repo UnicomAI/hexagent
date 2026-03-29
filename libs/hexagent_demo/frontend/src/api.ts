@@ -1,14 +1,7 @@
-﻿import type { Conversation } from "./types";
+import type { Conversation } from "./types";
+import { getApiBase } from "./apiBase";
 
-const API_BASE = (() => {
-  if (typeof window !== 'undefined' && window.electronAPI?.backendPort) {
-    const base = `http://localhost:${window.electronAPI.backendPort}`;
-    console.log('[api] Electron mode, API_BASE:', base);
-    return base;
-  }
-  console.log('[api] Browser mode, API_BASE: (empty, using relative URLs)');
-  return '';
-})();
+const API_BASE = getApiBase();
 
 export async function listConversations(): Promise<Conversation[]> {
   const res = await fetch(`${API_BASE}/api/conversations`);

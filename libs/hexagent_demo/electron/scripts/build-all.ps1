@@ -8,11 +8,15 @@ $PrepareOfflineWsl = ($env:HEXAGENT_PREPARE_OFFLINE_WSL -eq "1")
 $SourcePrebuiltTar = Join-Path $ElectronDir "prebuilt\hexagent-prebuilt.tar"
 $DistDir = Join-Path $ElectronDir "dist"
 $DistPrebuiltTar = Join-Path $DistDir "hexagent-prebuilt.tar"
-$DistReadme = Join-Path $DistDir "INSTALL-WINDOWS.txt"
+$ProductNameEn = "UniClaw-Work"
+$ProductNameZh = "UniClaw-工作虾"
+$InstallerExeName = "$ProductNameEn.exe"
+$DistReadme = Join-Path $DistDir "${ProductNameEn}使用说明.txt"
+$DistBundleZip = Join-Path $DistDir "${ProductNameZh}.zip"
 $RulesFile = Join-Path $ScriptDir "WINDOWS_PACKAGING_RULES.md"
 
 Write-Host '========================================='
-Write-Host '  HexAgent Desktop - Build ('$Target')'
+Write-Host '  UniClaw Desktop - Build ('$Target')'
 Write-Host '========================================='
 Write-Host ''
 
@@ -28,13 +32,13 @@ if ($Target -eq 'win') {
 }
 
 Write-Host '[1/3] Building frontend...'
-if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
     Write-Error "npm command not found, please make sure Node.js is installed"
 }
 
 Set-Location "$ElectronDir\..\frontend"
-npm install
-npm run build
+npm.cmd install
+npm.cmd run build
 
 Write-Host ''
 Write-Host '[2/3] Skipping electron dependencies (already installed)...'
@@ -64,7 +68,7 @@ Write-Host ''
 Write-Host '[3/3] Packaging Windows x64 installer...'
 $env:ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/'
 $env:ELECTRON_BUILDER_BINARIES_MIRROR = 'https://npmmirror.com/mirrors/electron-builder-binaries/'
-npx electron-builder --win --x64 --publish never
+npx.cmd electron-builder --win --x64 --publish never
 Write-Host 'Electron packaging completed successfully!'
 
 Write-Host ''
@@ -81,24 +85,84 @@ if (-not (Test-Path $DistPrebuiltTar)) {
     }
 }
 
+# Clean up old legacy-named artifacts to avoid confusing release folders.
+Get-ChildItem "$DistDir\ClawWork-*.exe", "$DistDir\ClawWork-*.exe.blockmap", "$DistDir\INSTALL-WINDOWS.txt" -ErrorAction SilentlyContinue |
+    Remove-Item -Force -ErrorAction SilentlyContinue
+
 $installGuide = @"
-ClawWork Windows 安装说明
+UniClaw-Work 使用说明
 
 1) 分发或安装前，请确保以下文件放在同一个文件夹：
-   - ClawWork-0.0.1-win-x64.exe
+   - $InstallerExeName
    - hexagent-prebuilt.tar
+   - $(Split-Path $DistReadme -Leaf)
 
-2) 运行 ClawWork-0.0.1-win-x64.exe 安装桌面应用。
+2) 运行 $InstallerExeName 安装桌面应用。
 
 3) 离线加速（可选）：
    - 如果运行时可找到 hexagent-prebuilt.tar，
      VM 初始化会优先从本地镜像导入。
    - 如果找不到该文件，VM 初始化会自动回退为联网安装。
 
-4) 建议同时保留：
-   - ClawWork-0.0.1-win-x64.exe.blockmap
-   便于后续升级与问题排查。
+4) 打包脚本会自动生成分发压缩包：
+   - ${ProductNameZh}.zip
+   其中包含：$InstallerExeName、hexagent-prebuilt.tar、$(Split-Path $DistReadme -Leaf)
 "@
 Set-Content -Path $DistReadme -Value $installGuide -Encoding UTF8
 
-Get-ChildItem "$ElectronDir\dist\*.exe", "$ElectronDir\dist\*.blockmap", "$ElectronDir\dist\hexagent-prebuilt.tar", "$ElectronDir\dist\INSTALL-WINDOWS.txt" -ErrorAction SilentlyContinue | Format-Table -AutoSize
+$InstallerExePath = Join-Path $DistDir $InstallerExeName
+if (-not (Test-Path $InstallerExePath)) {
+    $FallbackExe = Get-ChildItem "$DistDir\*.exe" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne 'Uninstall.exe' } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($FallbackExe) {
+        Write-Warning "Expected installer name not found. Renaming '$($FallbackExe.Name)' to '$InstallerExeName'."
+        Move-Item -Force $FallbackExe.FullName $InstallerExePath
+
+        $FallbackBlockmap = "$($FallbackExe.FullName).blockmap"
+        $InstallerBlockmap = "$InstallerExePath.blockmap"
+        if (Test-Path $FallbackBlockmap) {
+            Move-Item -Force $FallbackBlockmap $InstallerBlockmap
+        }
+    } else {
+        Write-Warning "Installer exe not found in dist directory."
+    }
+}
+
+$BundleItems = @($InstallerExePath, $DistPrebuiltTar, $DistReadme) | Where-Object { $_ -and (Test-Path $_) }
+if ($BundleItems.Count -eq 3) {
+    if (Test-Path $DistBundleZip) {
+        Remove-Item -Force $DistBundleZip
+    }
+
+    $BundleCreated = $false
+    $TarExe = Get-Command tar.exe -ErrorAction SilentlyContinue
+    if ($TarExe) {
+        $BundleEntryNames = @($InstallerExeName, 'hexagent-prebuilt.tar', (Split-Path $DistReadme -Leaf))
+        Push-Location $DistDir
+        try {
+            & $TarExe.Source -a -c -f $DistBundleZip @BundleEntryNames
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $DistBundleZip)) {
+                $BundleCreated = $true
+            }
+        } finally {
+            Pop-Location
+        }
+    }
+
+    if (-not $BundleCreated) {
+        Write-Warning "tar.exe zip creation failed or unavailable, falling back to Compress-Archive."
+        Compress-Archive -Path $BundleItems -DestinationPath $DistBundleZip -Force
+        $BundleCreated = $true
+    }
+
+    Write-Host "Created bundle: $DistBundleZip"
+} else {
+    Write-Warning "Bundle creation skipped. Missing files:"
+    if (-not (Test-Path $InstallerExePath)) { Write-Warning " - $InstallerExePath" }
+    if (-not (Test-Path $DistPrebuiltTar)) { Write-Warning " - $DistPrebuiltTar" }
+    if (-not (Test-Path $DistReadme)) { Write-Warning " - $DistReadme" }
+}
+
+Get-ChildItem "$DistDir\*.exe", "$DistDir\*.blockmap", "$DistDir\hexagent-prebuilt.tar", $DistReadme, $DistBundleZip -ErrorAction SilentlyContinue | Format-Table -AutoSize

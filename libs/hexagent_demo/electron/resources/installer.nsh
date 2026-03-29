@@ -1,7 +1,7 @@
 !macro customInstall
-  ; Force desktop shortcut to use bundled ClawWork icon, independent of EXE icon resource.
-  Delete "$DESKTOP\ClawWork.lnk"
-  CreateShortCut "$DESKTOP\ClawWork.lnk" "$INSTDIR\ClawWork.exe" "" "$INSTDIR\resources\app-icon.ico" 0
+  ; Force desktop shortcut to use bundled UniClaw-Work icon, independent of EXE icon resource.
+  Delete "$DESKTOP\UniClaw-Work.lnk"
+  CreateShortCut "$DESKTOP\UniClaw-Work.lnk" "$INSTDIR\UniClaw-Work.exe" "" "$INSTDIR\resources\app-icon.ico" 0
 
   ; Split package mode: if prebuilt tar is distributed next to installer exe,
   ; copy it into install dir for runtime discovery/import.

@@ -13,6 +13,7 @@ import { useSyntaxTheme } from "../hooks/useSyntaxTheme";
 import { X, Download, Copy, Check, File, Eye, CodeXml, Loader2 } from "lucide-react";
 import { useAppContext } from "../store";
 import Markdown from "./Markdown";
+import { withApiBase } from "../apiBase";
 
 const LazyPdfViewer = lazy(() => import("./PdfViewer"));
 const LazyDocxViewer = lazy(() => import("./DocxViewer"));
@@ -842,7 +843,9 @@ function PptxPreview({
     }
 
     let cancelled = false;
-    const previewEndpoint = `/api/files/${conversationId}/preview?path=${encodeURIComponent(path)}`;
+    const previewEndpoint = withApiBase(
+      `/api/files/${conversationId}/preview?path=${encodeURIComponent(path)}`,
+    );
 
     fetch(previewEndpoint)
       .then(async (res) => {
@@ -1158,7 +1161,9 @@ export default function FilePreview({ visible }: { visible: boolean }) {
   if (!preview) return null;
 
   const { path, mimeType, conversationId } = preview;
-  const previewUrl = `/api/files/${conversationId}?path=${encodeURIComponent(path)}`;
+  const previewUrl = withApiBase(
+    `/api/files/${conversationId}?path=${encodeURIComponent(path)}`,
+  );
   const downloadUrl = `${previewUrl}&download=true`;
   const fileName = basename(path);
   const category = detectCategory(mimeType, path);

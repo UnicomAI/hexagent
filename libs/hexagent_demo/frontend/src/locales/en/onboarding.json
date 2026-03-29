@@ -1,7 +1,8 @@
 {
   "welcome": {
-    "tagline": "Powered by ClawWork harness",
-    "nameLabel": "What should ClawWork call you?",
+    "brand": "UniClaw-Work",
+    "tagline": "Powered by UniClaw-Work harness",
+    "nameLabel": "What should UniClaw-Work call you?",
     "namePlaceholder": "Your name",
     "themeLabel": "Theme",
     "themeLightLabel": "Light",
@@ -44,7 +45,7 @@
   },
   "tools": {
     "title": "Web search & fetch",
-    "subtitle": "Let the agent search the web and read pages. Optional — you can configure these later.",
+    "subtitle": "Let the agent search the web and read pages. Optional 鈥?you can configure these later.",
     "webSearch": "Web Search",
     "webFetch": "Web Fetch",
     "providerLabel": "Provider",
@@ -56,7 +57,7 @@
   },
   "compute": {
     "title": "Compute environments",
-    "subtitle": "ClawWork uses sandboxed environments to run code safely.",
+    "subtitle": "UniClaw-Work uses sandboxed environments to run code safely.",
     "vmName": "Virtual Machine",
     "vmRequired": "Required",
     "vmDesc": "Local Linux VM for cowork sessions. You can skip this and set it up later in Settings.",
@@ -73,8 +74,8 @@
     "vmInstallBackground": "Install in background",
     "vmRetry": "Retry",
     "vmRecheck": "I've restarted, Re-check",
-    "vmDepsHint": "System dependencies install in the background — you can continue using ClawWork while it runs.",
-    "vmSkipped": "Skipped — you can set this up later in Settings",
+    "vmDepsHint": "System dependencies install in the background 鈥?you can continue using UniClaw-Work while it runs.",
+    "vmSkipped": "Skipped 鈥?you can set this up later in Settings",
     "vmSetupCowork": "Set up Cowork",
     "skipConfirmTitle": "Are you sure you want to skip?",
     "skipConfirmVm": "Without a <strong>Virtual Machine</strong>, Cowork mode will not be available.",
@@ -84,7 +85,7 @@
     "skipConfirmSkip": "Skip anyway",
     "depsPromptTitle": "Install system dependencies?",
     "depsPromptDesc1": "Installing VM system dependencies is <strong>strongly recommended</strong>. It gives the agent access to tools like Python, Node.js, LaTeX, LibreOffice, and more.",
-    "depsPromptDesc2": "The installation runs in the background — you can start using ClawWork immediately.",
+    "depsPromptDesc2": "The installation runs in the background 鈥?you can start using UniClaw-Work immediately.",
     "depsPromptContinueWithout": "Continue without",
     "depsPromptInstall": "Install & Continue",
     "back": "Back",
@@ -92,8 +93,8 @@
     "next": "Next"
   },
   "done": {
-    "title": "You\u2019re all set!",
-    "subtitle": "Here\u2019s what you configured:",
+    "title": "You’re all set!",
+    "subtitle": "Here’s what you configured:",
     "aiModel": "AI Model",
     "summarizer": "Summarizer",
     "summarizerSameAsMain": "Same as main",
@@ -107,7 +108,7 @@
     "footer": "You can change any of these later in Settings.",
     "back": "Back",
     "saving": "Saving...",
-    "finish": "Start using ClawWork"
+    "finish": "Start using UniClaw-Work"
   },
   "errors": {
     "configureModelFirst": "Please go back and configure your AI model first",
