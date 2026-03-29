@@ -16,3 +16,4 @@ How it works:
 - Multiple files can be presented efficiently in a single call
 - If a file is not in the output directory, it will be automatically copied into that directory
 - The first input path passed in to the PresentToUser tool, and therefore the first output path returned from it, should correspond to the file that is most relevant for the user to see first
+- In the same turn, do not call PresentToUser repeatedly for the same file path. If the file list is unchanged, reuse the existing result instead of presenting it again
