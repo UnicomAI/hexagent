@@ -222,17 +222,27 @@ class ToggleRequest(BaseModel):
 
 
 async def _sync_skill_to_vm(skill_name: str, subdir: str, enabled: bool) -> None:
-    """Sync a single skill's presence in the WSL VM after toggle.
+    """Sync a single skill's presence in the WSL VM after toggle (Windows only).
 
     WSL uses cp -r (not bind mount) for skills, so changes on Windows
     filesystem are not reflected automatically. This function directly
     adds/removes the skill in the WSL guest filesystem.
+
+    On macOS, Lima uses real bind mounts, so changes are automatically
+    reflected and this function is a no-op.
 
     Args:
         skill_name: Name of the skill directory.
         subdir: Either "public" or "private".
         enabled: True if skill was enabled, False if disabled.
     """
+    import sys
+
+    # Only Windows/WSL needs manual sync; macOS Lima uses bind mounts
+    if sys.platform != "win32":
+        logger.debug("Skipping skill sync on non-Windows platform (bind mounts auto-sync)")
+        return
+
     from hexagent_api.agent_manager import agent_manager
 
     vm = getattr(agent_manager, "_vm_manager", None)
