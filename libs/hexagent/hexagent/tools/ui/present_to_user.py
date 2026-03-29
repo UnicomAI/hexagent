@@ -42,6 +42,7 @@ _EXT_MIME_MAP: dict[str, str] = {
     "md": "text/markdown",
     "markdown": "text/markdown",
     "rst": "text/x-rst",
+    "pdf": "application/pdf",
     # -- Web --
     "css": "text/css",
     "js": "application/javascript",
@@ -132,10 +133,10 @@ def get_mime(fp):
 
 for fp in filepaths:
     if not os.path.exists(fp):
-        print(f"ERR{delim}Path does not exist: {fp}")
+        print(f"ERR{{delim}}Path does not exist: {{fp}}")
         continue
     if not os.path.isfile(fp):
-        print(f"ERR{delim}Path is not a file: {fp}")
+        print(f"ERR{{delim}}Path is not a file: {{fp}}")
         continue
     
     real = os.path.realpath(fp)
@@ -143,7 +144,7 @@ for fp in filepaths:
     
     # If it's already in the output dir, just report it
     if real.startswith(real_out + os.sep):
-        print(f"OK{delim}{real}{delim}{mime}")
+        print(f"OK{{delim}}{{real}}{{delim}}{{mime}}")
         continue
     
     # Otherwise copy it
@@ -154,14 +155,14 @@ for fp in filepaths:
         stem, ext = os.path.splitext(bname)
         counter = 1
         while os.path.exists(dest):
-            dest = os.path.join(output_dir, f"{stem}_{counter}{ext}")
+            dest = os.path.join(output_dir, f"{{stem}}_{{counter}}{{ext}}")
             counter += 1
             
     try:
         shutil.copy2(fp, dest)
-        print(f"COPIED{delim}{dest}{delim}{mime}{delim}{fp}")
+        print(f"COPIED{{delim}}{{dest}}{{delim}}{{mime}}{{delim}}{{fp}}")
     except Exception as e:
-        print(f"ERR{delim}Failed to copy {fp}: {str(e)}")
+        print(f"ERR{{delim}}Failed to copy {{fp}}: {{str(e)}}")
 """
 
 
