@@ -47,3 +47,6 @@ skills-inactive/
 # Bundled example/public skills (license restrictions)
 # skills/examples/
 # skills/public/
+
+# Ignore all local skills content
+skills/
