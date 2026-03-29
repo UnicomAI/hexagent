@@ -160,7 +160,7 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
                 {t(`mode.${mode}`)}
                 <span className="custom-tooltip">
                   {t(`mode.${mode}`)}
-                  <span className="custom-tooltip-shortcut">{isMac ? "鈬р寴" : "Ctrl+Shift+"}{idx + 1}</span>
+                  <span className="custom-tooltip-shortcut">{isMac ? "Cmd+Shift+" : "Ctrl+Shift+"}{idx + 1}</span>
                 </span>
               </button>
             ))}

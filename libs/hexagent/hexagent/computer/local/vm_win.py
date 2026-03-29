@@ -27,6 +27,7 @@ to an isolated Linux user on the WSL distro.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shlex
 import uuid
@@ -272,10 +273,12 @@ class LocalVM:
         # Platform check is delegated to WslVM.__init__(), which raises
         # UnsupportedPlatformError on non-Windows platforms.
         from hexagent.computer.local._wsl import WslVM as _WslVM
+        from hexagent.computer.local._wsl import wsl_log
 
         self._vm: WslVM = _WslVM(instance=instance)
         self._instance = instance
         self._lock = asyncio.Lock()
+        wsl_log("LocalVM initialized (Instance: %s)", instance)
 
     # ------------------------------------------------------------------
     # Public API
@@ -297,7 +300,7 @@ class LocalVM:
             return
         await self._vm.stop()
 
-    async def mount(  # noqa: PLR0912
+    async def mount(  # noqa: PLR0912, PLR0915
         self,
         mounts: Mount | list[Mount],
         *,
@@ -321,10 +324,13 @@ class LocalVM:
             VMMountConflictError: Guest path conflict with different config.
             VMError: Session does not exist on the distro.
         """
+        from hexagent.computer.local._wsl import wsl_log
+
         mount_list = [mounts] if isinstance(mounts, Mount) else list(mounts)
         if not mount_list:
             return
 
+        wsl_log("LocalVM.mount(session=%s, defer=%s): %s", session, defer, [m.source for m in mount_list])
         self._validate_mounts(mount_list)
 
         # Validate session user exists on the distro.
@@ -332,6 +338,7 @@ class LocalVM:
             result = await self._vm.shell(f"id -u {shlex.quote(session)}")
             if result.exit_code != 0:
                 msg = f"Session '{session}' does not exist on the distro"
+                wsl_log("LocalVM.mount ERROR: %s", msg, level=logging.ERROR)
                 raise VMError(msg)
 
         scope = "session" if session is not None else "system"
@@ -349,6 +356,7 @@ class LocalVM:
                 # Config may already contain the mount while the live bind mount
                 # was lost (for example after external WSL restart). Verify and
                 # self-heal by restoring only the missing live bind mount.
+                wsl_log("LocalVM.mount: All mounts already in config, checking live status for self-heal...")
                 for r in resolved_new:
                     probe = await self._vm.shell(f"findmnt -n {shlex.quote(r.guest_path)}")
                     if probe.exit_code != 0:
@@ -357,12 +365,14 @@ class LocalVM:
                         wsl_host = _win_path_to_wsl(r.host_path)
                         qguest = shlex.quote(r.guest_path)
                         qhost = shlex.quote(wsl_host)
+                        wsl_log("LocalVM.mount SELF-HEAL: Restoring lost bind mount %s -> %s", r.host_path, r.guest_path)
                         cmd = f"mkdir -p {qguest} && mount --bind {qhost} {qguest}"
                         if not r.writable:
                             cmd += f" && mount -o remount,ro,bind {qguest}"
                         remount = await self._vm.shell(cmd, user="root")
                         if remount.exit_code != 0:
                             msg = f"Failed to self-heal mount '{r.guest_path}': {remount.stderr or remount.stdout}"
+                            wsl_log("LocalVM.mount SELF-HEAL FAILED: %s", msg, level=logging.ERROR)
                             raise VMError(msg)
 
                         sess = _session_user_from_guest_mount_path(r.guest_path)
@@ -373,24 +383,30 @@ class LocalVM:
                         )
                         if r.writable and sess is not None and not skip_chown:
                             quser = shlex.quote(sess)
+                            wsl_log("LocalVM.mount SELF-HEAL chown: %s -> %s", sess, r.guest_path)
                             await self._vm.shell(f"chown -R {quser}:{quser} {qguest}", user="root")
 
                         verify = await self._vm.shell(f"findmnt -n {qguest}", user="root")
                         if verify.exit_code != 0 or not (verify.stdout or "").strip():
                             msg = f"Mount self-heal verification failed for '{r.guest_path}'"
+                            wsl_log("LocalVM.mount SELF-HEAL VERIFY FAILED: %s", msg, level=logging.ERROR)
                             raise VMError(msg)
                 return
 
+            wsl_log("LocalVM.mount: Adding %d new mount(s) to config", len(truly_new))
             existing_guests = {r.guest_path for r in existing}
             for r in truly_new:
                 if r.guest_path in existing_guests:
                     msg = f"Mount conflict: guest path '{r.guest_path}' is already in use"
+                    wsl_log("LocalVM.mount ERROR: %s", msg, level=logging.ERROR)
                     raise VMMountConflictError(msg)
 
             merged = existing + truly_new
             if defer:
+                wsl_log("LocalVM.mount: DEFERRED update to mounts.json")
                 self._vm.write_mounts(merged)
             else:
+                wsl_log("LocalVM.mount: IMMEDIATE apply (distro restart)")
                 await self._vm.apply_mounts(merged)
 
     async def unmount(

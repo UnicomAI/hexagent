@@ -724,14 +724,12 @@ class TestApplyMounts:
 
         with (
             patch.object(vm, "status", new_callable=AsyncMock, return_value="Running"),
-            patch.object(vm, "stop", new_callable=AsyncMock) as mock_stop,
-            patch.object(vm, "start", new_callable=AsyncMock) as mock_start,
+            patch.object(vm, "_apply_bind_mounts", new_callable=AsyncMock) as mock_apply,
             patch.object(vm, "write_mounts"),
         ):
             mounts = [ResolvedMount(host_path=r"C:\h", guest_path="/g", writable=False)]
             await vm.apply_mounts(mounts)
-            mock_stop.assert_awaited_once()
-            mock_start.assert_awaited_once()
+            mock_apply.assert_awaited_once()
 
     async def test_apply_raises_if_instance_missing(self) -> None:
         with (
@@ -771,27 +769,36 @@ class TestApplyBindMounts:
             patch.object(vm, "read_mounts", return_value=mounts),
             patch.object(vm, "shell", new_callable=AsyncMock) as mock_shell,
         ):
-            # First call: mountpoint check (not mounted)
-            # Second call: actual mount
-            mock_shell.side_effect = [
-                _fail(),  # mountpoint -q /mnt/code -> not mounted
-                _ok(),  # mount --bind ... /mnt/code
-                _ok(stdout="/mnt/c/Users/foo/code"),  # findmnt -n /mnt/code
-                _fail(),  # mountpoint -q /mnt/data -> not mounted
-                _ok(),  # mount --bind ... /mnt/data (+ remount ro)
-                _ok(stdout="/mnt/d/data"),  # findmnt -n /mnt/data
-            ]
+
+            async def _shell_side_effect(command: str, *_: Any, **__: Any) -> CLIResult:  # noqa: PLR0911
+                if command.startswith("wslpath -u"):
+                    if "C:\\Users\\foo\\code" in command:
+                        return _ok(stdout="/mnt/c/Users/foo/code")
+                    if "D:\\data" in command:
+                        return _ok(stdout="/mnt/d/data")
+                if command == "mountpoint -q /mnt/code":
+                    return _fail()
+                if command == "mountpoint -q /mnt/data":
+                    return _fail()
+                if command.startswith("findmnt -n "):
+                    return _ok(stdout="/dev/mock")
+                if command.startswith(("ls -A /mnt/code | head -n 5", "ls -A /mnt/data | head -n 5")):
+                    return _ok(stdout="ok")
+                return _ok()
+
+            mock_shell.side_effect = _shell_side_effect
 
             await vm._apply_bind_mounts()
 
-            assert mock_shell.await_count == 6
+            mount_calls = [c.args[0] for c in mock_shell.call_args_list if "mount --bind" in c.args[0]]
+            assert len(mount_calls) == 2
             # Check writable mount (no remount)
-            mount_call_1 = mock_shell.call_args_list[1].args[0]
+            mount_call_1 = mount_calls[0]
             assert "mount --bind" in mount_call_1
             assert "/mnt/c/Users/foo/code" in mount_call_1
             assert "remount,ro" not in mount_call_1
             # Check read-only mount (remount ro)
-            mount_call_2 = mock_shell.call_args_list[4].args[0]
+            mount_call_2 = mount_calls[1]
             assert "mount --bind" in mount_call_2
             assert "remount,ro" in mount_call_2
 
@@ -810,17 +817,23 @@ class TestApplyBindMounts:
             patch.object(vm, "read_mounts", return_value=mounts),
             patch.object(vm, "shell", new_callable=AsyncMock) as mock_shell,
         ):
-            mock_shell.side_effect = [
-                _fail(),  # mountpoint -q
-                _ok(),  # mount --bind
-                _ok(),  # chown -R alice:alice
-                _ok(stdout="/mnt/d/w"),  # findmnt
-            ]
+
+            async def _shell_side_effect(command: str, *_: Any, **__: Any) -> CLIResult:
+                if command.startswith("wslpath -u") and "D:\\w" in command:
+                    return _ok(stdout="/mnt/d/w")
+                if command == "mountpoint -q /sessions/alice/mnt/work":
+                    return _fail()
+                if command.startswith("findmnt -n "):
+                    return _ok(stdout="/dev/mock")
+                if command.startswith("ls -A /sessions/alice/mnt/work | head -n 5"):
+                    return _ok(stdout="ok")
+                return _ok()
+
+            mock_shell.side_effect = _shell_side_effect
 
             await vm._apply_bind_mounts()
 
-            assert mock_shell.await_count == 4
-            chown_call = mock_shell.call_args_list[2].args[0]
+            chown_call = next(c.args[0] for c in mock_shell.call_args_list if "chown -R" in c.args[0])
             assert "chown -R" in chown_call
             assert "alice:alice" in chown_call
             assert "/sessions/alice/mnt/work" in chown_call
@@ -840,12 +853,22 @@ class TestApplyBindMounts:
             patch.object(vm, "read_mounts", return_value=mounts),
             patch.object(vm, "shell", new_callable=AsyncMock) as mock_shell,
         ):
-            mock_shell.return_value = _ok()  # mountpoint -q succeeds (already mounted)
+
+            async def _shell_side_effect(command: str, *_: Any, **__: Any) -> CLIResult:
+                if command.startswith("wslpath -u") and "C:\\code" in command:
+                    return _ok(stdout="/mnt/c/code")
+                if command == "mountpoint -q /mnt/code":
+                    return _ok()
+                if command == "ls -A /mnt/code":
+                    return _ok(stdout="existing-file")
+                return _ok()
+
+            mock_shell.side_effect = _shell_side_effect
 
             await vm._apply_bind_mounts()
 
-            # Only the mountpoint check, no mount --bind call
-            assert mock_shell.await_count == 1
+            # When already mounted and non-empty, bind step is skipped.
+            assert not any("mount --bind" in c.args[0] for c in mock_shell.call_args_list)
 
     async def test_empty_mounts_is_noop(self) -> None:
         with (

@@ -1,13 +1,14 @@
 {
   "welcome": {
-    "tagline": "由 ClawWork 引擎驱动",
-    "nameLabel": "ClawWork 应该怎么称呼你？",
+    "tagline": "由 UniClaw-工作虾 引擎驱动",
+    "nameLabel": "UniClaw-工作虾 应该怎么称呼你？",
     "namePlaceholder": "你的名字",
     "themeLabel": "主题",
     "themeLightLabel": "浅色",
     "themeDarkLabel": "深色",
     "themeSystemLabel": "跟随系统",
-    "getStarted": "开始使用"
+    "getStarted": "开始使用",
+    "brand": "UniClaw-工作虾"
   },
   "provider": {
     "title": "AI 模型",
@@ -56,7 +57,7 @@
   },
   "compute": {
     "title": "计算环境",
-    "subtitle": "ClawWork 使用沙盒环境来安全地运行代码。",
+    "subtitle": "UniClaw-工作虾 使用沙盒环境来安全地运行代码。",
     "vmName": "虚拟机",
     "vmRequired": "必需",
     "vmDesc": "用于协作会话的本地 Linux 虚拟机。你可以跳过此步骤，稍后在设置中配置。",
@@ -73,7 +74,7 @@
     "vmInstallBackground": "后台安装",
     "vmRetry": "重试",
     "vmRecheck": "我已重启，重新检查",
-    "vmDepsHint": "系统依赖在后台安装 — 安装期间你可以继续使用 ClawWork。",
+    "vmDepsHint": "系统依赖在后台安装 — 安装期间你可以继续使用 UniClaw-工作虾。",
     "vmSkipped": "已跳过 — 你可以稍后在设置中配置",
     "vmSetupCowork": "设置协作模式",
     "skipConfirmTitle": "确定要跳过吗？",
@@ -84,7 +85,7 @@
     "skipConfirmSkip": "仍然跳过",
     "depsPromptTitle": "安装系统依赖？",
     "depsPromptDesc1": "<strong>强烈建议</strong>安装虚拟机系统依赖。它能让智能体访问 Python、Node.js、LaTeX、LibreOffice 等工具。",
-    "depsPromptDesc2": "安装在后台运行 — 你可以立即开始使用 ClawWork。",
+    "depsPromptDesc2": "安装在后台运行 — 你可以立即开始使用 UniClaw-工作虾。",
     "depsPromptContinueWithout": "不安装继续",
     "depsPromptInstall": "安装并继续",
     "back": "返回",
@@ -107,7 +108,7 @@
     "footer": "你可以稍后在设置中更改这些。",
     "back": "返回",
     "saving": "正在保存...",
-    "finish": "开始使用 ClawWork"
+    "finish": "开始使用 UniClaw-工作虾"
   },
   "errors": {
     "configureModelFirst": "请返回并先配置你的 AI 模型",
