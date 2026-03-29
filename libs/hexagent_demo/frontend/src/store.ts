@@ -651,6 +651,12 @@ export function reducer(state: AppState, action: Action): AppState {
     case "STREAM_END": {
       const { conversationId: endCid, messageId: endMsgId } = action.payload;
       const entry = state.streamingByConversation[endCid];
+      // Stream may already be finalized by STREAM_ERROR. In that case,
+      // ignore trailing message_end to avoid overwriting persisted content
+      // (especially the rendered error block) with an empty message.
+      if (!entry) {
+        return { ...state, isRequestPending: false };
+      }
       const finalBlocks = entry ? finalizeThinking(entry.blocks) : [];
       const finalContent = blocksToContent(finalBlocks);
       const { [endCid]: _, ...restStreaming } = state.streamingByConversation;
