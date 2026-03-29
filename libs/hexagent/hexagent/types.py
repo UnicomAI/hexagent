@@ -386,7 +386,8 @@ class ReadToolParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    description: str = Field(
+    description: str | None = Field(
+        default=None,
         description="Clear, concise description of what this Read does in active voice. (Always generate this param first)",
     )
     file_path: str = Field(description="The absolute path to the file to read")
@@ -407,10 +408,11 @@ class WriteToolParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    description: str = Field(
+    description: str | None = Field(
+        default=None,
         description="Clear, concise description of what this Write does in active voice. (Always generate this param first)",
     )
-    file_path: str = Field(description="The absolute path to the file to write (must be absolute, not relative)")
+    file_path: str = Field(description="The absolute path to the target file to write (must be absolute, not relative)")
     content: str = Field(description="The content to write to the file")
 
 
@@ -419,7 +421,8 @@ class EditToolParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    description: str = Field(
+    description: str | None = Field(
+        default=None,
         description="Clear, concise description of what this Edit does in active voice. (Always generate this param first)",
     )
     file_path: str = Field(description="The absolute path to the file to modify")
@@ -433,7 +436,8 @@ class GlobToolParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    description: str = Field(
+    description: str | None = Field(
+        default=None,
         description="Clear, concise description of what this Glob does in active voice. (Always generate this param first)",
     )
     pattern: str = Field(description="The glob pattern to match files against")
@@ -453,7 +457,8 @@ class GrepToolParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    description: str = Field(
+    description: str | None = Field(
+        default=None,
         description="Clear, concise description of what this Grep does in active voice. (Always generate this param first)",
     )
     pattern: str = Field(description="The regular expression pattern to search for in file contents")
