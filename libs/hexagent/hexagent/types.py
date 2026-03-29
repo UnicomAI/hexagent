@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, fields, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, Protocol, TypedDict, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -611,7 +611,7 @@ class TaskStopToolParams(BaseModel):
 class TodoItem(BaseModel):
     """A single todo item."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     content: str = Field(min_length=1, description="The todo item content")
     status: Literal["pending", "in_progress", "completed"] = Field(
@@ -619,6 +619,7 @@ class TodoItem(BaseModel):
     )
     active_form: str = Field(
         min_length=1,
+        validation_alias=AliasChoices("active_form", "activeForm"),
         description="The active form of the todo item",
     )
 

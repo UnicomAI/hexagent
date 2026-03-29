@@ -53,11 +53,25 @@ if not any(isinstance(h, logging.FileHandler) and h.baseFilename == str(_get_wsl
     _wsl_logger.addHandler(_fh)
     # Ensure logs are visible in the main logger too
     _wsl_logger.propagate = True
-    print(f"WSL LOG FILE: {log_file.resolve()}")
+
+def _truncate_log(s: str, limit: int = 50) -> str:
+    """Truncate a string for logging, showing only the first part if long."""
+    if not isinstance(s, str) or len(s) <= limit:
+        return s
+    # For very long strings (like base64 or file content), just show the start.
+    return s[:limit].replace("\n", "\\n") + f"... (truncated, total {len(s)} chars)"
 
 def wsl_log(msg: str, *args: Any, level: int = logging.INFO) -> None:
     """Log a message to the dedicated wsl.log and flush it."""
-    _wsl_logger.log(level, msg, *args)
+    # Truncate large arguments to avoid massive log files (e.g. base64 content)
+    truncated_args = []
+    for arg in args:
+        if isinstance(arg, str):
+            truncated_args.append(_truncate_log(arg))
+        else:
+            truncated_args.append(arg)
+            
+    _wsl_logger.log(level, msg, *truncated_args)
     for h in _wsl_logger.handlers:
         if isinstance(h, logging.FileHandler):
             h.flush()
@@ -235,14 +249,25 @@ class WslVM:
         Raises:
             WslError: If the distribution exists but is WSL version 1.
         """
-        proc = await asyncio.create_subprocess_exec(
-            self._wsl_exe,
-            "--list",
-            "--verbose",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout_bytes, _ = await proc.communicate()
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self._wsl_exe,
+                "--list",
+                "--verbose",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+        except (TimeoutError, asyncio.TimeoutError):
+            if proc:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                await proc.wait()
+            wsl_log("WSL status check TIMEOUT (30s)", level=logging.ERROR)
+            return None
+        except Exception as e:
+            wsl_log("WSL status check ERROR: %s", str(e), level=logging.ERROR)
+            return None
 
         if proc.returncode != 0:
             return None

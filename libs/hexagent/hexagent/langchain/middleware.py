@@ -515,4 +515,8 @@ class AgentMiddleware(LangChainAgentMiddleware):
             if not approved:
                 return _create_denied_response(request, "Action denied by user")
 
-        return await handler(request)
+        try:
+            return await handler(request)
+        except Exception as e:
+            logger.exception("Tool execution failed in middleware: %s", tool_name)
+            raise
