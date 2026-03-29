@@ -1,23 +1,37 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ElectronDir = Resolve-Path "$ScriptDir\.."
 $Target = if ($args.Count -gt 0) { $args[0] } else { 'win' }
 $EmbedWslPrebuilt = ($env:HEXAGENT_EMBED_WSL_PREBUILT -eq "1" -or $env:OPENAGENT_EMBED_WSL_PREBUILT -eq "1")
-$PrepareOfflineWsl = ($env:HEXAGENT_PREPARE_OFFLINE_WSL -ne "0")
+$PrepareOfflineWsl = ($env:HEXAGENT_PREPARE_OFFLINE_WSL -eq "1")
+$SourcePrebuiltTar = Join-Path $ElectronDir "prebuilt\hexagent-prebuilt.tar"
+$DistDir = Join-Path $ElectronDir "dist"
+$DistPrebuiltTar = Join-Path $DistDir "hexagent-prebuilt.tar"
+$DistReadme = Join-Path $DistDir "INSTALL-WINDOWS.txt"
+$RulesFile = Join-Path $ScriptDir "WINDOWS_PACKAGING_RULES.md"
 
 Write-Host '========================================='
 Write-Host '  HexAgent Desktop - Build ('$Target')'
 Write-Host '========================================='
 Write-Host ''
 
+if ($Target -eq 'win') {
+    if (Test-Path $RulesFile) {
+        Write-Host '[Preflight] Reading Windows packaging rules...'
+        Write-Host ''
+        Get-Content $RulesFile | ForEach-Object { Write-Host $_ }
+        Write-Host ''
+    } else {
+        Write-Warning "Windows packaging rules file not found: $RulesFile"
+    }
+}
+
 Write-Host '[1/3] Building frontend...'
-# Check if npm command exists
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     Write-Error "npm command not found, please make sure Node.js is installed"
 }
 
-# Build frontend
 Set-Location "$ElectronDir\..\frontend"
 npm install
 npm run build
@@ -42,7 +56,6 @@ if ($Target -eq 'win') {
 
 Write-Host ''
 Write-Host '[2.5/3] Building backend...'
-# Call PowerShell version of backend build script
 & "$ScriptDir\build-backend.ps1"
 Write-Host 'Backend build completed successfully!'
 Set-Location $ElectronDir
@@ -59,5 +72,33 @@ Write-Host '========================================='
 Write-Host '  Build complete! Output in dist/'
 Write-Host '========================================='
 
-# List build artifacts
-Get-ChildItem "$ElectronDir\dist\*.exe", "$ElectronDir\dist\*.blockmap" | Format-Table -AutoSize
+if (-not (Test-Path $DistPrebuiltTar)) {
+    if (Test-Path $SourcePrebuiltTar) {
+        Write-Host 'Copying split prebuilt VM image to dist/...'
+        Copy-Item -Force $SourcePrebuiltTar $DistPrebuiltTar
+    } else {
+        Write-Warning "Prebuilt tar source not found: $SourcePrebuiltTar"
+    }
+}
+
+$installGuide = @"
+ClawWork Windows 安装说明
+
+1) 分发或安装前，请确保以下文件放在同一个文件夹：
+   - ClawWork-0.0.1-win-x64.exe
+   - hexagent-prebuilt.tar
+
+2) 运行 ClawWork-0.0.1-win-x64.exe 安装桌面应用。
+
+3) 离线加速（可选）：
+   - 如果运行时可找到 hexagent-prebuilt.tar，
+     VM 初始化会优先从本地镜像导入。
+   - 如果找不到该文件，VM 初始化会自动回退为联网安装。
+
+4) 建议同时保留：
+   - ClawWork-0.0.1-win-x64.exe.blockmap
+   便于后续升级与问题排查。
+"@
+Set-Content -Path $DistReadme -Value $installGuide -Encoding UTF8
+
+Get-ChildItem "$ElectronDir\dist\*.exe", "$ElectronDir\dist\*.blockmap", "$ElectronDir\dist\hexagent-prebuilt.tar", "$ElectronDir\dist\INSTALL-WINDOWS.txt" -ErrorAction SilentlyContinue | Format-Table -AutoSize
