@@ -528,10 +528,28 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
     if (phase1 === "checking") return;
     if (phase1 === "running" || phase2 === "running") return;
 
+    const inferredBackend = navigator.platform.toUpperCase().includes("WIN") ? "wsl" : "lima";
+    const currentBackend = vmStatus?.backend ?? inferredBackend;
+    const canAssistWslInstall =
+      currentBackend === "wsl" &&
+      typeof window !== "undefined" &&
+      typeof window.electronAPI?.installWslRuntime === "function";
+
     if (phase1 === "pending") {
       autoBootstrapTriggeredRef.current = true;
       setAutoBootstrapping(true);
       notify("Detected first-time Windows setup. Starting VM runtime install automatically...", "info");
+      void doInstallLima();
+      return;
+    }
+
+    // On some first-run Windows hosts, VM status exposes a reason
+    // (e.g. wsl.exe missing / feature disabled) and phase1 is "error".
+    // If desktop app can assist runtime install, auto-bootstrap anyway.
+    if (phase1 === "error" && phase2 === "pending" && canAssistWslInstall) {
+      autoBootstrapTriggeredRef.current = true;
+      setAutoBootstrapping(true);
+      notify("Detected actionable WSL runtime issue. Starting automatic repair...", "info");
       void doInstallLima();
       return;
     }
@@ -559,8 +577,32 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
     if (phase1 !== "done" || phase2 !== "done") return;
     if (phase3 !== "pending") return;
     autoProvisionTriggeredRef.current = true;
-    notify("VM instance is ready. Starting system dependency installation in background...", "info");
-    doStartProvision(false);
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const ps = await getVMProvisionStatus();
+        if (cancelled) return;
+        setProvSteps(ps.steps);
+        if (ps.markers?.provisioned) {
+          const statuses: Record<string, PhaseStatus> = {};
+          for (const s of ps.steps) statuses[s.id] = "done";
+          setProvStepStatus(statuses);
+          setPhase3("done");
+          notify("VM dependencies are already provisioned from local image.", "success");
+          return;
+        }
+      } catch {
+        // Fall through to provisioning attempt.
+      }
+
+      notify("VM instance is ready. Starting system dependency installation in background...", "info");
+      doStartProvision(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [phase1, phase2, phase3]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const value: VMSetupContextValue = {

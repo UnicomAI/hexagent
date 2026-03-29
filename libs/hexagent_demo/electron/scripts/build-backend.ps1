@@ -39,7 +39,9 @@ $pyinstallerArgs = @(
     "--collect-submodules", "hexagent_api",
     "--collect-submodules", "hexagent",
     "--collect-data", "hexagent",
-    "--add-data", "../../hexagent/sandbox/vm;sandbox/vm",
+    "--add-data", "../../hexagent/sandbox/vm/setup;sandbox/vm/setup",
+    "--add-data", "../../hexagent/sandbox/vm/setup_lite;sandbox/vm/setup_lite",
+    "--add-data", "../../hexagent/sandbox/vm/lima;sandbox/vm/lima",
     "--add-data", "skills;skills",
     "--add-data", "$ConfigSource;.",
     "hexagent_api/server.py"
@@ -69,6 +71,10 @@ try {
         Remove-Item -Recurse -Force "$ElectronDir\backend_dist"
     }
     Copy-Item -Recurse "$BackendDir\dist\hexagent_api_server" "$ElectronDir\backend_dist"
+
+    # Safety net: never ship huge prebuilt tar inside main installer payload.
+    Get-ChildItem -Path "$ElectronDir\backend_dist" -Recurse -File -Filter "hexagent-prebuilt.tar" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
 
     Write-Host "==> Backend build complete."
 }
