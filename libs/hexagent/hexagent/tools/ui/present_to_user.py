@@ -205,12 +205,9 @@ def _build_command(filepaths: list[str], output_dir: str) -> str:
     """
     quoted_file_args = " ".join(shlex.quote(p) for p in filepaths)
     set_args = f"set -- {quoted_file_args}" if quoted_file_args else "set --"
-    script = f"OUTPUT_DIR={shlex.quote(output_dir)}\n{set_args}\n{_SCRIPT_BODY_LF}"
-    # WSL can evaluate one outer shell layer before the intended ``bash -c``
-    # command, which would eagerly expand ``$...`` and break the script.
-    # Pre-escape dollars so expansion happens only in the inner bash.
-    script_for_outer = script.replace("$", r"\$")
-    return f"bash -c {shlex.quote(script_for_outer)}"
+    # We return the raw script and let Computer.run() handle the execution (bash -c).
+    # No manual dollar escaping is needed because shlex.quote handles the outer layer.
+    return f"OUTPUT_DIR={shlex.quote(output_dir)}\n{set_args}\n{_SCRIPT_BODY_LF}"
 
 
 class PresentToUserTool(BaseAgentTool[PresentToUserToolParams]):
