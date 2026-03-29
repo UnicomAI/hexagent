@@ -85,7 +85,7 @@ _EXT_MIME_MAP: dict[str, str] = {
     "m4a": "audio/mp4",
     "ogg": "audio/ogg",
     "oga": "audio/ogg",
-    # -- Video --
+    # --- Video --
     "webm": "video/webm",
     "mkv": "video/x-matroska",
     # -- Fonts --
@@ -105,96 +105,68 @@ _EXT_MIME_MAP: dict[str, str] = {
 }
 
 
-def _build_case_block() -> str:
-    """Generate a bash ``case`` block from :data:`_EXT_MIME_MAP`.
+_SCRIPT_TEMPLATE = r"""
+import os
+import shutil
+import mimetypes
+import sys
 
-    Groups extensions that share the same MIME type into a single
-    ``ext1|ext2)`` arm for compact output.
-    """
-    # Invert: mime → sorted list of extensions
-    mime_to_exts: dict[str, list[str]] = {}
-    for ext, mime in _EXT_MIME_MAP.items():
-        mime_to_exts.setdefault(mime, []).append(ext)
+output_dir = {output_dir_repr}
+filepaths = {filepaths_repr}
+delim = {delim_repr}
+ext_mime_map = {ext_mime_map_repr}
 
-    arms: list[str] = []
-    for mime, exts in mime_to_exts.items():
-        pattern = "|".join(sorted(exts))
-        arms.append(f'    {pattern}) echo "{mime}" ;;')
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir, exist_ok=True)
 
-    arms.append('    *) echo "" ;;')
-    return "\n".join(arms)
+real_out = os.path.realpath(output_dir)
 
+def get_mime(fp):
+    # Try mimetypes first
+    mime, _ = mimetypes.guess_type(fp)
+    if mime:
+        return mime
+    # Fallback to extension map
+    ext = fp.split('.')[-1].lower() if '.' in fp else ''
+    return ext_mime_map.get(ext, "application/octet-stream")
 
-# The bash script body template. ``{case_arms}`` is replaced at import
-# time with the generated case block. ``OUTPUT_DIR`` is injected by
-# ``_build_command`` and file paths are passed via ``$@``.
-_SCRIPT_BODY = r"""
-mkdir -p "$OUTPUT_DIR"
-REAL_OUT="$(realpath "$OUTPUT_DIR")"
-
-_mime_by_ext() {{
-  case "${{1##*.}}" in
-{case_arms}
-  esac
-}}
-
-D='@@PRESENT@@'
-
-for fp in "$@"; do
-  if [ ! -e "$fp" ]; then
-    echo "ERR${{D}}Path does not exist: $fp"
-  elif [ ! -f "$fp" ]; then
-    echo "ERR${{D}}Path is not a file: $fp"
-  else
-    real="$(realpath "$fp")"
-    mime="$(file --mime-type -b "$fp")"
-    if [ "$mime" = "text/plain" ] || [ "$mime" = "application/octet-stream" ] || [ "$mime" = "application/zip" ]; then
-      ext_mime="$(_mime_by_ext "$fp")"
-      if [ -n "$ext_mime" ]; then
-        mime="$ext_mime"
-      fi
-    fi
-    case "$real" in
-      "$REAL_OUT"/*)
-        echo "OK${{D}}${{real}}${{D}}${{mime}}"
-        ;;
-      *)
-        bname="$(basename "$fp")"
-        dest="$OUTPUT_DIR/$bname"
-        if [ -e "$dest" ]; then
-          stem="${{bname%.*}}"
-          ext="${{bname##*.}}"
-          if [ "$stem" = "$bname" ]; then
-            ext=""
-          else
-            ext=".$ext"
-          fi
-          counter=1
-          while [ -e "$dest" ]; do
-            dest="$OUTPUT_DIR/${{stem}}_${{counter}}${{ext}}"
-            counter=$((counter + 1))
-          done
-        fi
-        cp -p "$fp" "$dest"
-        echo "COPIED${{D}}${{dest}}${{D}}${{mime}}${{D}}${{fp}}"
-        ;;
-    esac
-  fi
-done
-""".format(case_arms=_build_case_block())  # noqa: UP032 — can't use f-string; bash ${} conflicts
-
-# WSL/bash is sensitive to CRLF in inline scripts (can break function
-# definitions/quoting with opaque parse errors). Normalize to LF at runtime so
-# behavior is stable regardless of host checkout EOL settings.
-_SCRIPT_BODY_LF = _SCRIPT_BODY.replace("\r\n", "\n").replace("\r", "\n")
+for fp in filepaths:
+    if not os.path.exists(fp):
+        print(f"ERR{delim}Path does not exist: {fp}")
+        continue
+    if not os.path.isfile(fp):
+        print(f"ERR{delim}Path is not a file: {fp}")
+        continue
+    
+    real = os.path.realpath(fp)
+    mime = get_mime(fp)
+    
+    # If it's already in the output dir, just report it
+    if real.startswith(real_out + os.sep):
+        print(f"OK{delim}{real}{delim}{mime}")
+        continue
+    
+    # Otherwise copy it
+    bname = os.path.basename(fp)
+    dest = os.path.join(output_dir, bname)
+    
+    if os.path.exists(dest):
+        stem, ext = os.path.splitext(bname)
+        counter = 1
+        while os.path.exists(dest):
+            dest = os.path.join(output_dir, f"{stem}_{counter}{ext}")
+            counter += 1
+            
+    try:
+        shutil.copy2(fp, dest)
+        print(f"COPIED{delim}{dest}{delim}{mime}{delim}{fp}")
+    except Exception as e:
+        print(f"ERR{delim}Failed to copy {fp}: {str(e)}")
+"""
 
 
 def _build_command(filepaths: list[str], output_dir: str) -> str:
-    """Build a bash command that processes all file paths.
-
-    The script body is constant-size.  File paths and the output directory
-    are passed as shell arguments, keeping the command length proportional
-    only to the paths themselves.
+    """Build a python3 command that processes all file paths.
 
     Args:
         filepaths: Paths to present.
@@ -203,11 +175,13 @@ def _build_command(filepaths: list[str], output_dir: str) -> str:
     Returns:
         A shell command string safe for ``Computer.run()``.
     """
-    quoted_file_args = " ".join(shlex.quote(p) for p in filepaths)
-    set_args = f"set -- {quoted_file_args}" if quoted_file_args else "set --"
-    # We return the raw script and let Computer.run() handle the execution (bash -c).
-    # No manual dollar escaping is needed because shlex.quote handles the outer layer.
-    return f"OUTPUT_DIR={shlex.quote(output_dir)}\n{set_args}\n{_SCRIPT_BODY_LF}"
+    script = _SCRIPT_TEMPLATE.format(
+        output_dir_repr=repr(output_dir),
+        filepaths_repr=repr(filepaths),
+        delim_repr=repr(_DELIM),
+        ext_mime_map_repr=repr(_EXT_MIME_MAP),
+    )
+    return f"python3 -c {shlex.quote(script)}"
 
 
 class PresentToUserTool(BaseAgentTool[PresentToUserToolParams]):
