@@ -35,6 +35,34 @@ from hexagent.types import CLIResult
 
 logger = logging.getLogger(__name__)
 
+# --- WSL Logging ---
+def _get_wsl_log_file() -> Path:
+    """Return the path to wsl.log."""
+    data_dir = os.environ.get("HEXAGENT_DATA_DIR")
+    base = Path(data_dir) if data_dir else Path.home() / ".hexagent"
+    log_dir = base / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / "wsl.log"
+
+_wsl_logger = logging.getLogger("hexagent.wsl")
+_wsl_logger.setLevel(logging.DEBUG)
+if not any(isinstance(h, logging.FileHandler) and h.baseFilename == str(_get_wsl_log_file().resolve()) for h in _wsl_logger.handlers):
+    log_file = _get_wsl_log_file()
+    _fh = logging.FileHandler(log_file, encoding="utf-8")
+    _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    _wsl_logger.addHandler(_fh)
+    # Ensure logs are visible in the main logger too
+    _wsl_logger.propagate = True
+    print(f"WSL LOG FILE: {log_file.resolve()}")
+
+def wsl_log(msg: str, *args: Any, level: int = logging.INFO) -> None:
+    """Log a message to the dedicated wsl.log and flush it."""
+    _wsl_logger.log(level, msg, *args)
+    for h in _wsl_logger.handlers:
+        if isinstance(h, logging.FileHandler):
+            h.flush()
+# -------------------
+
 # UNC path prefixes for accessing WSL filesystem from Windows.
 # Modern Windows 11 uses ``wsl.localhost``; older builds use ``wsl$``.
 _UNC_PREFIXES = (r"\\wsl.localhost", r"\\wsl$")
@@ -375,27 +403,30 @@ class WslVM:
     async def apply_mounts(self, mounts: list[ResolvedMount]) -> None:
         """Apply mount configuration to the distribution.
 
-        Writes the config, terminates the distro (clearing old bind
-        mounts), restarts, and applies new bind mounts.
+        Writes the config. If the distro is running, it applies the mounts
+        live via ``mount --bind`` to avoid a full restart. If stopped,
+        they will be applied on the next ``start()``.
 
         Args:
             mounts: Complete list of resolved mounts. Replaces all
                 existing mounts in ``mounts.json``.
 
         Raises:
-            WslError: If the distribution does not exist or start fails.
+            WslError: If the distribution does not exist or live apply fails.
         """
         current = await self.status()
         if current is None:
             msg = f"WSL distro '{self._instance}' does not exist"
             raise WslError(msg)
 
+        wsl_log("WslVM.apply_mounts: Updating mounts.json with %d mounts", len(mounts))
         self.write_mounts(mounts)
 
         if current == "Running":
-            await self.stop()
-
-        await self.start()
+            wsl_log("WslVM.apply_mounts: Distro is running, applying mounts live to avoid restart")
+            await self._apply_bind_mounts()
+        else:
+            wsl_log("WslVM.apply_mounts: Distro is not running, mounts will be applied on next start")
 
     async def stop(self) -> None:
         """Terminate the WSL distribution.
@@ -467,6 +498,7 @@ class WslVM:
         exec_args += ["-c", inner]
 
         start_time = time.monotonic()
+        wsl_log("WSL Shell Execution (Instance: %s, User: %s, CWD: %s): %s", self._instance, user or "default", cwd or "default", command)
 
         process = await asyncio.create_subprocess_exec(
             *exec_args,
@@ -485,17 +517,25 @@ class WslVM:
             process.kill()
             await process.wait()
             msg = f"timed out after {timeout}s"
+            wsl_log("WSL Shell TIMEOUT (Instance: %s): %s", self._instance, msg, level=logging.ERROR)
             raise WslError(msg) from None
 
         stdout = _decode_wsl_output(stdout_bytes).removesuffix("\n")
         stderr = _decode_wsl_output(stderr_bytes).removesuffix("\n")
 
         rc: int = process.returncode if process.returncode is not None else -1
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        
+        wsl_log(
+            "WSL Shell Result (Exit: %d, Duration: %dms):\nSTDOUT: %s\nSTDERR: %s",
+            rc, duration_ms, stdout or "(empty)", stderr or "(empty)"
+        )
+
         return CLIResult(
             stdout=stdout,
             stderr=stderr,
             exit_code=rc,
-            metadata=ExecutionMetadata(duration_ms=int((time.monotonic() - start_time) * 1000)),
+            metadata=ExecutionMetadata(duration_ms=duration_ms),
         )
 
     # ------------------------------------------------------------------
@@ -546,6 +586,7 @@ class WslVM:
         Raises:
             WslError: On non-zero exit code or timeout.
         """
+        wsl_log("WSL.exe Command (Instance: %s): %s", self._instance, " ".join(cmd))
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -561,14 +602,20 @@ class WslVM:
             proc.kill()
             await proc.wait()
             msg = f"wsl.exe timed out after {timeout}s: {' '.join(cmd[:3])}"
+            wsl_log("WSL.exe TIMEOUT (Instance: %s): %s", self._instance, msg, level=logging.ERROR)
             raise WslError(msg) from None
 
+        stdout = _decode_wsl_output(stdout_bytes)
+        stderr = _decode_wsl_output(stderr_bytes)
+
         if proc.returncode != 0:
-            stderr = _decode_wsl_output(stderr_bytes).strip()
-            msg = f"wsl.exe failed (exit {proc.returncode}): {stderr}"
+            stderr_strip = stderr.strip()
+            msg = f"wsl.exe failed (exit {proc.returncode}): {stderr_strip}"
+            wsl_log("WSL.exe ERROR (Instance: %s, Exit: %d):\nSTDOUT: %s\nSTDERR: %s", self._instance, proc.returncode, stdout.strip() or "(empty)", stderr_strip or "(empty)", level=logging.ERROR)
             raise WslError(msg)
 
-        return _decode_wsl_output(stdout_bytes)
+        wsl_log("WSL.exe Success (Instance: %s):\nSTDOUT: %s", self._instance, stdout.strip() or "(empty)")
+        return stdout
 
     async def _apply_bind_mounts(self) -> None:
         """Apply all bind mounts from ``mounts.json`` inside the distro.
@@ -578,34 +625,82 @@ class WslVM:
         """
         mounts = self.read_mounts()
         if not mounts:
+            wsl_log("WSL applying bind mounts: No mounts found in mounts.json")
             return
 
-        logger.debug("WSL applying %d bind mount(s) from mounts.json", len(mounts))
+        wsl_log("WSL applying %d bind mount(s) from mounts.json", len(mounts))
+
+        # Diagnostic: Log all current mounts
+        all_mounts = await self.shell("mount", user="root")
+        wsl_log("WSL Current System Mounts:\n%s", all_mounts.stdout or "(empty)")
 
         for m in mounts:
-            wsl_host = _win_path_to_wsl(m.host_path)
+            # Use wslpath to get the accurate Linux path for the Windows host path.
+            # This handles drive letters, mount points, and case-sensitivity correctly.
+            wsl_host_res = await self.shell(f"wslpath -u {shlex.quote(m.host_path)}", user="root")
+            if wsl_host_res.exit_code == 0 and wsl_host_res.stdout.strip():
+                wsl_host = wsl_host_res.stdout.strip()
+            else:
+                wsl_host = _win_path_to_wsl(m.host_path)
+                wsl_log("WSL wslpath failed for %s, falling back to %s", m.host_path, wsl_host, level=logging.WARNING)
+
             qguest = shlex.quote(m.guest_path)
             qhost = shlex.quote(wsl_host)
 
             # Skip if already mounted.
             check = await self.shell(f"mountpoint -q {qguest}", user="root")
             if check.exit_code == 0:
-                logger.info(
-                    "WSL bind-mount already active: guest=%s wsl_source=%s host_win=%s",
-                    m.guest_path,
-                    wsl_host,
-                    m.host_path,
+                # Even if mounted, check if it's empty
+                ls_check = await self.shell(f"ls -A {qguest}", user="root")
+                if ls_check.stdout.strip():
+                    wsl_log(
+                        "WSL bind-mount already active and NOT empty: guest=%s host_win=%s",
+                        m.guest_path,
+                        m.host_path,
+                    )
+                    continue
+                else:
+                    wsl_log("WSL bind-mount active but EMPTY, forcing re-mount: %s", m.guest_path, level=logging.WARNING)
+                    await self.shell(f"umount -l {qguest}", user="root")
+
+            # Diagnostic: check source path existence and content
+            src_ls = await self.shell(f"ls -ld {qhost} && ls -A {qhost} | head -n 5", user="root")
+            wsl_log("WSL Source Path Check (%s):\n%s", wsl_host, src_ls.stdout or "(empty)")
+
+            wsl_log("WSL applying NEW sync/copy: %s -> %s", m.host_path, m.guest_path)
+            
+            # Ensure target parent exists
+            guest_parent = str(Path(m.guest_path).parent).replace("\\", "/")
+            setup_cmd = f"mkdir -p {shlex.quote(guest_parent)} && chmod 777 {shlex.quote(guest_parent)}"
+            await self.shell(setup_cmd, user="root")
+
+            # Check if this is a skills directory (usually in /mnt/skills/)
+            is_skill = "/mnt/skills/" in m.guest_path
+            
+            if is_skill:
+                wsl_log("WSL: Skills directory detected, using CP instead of BIND for reliability")
+                # 1. Clean up potential old mount points
+                await self.shell(f"umount -l {qguest} 2>/dev/null || true", user="root")
+                # 2. Sync files from Windows to WSL internal storage
+                sync_cmd = (
+                    f"mkdir -p {qguest} && "
+                    f"cp -r {qhost}/* {qguest}/ 2>/dev/null || true && "
+                    f"chmod -R 777 {qguest}"
                 )
-                continue
-
-            cmd = f"mkdir -p {qguest} && mount --bind {qhost} {qguest}"
-            if not m.writable:
-                cmd += f" && mount -o remount,ro,bind {qguest}"
-
-            result = await self.shell(cmd, user="root")
-            if result.exit_code != 0:
-                msg = f"Failed to bind-mount {m.host_path} → {m.guest_path}: {result.stderr}"
-                raise WslError(msg)
+                result = await self.shell(sync_cmd, user="root")
+                wsl_log("WSL Skills sync finished (Exit: %d)", result.exit_code)
+            else:
+                # For workspace/working dirs, we still try bind mount as they need real-time sync.
+                wsl_log("WSL: Workspace directory detected, using robust bind mount")
+                cmd = f"mkdir -p {qguest} && chmod 777 {qguest} && mount --bind {qhost} {qguest}"
+                if not m.writable:
+                    cmd += f" && mount -o remount,ro,bind {qguest}"
+                
+                result = await self.shell(cmd, user="root")
+                if result.exit_code != 0:
+                    wsl_log("WSL mount failed, falling back to symlink: %s", result.stderr, level=logging.WARNING)
+                    ln_cmd = f"rm -rf {qguest} && ln -s {qhost} {qguest}"
+                    result = await self.shell(ln_cmd, user="root")
 
             # Cowork mounts bind a DrvFs path (/mnt/<drive>/...) into /sessions/<user>/mnt/....
             # DrvFs often presents files as root:root with mode 755 to Linux UIDs that are not
@@ -620,26 +715,31 @@ class WslVM:
             )
             if m.writable and sess is not None and not skip_chown:
                 quser = shlex.quote(sess)
+                wsl_log("WSL post-bind chown for session user: %s -> %s", sess, m.guest_path)
                 own = await self.shell(f"chown -R {quser}:{quser} {qguest}", user="root")
                 if own.exit_code != 0:
-                    logger.warning(
+                    wsl_log(
                         "WSL post-bind chown failed (session=%s guest=%s): %s",
                         sess,
                         m.guest_path,
                         (own.stderr or own.stdout or "").strip() or "(empty)",
+                        level=logging.WARNING
                     )
 
             # Post-verify so logs show whether the guest path is really a mount (debug empty ls issues).
             verify = await self.shell(f"findmnt -n {qguest}", user="root")
+            content_verify = await self.shell(f"ls -A {qguest} | head -n 5", user="root")
+            
             if verify.exit_code == 0 and (verify.stdout or "").strip():
-                logger.info(
-                    "WSL bind-mount applied+verified: guest=%s host_win=%s findmnt=%s",
+                wsl_log(
+                    "WSL bind-mount applied+verified: guest=%s host_win=%s findmnt=%s Content: %s",
                     m.guest_path,
                     m.host_path,
                     verify.stdout.strip().replace("\n", " | "),
+                    content_verify.stdout.strip().replace("\n", ", ") or "(empty)"
                 )
             else:
-                logger.warning(
+                wsl_log(
                     "WSL bind-mount mount(8) succeeded but findmnt could not confirm guest=%s "
                     "(host_win=%s, wsl_source=%s, findmnt_exit=%s, findmnt_stderr=%s)",
                     m.guest_path,
@@ -647,6 +747,7 @@ class WslVM:
                     wsl_host,
                     verify.exit_code,
                     (verify.stderr or "").strip() or "(empty)",
+                    level=logging.WARNING
                 )
 
     async def _resolve_unc_prefix(self) -> str:
