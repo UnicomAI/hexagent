@@ -3,7 +3,7 @@ const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const path = require("path");
 const net = require("net");
 const fs = require("fs");
-const { spawn, execFileSync } = require("child_process");
+const { spawn, execFileSync, execSync } = require("child_process");
 const treeKill = require("tree-kill");
 
 const IS_DEV = !!process.env.ELECTRON_DEV;
@@ -19,6 +19,17 @@ let backendStderr = ""; // capture stderr for error reporting
 //   Windows: %APPDATA%/HexAgent/
 //   Linux:   ~/.config/HexAgent/
 const userDataDir = app.getPath("userData");
+
+function wslLog(message) {
+  const logDir = path.join(userDataDir, "logs");
+  if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true });
+  }
+  const logFile = path.join(logDir, "wsl.log");
+  const timestamp = new Date().toISOString().replace("T", " ").split(".")[0];
+  const logEntry = `${timestamp} INFO electron: ${message}\n`;
+  fs.appendFileSync(logFile, logEntry);
+}
 
 function ensureUserData() {
   // Create user data directory if it doesn't exist
@@ -102,9 +113,37 @@ function waitForHealth(port, retries = 30, interval = 500) {
   });
 }
 
+function killPort(port) {
+  try {
+    if (process.platform === "win32") {
+      // Find PID on port using netstat
+      const output = execSync(`netstat -ano | findstr :${port}`).toString();
+      const lines = output.split("\n");
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 5 && parts[1].includes(`:${port}`)) {
+          const pid = parts[parts.length - 1];
+          if (pid && pid !== "0") {
+            console.log(`Killing process ${pid} on port ${port}`);
+            execSync(`taskkill /F /PID ${pid}`);
+          }
+        }
+      }
+    } else {
+      // For macOS/Linux
+      execSync(`lsof -t -i:${port} | xargs kill -9 2>/dev/null || true`);
+    }
+  } catch (err) {
+    // Ignore errors if port is not in use
+  }
+}
+
 // ── Backend lifecycle ────────────────────────────────────────────────────────
 
 async function spawnBackend() {
+  if (IS_DEV) {
+    killPort(8000);
+  }
   const port = IS_DEV ? 8000 : await findFreePort();
   backendPort = port;
   const wslOfflineDir = IS_DEV
@@ -231,7 +270,9 @@ function tryParseJsonObject(text) {
 }
 
 async function checkWslPrerequisitesInternal() {
+  wslLog("Checking WSL prerequisites...");
   if (process.platform !== "win32") {
+    wslLog("WSL prerequisites check: Unsupported platform.");
     return {
       ok: false,
       code: "UNSUPPORTED_PLATFORM",
@@ -311,8 +352,10 @@ if ((-not $hypervisorPresent) -and (($vmMonitorKnown -and -not $vmMonitor) -or (
 
   const parsed = tryParseJsonObject(`${res.stdout || ""}\n${res.stderr || ""}`);
   if (parsed && typeof parsed === "object") {
+    wslLog(`WSL prerequisites result: ${JSON.stringify(parsed)}`);
     return parsed;
   }
+  wslLog(`WSL prerequisites check FAILED: ${res.stderr || res.stdout || "unknown error"}`);
   return {
     ok: false,
     code: "CHECK_FAILED",
@@ -331,12 +374,15 @@ ipcMain.handle("check-wsl-prerequisites", async () => {
 });
 
 ipcMain.handle("install-wsl-runtime", async () => {
+  wslLog("Starting WSL runtime installation...");
   if (process.platform !== "win32") {
+    wslLog("WSL runtime installation: Unsupported platform.");
     return { ok: false, message: "This action is only available on Windows." };
   }
 
   const precheck = await checkWslPrerequisitesInternal();
   if (precheck?.code === "BIOS_VIRT_DISABLED" || precheck?.code === "CPU_NOT_SUPPORTED") {
+    wslLog(`WSL runtime installation BLOCKED by hardware/BIOS: ${precheck.code}`);
     return {
       ok: false,
       code: precheck.code,
@@ -376,11 +422,14 @@ try {
     psScript,
   ]);
 
+  wslLog(`WSL runtime installation finished with exit code ${res.code}`);
+
   // WSL optional features often need a reboot before WSL2 import/start works.
   // We gate follow-up VM instance setup on reboot to avoid first-run import failures.
   const success = res.code === 0 || res.code === 3010;
   const rebootRequired = success;
   if (success) {
+    wslLog("WSL runtime installation SUCCESS (reboot required)");
     return {
       ok: true,
       rebootRequired,
@@ -395,10 +444,12 @@ try {
   const installErr = (combined.match(/INSTALL_ERR:(.*)/) || [null, ""])[1]?.trim();
   const cancelled = /canceled|cancelled|拒绝|已取消|denied/i.test(combined);
   if (cancelled) {
+    wslLog("WSL runtime installation CANCELLED by user");
     return { ok: false, exitCode: res.code, message: "Installation was cancelled." };
   }
 
   if (precheck?.code === "WINDOWS_FEATURES_DISABLED" || precheck?.code === "HYPERVISOR_DISABLED") {
+    wslLog(`WSL runtime installation: Features still disabled (exit ${res.code})`);
     return {
       ok: false,
       code: precheck.code,
@@ -409,6 +460,7 @@ try {
     };
   }
 
+  wslLog(`WSL runtime installation FAILED: ${installErr || combined}`);
   return {
     ok: false,
     exitCode: res.code,
@@ -531,4 +583,17 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   killBackend();
+});
+
+// Explicitly handle Ctrl+C (SIGINT) on terminal
+process.on("SIGINT", () => {
+  console.log("Caught interrupt signal (SIGINT), killing backend...");
+  killBackend();
+  app.quit();
+});
+
+process.on("SIGTERM", () => {
+  console.log("Caught termination signal (SIGTERM), killing backend...");
+  killBackend();
+  app.quit();
 });

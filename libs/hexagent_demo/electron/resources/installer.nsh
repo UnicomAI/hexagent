@@ -11,5 +11,8 @@
 
 !macro customUnInstall
   Delete "$INSTDIR\hexagent-prebuilt.tar"
+  ; Unregister the WSL distribution to clean up registry and metadata
+  nsExec::Exec "wsl.exe --unregister hexagent"
+  ; Remove the persistent data directory in the user profile
   RMDir /r "$PROFILE\.hexagent"
 !macroend

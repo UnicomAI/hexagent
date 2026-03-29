@@ -75,7 +75,6 @@ try {
     # Safety net: never ship huge prebuilt tar inside main installer payload.
     Get-ChildItem -Path "$ElectronDir\backend_dist" -Recurse -File -Filter "hexagent-prebuilt.tar" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
-
     Write-Host "==> Backend build complete."
 }
 finally {
