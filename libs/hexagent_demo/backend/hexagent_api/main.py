@@ -9,6 +9,17 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 import logging
+import io
+
+# Ensure stdout/stderr are using UTF-8 for Chinese characters in terminal
+if sys.platform == "win32":
+    import os
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding='utf-8')
+    if isinstance(sys.stderr, io.TextIOWrapper):
+        sys.stderr.reconfigure(encoding='utf-8')
+
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
@@ -23,12 +34,22 @@ _LOG_DIR = data_dir() / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 _LOG_FILE = _LOG_DIR / "backend.log"
 
+class FlushingStreamHandler(logging.StreamHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+class FlushingFileHandler(logging.FileHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(_LOG_FILE, encoding="utf-8"),
+        FlushingStreamHandler(),
+        FlushingFileHandler(_LOG_FILE, encoding="utf-8"),
     ],
     force=True,
 )
