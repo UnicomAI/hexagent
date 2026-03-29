@@ -9,6 +9,7 @@ import { useMemo, useCallback, memo } from "react";
 import { FileText, FileCode, Image, FileSpreadsheet, Music, Video, File, Download, AlertCircle } from "lucide-react";
 import { useAppContext } from "../../store";
 import ScrollableText from "../../components/ScrollableText";
+import { withApiBase } from "../../apiBase";
 import type { ResultRendererProps } from "../types";
 
 interface PresentedFile {
@@ -184,7 +185,9 @@ export default memo(function PresentFilesResult({ output }: ResultRendererProps)
   const handleDownload = useCallback((e: React.MouseEvent, file: PresentedFile) => {
     e.stopPropagation();
     if (!conversationId) return;
-    const url = `/api/files/${conversationId}?path=${encodeURIComponent(file.path)}`;
+    const url = withApiBase(
+      `/api/files/${conversationId}?path=${encodeURIComponent(file.path)}`,
+    );
     const a = document.createElement("a");
     a.href = url;
     a.download = basename(file.path);

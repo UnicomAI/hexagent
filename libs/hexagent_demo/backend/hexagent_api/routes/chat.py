@@ -12,6 +12,7 @@ import os
 import re
 import shlex
 import shutil
+import sys
 import tempfile
 import time
 import urllib.parse
@@ -748,18 +749,39 @@ _SOFFICE_SEARCH_PATHS = [
     "/Applications/LibreOffice.app/Contents/MacOS/soffice",  # macOS
     "/usr/bin/soffice",  # Linux
     "/usr/local/bin/soffice",  # Linux (manual install)
+    os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "LibreOffice", "program", "soffice.exe"),  # Windows
+    os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "LibreOffice", "program", "soffice.exe"),  # Windows x86 path
+    os.path.join(os.environ.get("LOCALAPPDATA", r"C:\Users\Public\AppData\Local"), "Programs", "LibreOffice", "program", "soffice.exe"),  # Windows per-user
 ]
 
 
 def _find_soffice() -> str | None:
     """Find the soffice binary on the host machine."""
-    found = shutil.which("soffice")
-    if found:
-        return found
+    for binary in ("soffice", "soffice.exe"):
+        found = shutil.which(binary)
+        if found:
+            return found
     for p in _SOFFICE_SEARCH_PATHS:
         if os.path.isfile(p) and os.access(p, os.X_OK):
             return p
     return None
+
+
+def _libreoffice_install_hint() -> str:
+    if os.name == "nt":
+        return (
+            "Install it to enable presentation preview: "
+            "winget install TheDocumentFoundation.LibreOffice"
+        )
+    if sys.platform == "darwin":
+        return (
+            "Install it to enable presentation preview: "
+            "brew install --cask libreoffice"
+        )
+    return (
+        "Install it to enable presentation preview (for example: "
+        "sudo apt install libreoffice)."
+    )
 
 
 def _cleanup_dir(dir_path: str) -> None:
@@ -967,11 +989,7 @@ async def preview_office_file(
     if soffice_bin is None:
         raise HTTPException(
             status_code=422,
-            detail=(
-                "LibreOffice is not installed. "
-                "Install it to enable presentation preview: "
-                "brew install --cask libreoffice"
-            ),
+            detail=f"LibreOffice is not installed. {_libreoffice_install_hint()}",
         )
 
     # Wait for any in-flight pre-conversion for this file

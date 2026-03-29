@@ -346,7 +346,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           <div className="setup-step setup-welcome">
             <div className="setup-welcome-brand">
               <img className="setup-welcome-logo" width="40" height="40" src={faviconSvg} alt="" />
-              <h2 className="setup-welcome-title">ClawWork</h2>
+              <h2 className="setup-welcome-title">{t("welcome.brand")}</h2>
             </div>
             <p className="setup-welcome-tagline">{t("welcome.tagline")}</p>
 

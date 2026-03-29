@@ -1,7 +1,7 @@
-{
+﻿{
   "heading": {
-    "chatWords": ["ClawWork,", "ready", "when", "you", "are."],
-    "coworkWords": ["ClawWork,", "here", "to", "get", "things", "done."]
+    "chatWords": ["UniClaw-Work,", "ready", "when", "you", "are."],
+    "coworkWords": ["UniClaw-Work,", "here", "to", "get", "things", "done."]
   },
   "placeholders": {
     "chat": [
@@ -27,3 +27,4 @@
   "vmSetupRequired": "VM setup required",
   "setupInSettings": "Set up in Settings"
 }
+

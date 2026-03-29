@@ -146,12 +146,12 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
         if (e.target === e.currentTarget) e.currentTarget.classList.remove("animating");
       }}
     >
-      {/* Header: always visible. On narrow screens it's fixed at top-left
+        {/* Header: always visible. On narrow screens it's fixed at top-left
           (outside the sliding aside). On wide screens it's static inside the clip. */}
       <div className="sidebar-header">
         <div className="sidebar-brand sidebar-fadeable">
-          <img className="sidebar-brand-logo" width="25" height="25" src={brandLogo} alt="ClawWork" />
-          <span className="sidebar-brand-text">ClawWork</span>
+          <img className="sidebar-brand-logo" width="25" height="25" src={brandLogo} alt={t("brand")} />
+          <span className="sidebar-brand-text">{t("brand")}</span>
         </div>
         <button
           className="sidebar-icon-wrap sidebar-toggle custom-tooltip-trigger"
