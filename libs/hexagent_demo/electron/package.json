@@ -1,6 +1,6 @@
 {
   "name": "hexagent",
-  "version": "0.0.1",
+  "version": "0.0.6.20260329.1127",
   "description": "ClawWork Desktop App",
   "main": "main.js",
   "scripts": {
