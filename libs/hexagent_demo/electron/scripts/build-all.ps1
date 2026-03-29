@@ -11,7 +11,7 @@ $DistPrebuiltTar = Join-Path $DistDir "hexagent-prebuilt.tar"
 $ProductNameEn = "UniClaw-Work"
 $ProductNameZh = "UniClaw-工作虾"
 $InstallerExeName = "$ProductNameEn.exe"
-$DistReadme = Join-Path $DistDir "${ProductNameEn}使用说明.txt"
+$DistReadme = Join-Path $DistDir "安装说明.txt"
 $DistBundleZip = Join-Path $DistDir "${ProductNameZh}.zip"
 $RulesFile = Join-Path $ScriptDir "WINDOWS_PACKAGING_RULES.md"
 
@@ -89,25 +89,7 @@ if (-not (Test-Path $DistPrebuiltTar)) {
 Get-ChildItem "$DistDir\ClawWork-*.exe", "$DistDir\ClawWork-*.exe.blockmap", "$DistDir\INSTALL-WINDOWS.txt" -ErrorAction SilentlyContinue |
     Remove-Item -Force -ErrorAction SilentlyContinue
 
-$installGuide = @"
-UniClaw-Work 使用说明
-
-1) 分发或安装前，请确保以下文件放在同一个文件夹：
-   - $InstallerExeName
-   - hexagent-prebuilt.tar
-   - $(Split-Path $DistReadme -Leaf)
-
-2) 运行 $InstallerExeName 安装桌面应用。
-
-3) 离线加速（可选）：
-   - 如果运行时可找到 hexagent-prebuilt.tar，
-     VM 初始化会优先从本地镜像导入。
-   - 如果找不到该文件，VM 初始化会自动回退为联网安装。
-
-4) 打包脚本会自动生成分发压缩包：
-   - ${ProductNameZh}.zip
-   其中包含：$InstallerExeName、hexagent-prebuilt.tar、$(Split-Path $DistReadme -Leaf)
-"@
+$installGuide = "欢迎使用UniClaw-Work，双击UniClaw-Work.exe即可安装使用。"
 Set-Content -Path $DistReadme -Value $installGuide -Encoding UTF8
 
 $InstallerExePath = Join-Path $DistDir $InstallerExeName

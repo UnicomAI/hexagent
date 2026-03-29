@@ -43,6 +43,7 @@ uploads/
 # Private skills (user-uploaded, runtime-generated)
 skills/private/
 skills-inactive/
+skills/
 
 # Bundled example/public skills (license restrictions)
 # skills/examples/

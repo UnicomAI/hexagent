@@ -10,7 +10,7 @@
    - `UniClaw-Work.exe`
    - `UniClaw-Work.exe.blockmap`
    - `hexagent-prebuilt.tar`
-   - `UniClaw-Work使用说明.txt`
+   - `安装说明.txt`
    - `UniClaw-工作虾.zip`（统一分发压缩包）
 
 ## 标准打包步骤
@@ -20,8 +20,8 @@
 4. 执行 electron-builder 生成 Windows 安装包。
 5. 构建结束后检查 `dist`：
    - 若缺少 `hexagent-prebuilt.tar`，从 `electron/prebuilt/` 复制一份。
-   - 生成或更新 `UniClaw-Work使用说明.txt`（中文说明）。
-   - 将 `UniClaw-Work.exe`、`hexagent-prebuilt.tar`、`UniClaw-Work使用说明.txt` 统一压缩为 `UniClaw-工作虾.zip`。
+   - 生成或更新 `安装说明.txt`（固定文案）。
+   - 将 `UniClaw-Work.exe`、`hexagent-prebuilt.tar`、`安装说明.txt` 统一压缩为 `UniClaw-工作虾.zip`。
 
 ## 验收检查
 1. 安装包可生成，且体积在预期范围（通常约 120MB，随版本波动）。
