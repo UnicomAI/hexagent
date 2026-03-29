@@ -173,7 +173,7 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
           <PanelLeft />
           <span className="custom-tooltip">
             {state.sidebarCollapsed ? t("openSidebar") : t("closeSidebar")}
-            <span className="custom-tooltip-shortcut">{isMac ? "鈬р寴S" : "Ctrl+Shift+S"}</span>
+            <span className="custom-tooltip-shortcut">{isMac ? "Cmd+Shift+S" : "Ctrl+Shift+S"}</span>
           </span>
         </button>
       </div>
@@ -191,12 +191,12 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
           >
             <span className="sidebar-icon-wrap"><Plus /></span>
             <span className="sidebar-action-label sidebar-fadeable">{state.selectedMode === "chat" ? t("newChat") : t("newTask")}</span>
-            <kbd className="sidebar-shortcut">{isMac ? "鈬р寴O" : "Ctrl+Shift+O"}</kbd>
+            <kbd className="sidebar-shortcut">{isMac ? "Cmd+Shift+O" : "Ctrl+Shift+O"}</kbd>
           </button>
           <button className="sidebar-action-btn" onClick={onOpenSearch}>
             <span className="sidebar-icon-wrap"><Search /></span>
             <span className="sidebar-action-label sidebar-fadeable">{t("search")}</span>
-            <kbd className="sidebar-shortcut">{isMac ? "鈱楰" : "Ctrl+K"}</kbd>
+            <kbd className="sidebar-shortcut">{isMac ? "Cmd+K" : "Ctrl+K"}</kbd>
           </button>
         </nav>
 
@@ -265,7 +265,7 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
           <button className="sidebar-action-btn" onClick={onOpenSettings}>
             <span className="sidebar-icon-wrap"><Settings /></span>
             <span className="sidebar-action-label sidebar-fadeable">{t("settings")}</span>
-            <kbd className="sidebar-shortcut">{isMac ? "鈬р寴," : "Ctrl+Shift+,"}</kbd>
+            <kbd className="sidebar-shortcut">{isMac ? "Cmd+Shift+," : "Ctrl+Shift+,"}</kbd>
           </button>
           <div className="sidebar-action-btn sidebar-user-row">
             <span className="sidebar-icon-wrap">
