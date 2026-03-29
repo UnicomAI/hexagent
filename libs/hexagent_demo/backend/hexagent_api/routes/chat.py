@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import glob
 import hashlib
 import json
 import logging
@@ -392,18 +393,26 @@ async def _generate_events(  # noqa: C901
 
     except Exception as exc:
         logger.exception("Error streaming agent response")
-        detail = f"{type(exc).__name__}: {exc}"
-        
-        # If it's a known sensitive content error from Anthropic/Maas, make it user-friendly
-        error_msg = str(exc)
-        if "包含敏感内容" in error_msg or "403" in error_msg:
-            detail = "您当前的请求或历史信息中包含敏感内容，该轮对话已终止。请尝试清除历史信息或开启新对话。"
-            
-        yield f"event: error\ndata: {json.dumps({'message': detail})}\n\n"
-        
-        # Ensure the error is also added to the message blocks so it's saved in history
-        blocks.append({"type": "text", "text": f"\n\n[系统错误: {detail}]"})
-        full_text += f"\n\n[系统错误: {detail}]"
+        detail = str(exc)
+        is_sensitive = "包含敏感内容" in detail or "403" in detail or "1003" in detail
+
+        if is_sensitive:
+            friendly_msg = "您当前的请求或历史信息中包含敏感内容，该轮对话已终止。建议检查内容并开启新对话。"
+            # Use text_delta for sensitive content so it's displayed as a message part
+            yield f"event: text_delta\ndata: {json.dumps({'delta': f'\n\n[系统提示: {friendly_msg}]', 'ts': time.time() * 1000})}\n\n"
+            detail = friendly_msg
+        else:
+            # For other fatal errors, use error event
+            yield f"event: error\ndata: {json.dumps({'message': detail})}\n\n"
+
+        # Update full_text/blocks so it gets saved to the store
+        error_text = f"\n\n[系统提示: {detail}]" if is_sensitive else f"\n\n[系统错误: {detail}]"
+        error_block = {"type": "text", "text": error_text}
+        if blocks is None:
+            blocks = [error_block]
+        else:
+            blocks.append(error_block)
+        full_text += error_text
 
     # Flush any trailing thinking
     if current_thinking:
@@ -771,7 +780,12 @@ def _find_soffice() -> str | None:
         found = shutil.which(binary)
         if found:
             return found
-    for p in _SOFFICE_SEARCH_PATHS:
+    search_paths = list(_SOFFICE_SEARCH_PATHS)
+    if sys.platform == "darwin":
+        search_paths.append(os.path.expanduser("~/Applications/LibreOffice.app/Contents/MacOS/soffice"))
+    elif sys.platform != "win32":
+        search_paths.extend(["/usr/bin/libreoffice", "/snap/bin/libreoffice"])
+    for p in search_paths:
         if os.path.isfile(p) and os.access(p, os.X_OK):
             return p
     return None
@@ -843,13 +857,21 @@ async def _convert_to_pdf(soffice_bin: str, src_path: str, out_dir: str) -> str:
 
     Raises on failure or timeout.
     """
+    # Use a dedicated user profile to avoid locks and ensure fresh font detection
+    profile_dir = os.path.join(out_dir, ".soffice_profile").replace("\\", "/")
+    user_inst_arg = f"-env:UserInstallation=file:///{profile_dir}"
+
+    # 1. Convert PPTX to high-fidelity PDF first
     proc = await asyncio.create_subprocess_exec(
         soffice_bin,
+        user_inst_arg,
         "--headless",
         "--norestore",
         "--nofirststartwizard",
-        "--convert-to", "pdf",
-        "--outdir", out_dir,
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        out_dir,
         src_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -869,6 +891,69 @@ async def _convert_to_pdf(soffice_bin: str, src_path: str, out_dir: str) -> str:
         raise RuntimeError(f"soffice exit {proc.returncode}: {err or 'unknown error'}")
 
     return pdf_path
+
+
+async def _convert_pdf_to_images_json(pdf_path: str, out_dir: str, cache_json_path: str) -> bool:
+    """Convert PDF to PNGs and save as JSON. Returns True on success."""
+    pdftoppm_bin = shutil.which("pdftoppm")
+    if not pdftoppm_bin:
+        # Search common installation paths if not in PATH
+        search_paths = []
+        if sys.platform == "win32":
+            # Check common locations for Poppler/MiKTeX/TeX Live on Windows
+            program_files = [
+                os.environ.get("ProgramFiles", "C:\\Program Files"),
+                os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"),
+            ]
+            for pf in program_files:
+                search_paths.extend([
+                    os.path.join(pf, "MiKTeX", "miktex", "bin", "x64", "pdftoppm.exe"),
+                    os.path.join(pf, "poppler", "bin", "pdftoppm.exe"),
+                    os.path.join(pf, "Xpdf", "bin64", "pdftoppm.exe"),
+                ])
+        elif sys.platform == "darwin":
+            search_paths = [
+                "/opt/homebrew/bin/pdftoppm",
+                "/usr/local/bin/pdftoppm",
+            ]
+
+        for p in search_paths:
+            if os.path.isfile(p) and os.access(p, os.X_OK):
+                pdftoppm_bin = p
+                break
+
+    if not pdftoppm_bin:
+        return False
+
+    try:
+        proc_img = await asyncio.create_subprocess_exec(
+            pdftoppm_bin,
+            "-png",
+            "-r", "150",
+            pdf_path,
+            os.path.join(out_dir, "slide"),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc_img.communicate()
+
+        pngs = sorted(glob.glob(os.path.join(out_dir, "slide-*.png")))
+        if not pngs:
+            return False
+
+        images_data = []
+        for p in pngs:
+            with open(p, "rb") as img_f:
+                b64 = base64.b64encode(img_f.read()).decode("utf-8")
+                images_data.append(f"data:image/png;base64,{b64}")
+
+        result = {"type": "images", "images": images_data}
+        with open(cache_json_path, "w") as jf:
+            json.dump(result, jf)
+        return True
+    except Exception:
+        logger.exception("Error converting PDF to images JSON")
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -917,8 +1002,13 @@ async def _preconvert_office_file(
 
         t0 = time.monotonic()
         pdf_path = await _convert_to_pdf(soffice_bin, src_path, tmp_dir)
-        elapsed = time.monotonic() - t0
         _store_cached_pdf(key, pdf_path)
+
+        # Also pre-convert to images JSON for instant PPTX preview
+        cache_json = os.path.join(_get_cache_dir(), key + ".json")
+        await _convert_pdf_to_images_json(pdf_path, tmp_dir, cache_json)
+
+        elapsed = time.monotonic() - t0
         logger.info("Office pre-convert: %s → cached in %.1fs", file_path, elapsed)
     except Exception:
         logger.debug("Office pre-convert failed for %s (will convert on demand)", file_path)
@@ -1002,69 +1092,64 @@ async def preview_office_file(
             detail=f"LibreOffice is not installed. {_libreoffice_install_hint()}",
         )
 
-    # Wait for any in-flight pre-conversion for this file
+    # Wait for any in-flight pre-conversion for this file (OPTIONAL: only wait if no cache at all)
     task_key = f"{conversation_id}:{path}"
     preconvert_task = _preconvert_tasks.get(task_key)
-    if preconvert_task and not preconvert_task.done():
-        try:
-            await asyncio.wait_for(asyncio.shield(preconvert_task), timeout=30)
-        except (asyncio.TimeoutError, Exception):
-            pass  # fall through to on-demand conversion
+    # Note: We don't wait for the full 30s here anymore if we can avoid it.
+    # The _maybe_preconvert handles the background task.
 
-    # Download to check cache / convert on demand
     tmp_dir = tempfile.mkdtemp()
     filename = os.path.basename(path)
     src_path = os.path.join(tmp_dir, filename)
 
     try:
+        # Download the file from the container/VM
         await computer.download(path, src_path)
-    except Exception:
-        logger.exception("Office preview: failed to download %s from VM", path)
-        _cleanup_dir(tmp_dir)
-        raise HTTPException(
-            status_code=422,
-            detail="Failed to download file from sandbox.",
-        ) from None
+        with open(src_path, "rb") as f:
+            file_bytes = f.read()
 
-    with open(src_path, "rb") as f:
-        file_bytes = f.read()
-    key = _cache_key(file_bytes)
+        key = _cache_key(file_bytes)
 
-    # Cache hit — return immediately
-    cached = _get_cached_pdf(key)
-    if cached:
-        _cleanup_dir(tmp_dir)
+        # 1. Return cached images (JSON) if available (highest fidelity)
+        cache_json = os.path.join(_get_cache_dir(), key + ".json")
+        if os.path.exists(cache_json):
+            _cleanup_dir(tmp_dir)
+            return StreamingResponse(_read_file(cache_json), media_type="application/json")
+
+        # 2. Return cached PDF if available (rough version)
+        cached_pdf = _get_cached_pdf(key)
+        if cached_pdf:
+            # Trigger high-fidelity conversion in background if not already done
+            _maybe_preconvert(conversation_id, path)
+            _cleanup_dir(tmp_dir)
+            pdf_name = os.path.splitext(filename)[0] + ".pdf"
+            return StreamingResponse(
+                _read_file(cached_pdf),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'inline; filename="{pdf_name}"'}
+            )
+
+        # 3. No cache: Need to convert to PDF at least
+        # Step A: Convert to PDF (Fast)
+        pdf_path = await _convert_to_pdf(soffice_bin, src_path, tmp_dir)
+        _store_cached_pdf(key, pdf_path)
+
+        # Step B: Trigger background PNG conversion
+        _maybe_preconvert(conversation_id, path)
+
+        # Step C: Return PDF immediately (don't wait for PNG)
         pdf_name = os.path.splitext(filename)[0] + ".pdf"
         return StreamingResponse(
-            _read_file(cached),
+            _read_file(pdf_path),
             media_type="application/pdf",
-            headers={"Content-Disposition": _content_disposition("inline", pdf_name)},
+            headers={"Content-Disposition": f'inline; filename="{pdf_name}"'},
+            background=BackgroundTask(_cleanup_dir, tmp_dir),
         )
 
-    # On-demand conversion (pre-convert didn't finish or wasn't triggered)
-    t0 = time.monotonic()
-    try:
-        pdf_path = await _convert_to_pdf(soffice_bin, src_path, tmp_dir)
-    except asyncio.TimeoutError:
-        _cleanup_dir(tmp_dir)
-        raise HTTPException(status_code=422, detail="LibreOffice conversion timed out.") from None
     except Exception as exc:
+        logger.error("On-demand conversion failed: %s", exc)
         _cleanup_dir(tmp_dir)
-        raise HTTPException(status_code=422, detail=str(exc)) from None
-
-    elapsed = time.monotonic() - t0
-    logger.info("Office preview: converted %s in %.1fs", path, elapsed)
-
-    _store_cached_pdf(key, pdf_path)
-    os.unlink(src_path)
-
-    pdf_name = os.path.splitext(filename)[0] + ".pdf"
-    return StreamingResponse(
-        _read_file(pdf_path),
-        media_type="application/pdf",
-        headers={"Content-Disposition": _content_disposition("inline", pdf_name)},
-        background=BackgroundTask(_cleanup_dir, tmp_dir),
-    )
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {exc}")
 
 
 def _read_file(path: str):
