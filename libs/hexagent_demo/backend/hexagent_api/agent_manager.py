@@ -366,6 +366,7 @@ class AgentManager:
             )
             # Cowork sessions have skills mounted at /mnt/skills/{public,private}
             skill_paths = ("/mnt/skills/public", "/mnt/skills/private") if mode != "chat" else ()
+            logger.info("[AgentManager] Configured skill_paths for mode=%s: %s", mode, skill_paths)
 
             # PresentToUserTool output directory depends on mode
             if session_key == "chat":

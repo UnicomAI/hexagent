@@ -287,6 +287,14 @@ class AgentMiddleware(LangChainAgentMiddleware):
         self._summary_template = load("user_prompt_compaction_summary_rebuild")
         self._tools_cache: list[BaseTool] | None = None
 
+        # Log middleware initialization for debugging skill injection
+        logger.info(
+            "[AgentMiddleware] Initialized: reminders_count=%d, skills_in_context=%d, skill_names=%s",
+            len(self._reminders),
+            len(context.skills),
+            [s.name for s in context.skills],
+        )
+
     @property
     def tools(self) -> Sequence[BaseTool]:  # type: ignore[override]
         """Get tools as LangChain tools (cached)."""
@@ -437,6 +445,11 @@ class AgentMiddleware(LangChainAgentMiddleware):
 
         # --- GROUP 3: Annotators (system reminders) ---
         if self._reminders:
+            logger.debug(
+                "[AgentMiddleware] Evaluating reminders: reminders_count=%d, context_skills_count=%d",
+                len(self._reminders),
+                len(self._context.skills),
+            )
             openai_msgs = convert_to_openai_messages(messages)
             prepends, appends = evaluate_reminders(
                 self._reminders,
@@ -451,6 +464,12 @@ class AgentMiddleware(LangChainAgentMiddleware):
                 reminder_parts = [*prepends, content_str, *appends]
                 new_content = "\n\n".join(part for part in reminder_parts if part)
 
+                logger.info(
+                    "[AgentMiddleware] Injected reminders into message: prepends=%d, appends=%d, skills_in_context=%d",
+                    len(prepends),
+                    len(appends),
+                    len(self._context.skills),
+                )
                 patched = [*messages[:-1], _rebuild_message(last_msg, new_content)]
                 return {
                     "messages": LangGraphOverwrite(patched),

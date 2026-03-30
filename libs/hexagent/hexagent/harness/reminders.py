@@ -13,11 +13,14 @@ Built-in rules are defined at the bottom of this module.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from hexagent.prompts.content import load, substitute
 from hexagent.prompts.tags import SYSTEM_REMINDER_TAG, Tag
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -65,6 +68,7 @@ def evaluate_reminders(
     Returns:
         (prepends, appends) — tagged strings ready for injection.
     """
+    logger.debug("[evaluate_reminders] Evaluating %d reminder(s), messages_count=%d", len(reminders), len(messages))
     prepends: list[str] = []
     appends: list[str] = []
     for reminder in reminders:
@@ -73,8 +77,11 @@ def evaluate_reminders(
             wrapped = tag(content)
             if reminder.position == "prepend":
                 prepends.append(wrapped)
+                logger.debug("[evaluate_reminders] Prepended reminder (len=%d)", len(wrapped))
             else:
                 appends.append(wrapped)
+                logger.debug("[evaluate_reminders] Appended reminder (len=%d)", len(wrapped))
+    logger.info("[evaluate_reminders] Result: %d prepend(s), %d append(s)", len(prepends), len(appends))
     return prepends, appends
 
 
@@ -94,15 +101,33 @@ def available_skills_reminder(
     are available.
     """
     _max_initial_messages = 2  # At most: [system?, user]
+
+    # Log for debugging skill injection issues
+    logger.info(
+        "[available_skills_reminder] Evaluating: messages_count=%d, last_role=%s, skills_count=%d",
+        len(messages),
+        messages[-1].get("role") if messages else "N/A",
+        len(ctx.skills),
+    )
+
     if not messages or len(messages) > _max_initial_messages or messages[-1].get("role") != "user":
+        logger.debug(
+            "[available_skills_reminder] Skipped: not initial user message (messages=%d, max=%d, last_role=%s)",
+            len(messages),
+            _max_initial_messages,
+            messages[-1].get("role") if messages else "N/A",
+        )
         return None
 
     if not ctx.skills:
+        logger.info("[available_skills_reminder] Skipped: no skills available in context")
         return None
 
     template = load("system_reminder_initial_available_skills")
     formatted = "\n".join(f"- {s.name}: {s.description}" for s in ctx.skills)
-    return substitute(template, **ctx.tool_name_vars, FORMATTED_SKILLS_LIST=formatted)
+    result = substitute(template, **ctx.tool_name_vars, FORMATTED_SKILLS_LIST=formatted)
+    logger.info("[available_skills_reminder] Injected skills reminder: skills=%s", [s.name for s in ctx.skills])
+    return result
 
 
 def task_completion_reminder(registry: TaskRegistry) -> Reminder:
