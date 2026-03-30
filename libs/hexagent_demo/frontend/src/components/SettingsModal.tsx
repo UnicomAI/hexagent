@@ -27,6 +27,20 @@ interface SettingsModalProps {
 export type Tab = "general" | "model" | "mcps" | "tools" | "agents" | "sandbox" | "skills";
 
 const isMac = navigator.platform.toUpperCase().includes("MAC");
+const SENSITIVE_SK_TOKEN_RE = /sk-[A-Za-z0-9._-]+/g;
+const MASKED_SK_TOKEN = "sk-****";
+
+function maskSkTokens(value: string): string {
+  if (!value) return value;
+  return value.replace(SENSITIVE_SK_TOKEN_RE, MASKED_SK_TOKEN);
+}
+
+function mergeMaskedSkTokens(previousRaw: string, nextDisplayed: string): string {
+  if (!nextDisplayed) return nextDisplayed;
+  const prevTokens = previousRaw.match(SENSITIVE_SK_TOKEN_RE) ?? [];
+  let tokenIdx = 0;
+  return nextDisplayed.replace(/sk-\*{4}/g, () => prevTokens[tokenIdx++] ?? MASKED_SK_TOKEN);
+}
 
 /** Props shared by all tabs that edit ServerConfig. */
 interface ConfigTabProps {
@@ -1099,7 +1113,7 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
                   </div>
                   <div className="ml-row-meta">
                     {server.type === "http"
-                      ? server.url || t("mcp.noUrlConfigured")
+                      ? maskSkTokens(server.url) || t("mcp.noUrlConfigured")
                       : [server.command, server.args].filter(Boolean).join(" ") || t("mcp.noCommandConfigured")}
                   </div>
                 </div>
@@ -1171,8 +1185,16 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
                           <label className="mc-label">{t("mcp.url")}</label>
                           <input
                             className="mc-input"
-                            value={server.url}
-                            onChange={(e) => updateServer(server.id, { url: e.target.value })}
+                            value={maskSkTokens(server.url)}
+                            onChange={(e) => updateServer(server.id, { url: mergeMaskedSkTokens(server.url, e.target.value) })}
+                            onCopy={(e) => e.preventDefault()}
+                            onCut={(e) => e.preventDefault()}
+                            onContextMenu={(e) => e.preventDefault()}
+                            onKeyDown={(e) => {
+                              if ((e.metaKey || e.ctrlKey) && (e.key.toLowerCase() === "c" || e.key.toLowerCase() === "x")) {
+                                e.preventDefault();
+                              }
+                            }}
                             placeholder={t("mcp.urlPlaceholder")}
                           />
                         </div>
