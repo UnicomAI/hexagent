@@ -5,6 +5,7 @@ Fetch providers:
 - FirecrawlFetchProvider: Advanced JS rendering, requires API key
 
 Search providers:
+- BochaSearchProvider: AI-optimized search, requires API key
 - TavilySearchProvider: AI-optimized search, requires API key
 - BraveSearchProvider: Privacy-focused search, requires API key
 """
@@ -18,6 +19,7 @@ from hexagent.tools.web.providers.fetch import (
     JinaFetchProvider,
 )
 from hexagent.tools.web.providers.search import (
+    BochaSearchProvider,
     BraveSearchProvider,
     SearchProvider,
     SearchResultItem,
@@ -25,6 +27,7 @@ from hexagent.tools.web.providers.search import (
 )
 
 __all__ = [
+    "BochaSearchProvider",
     "BraveSearchProvider",
     "FetchProvider",
     "FetchResult",

@@ -60,7 +60,7 @@ class AgentConfig:
 
 @dataclass
 class ToolsConfig:
-    search_provider: str = ""  # "tavily" | "brave" | ""
+    search_provider: str = ""  # "bocha" | "tavily" | "brave" | ""
     search_api_key: str = ""
     fetch_provider: str = "jina"  # "jina" | "firecrawl" | ""
     fetch_api_key: str = ""

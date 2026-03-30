@@ -287,6 +287,7 @@ class AgentManager:
             from hexagent.harness.model import ModelProfile
             from hexagent.tools import PresentToUserTool
             from hexagent.tools.web import (
+                BochaSearchProvider,
                 BraveSearchProvider,
                 FetchProvider,
                 FirecrawlFetchProvider,
@@ -357,6 +358,8 @@ class AgentManager:
                 search = TavilySearchProvider(api_key=tc.search_api_key or None)
             elif tc.search_provider == "brave":
                 search = BraveSearchProvider(api_key=tc.search_api_key or None)
+            elif tc.search_provider == "bocha":
+                search = BochaSearchProvider(api_key=tc.search_api_key or None)
 
             fetch: FetchProvider | None = None
             if tc.fetch_provider == "jina":

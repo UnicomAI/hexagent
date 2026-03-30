@@ -5,7 +5,7 @@ Tools:
 - WebFetchTool: Fetch and extract content from web pages
 
 Providers:
-- TavilySearchProvider, BraveSearchProvider: Search backends
+- BochaSearchProvider, TavilySearchProvider, BraveSearchProvider: Search backends
 - JinaFetchProvider, FirecrawlFetchProvider: Fetch backends
 
 Factory functions:
@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 from hexagent.tools.web._cache import clear_caches
 from hexagent.tools.web.fetch import WebFetchTool
 from hexagent.tools.web.providers import (
+    BochaSearchProvider,
     BraveSearchProvider,
     FetchProvider,
     FirecrawlFetchProvider,
@@ -64,6 +65,7 @@ def create_web_tools(
 
 
 __all__ = [
+    "BochaSearchProvider",
     "BraveSearchProvider",
     "FetchProvider",
     "FirecrawlFetchProvider",

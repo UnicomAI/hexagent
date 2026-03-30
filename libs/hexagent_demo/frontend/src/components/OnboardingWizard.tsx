@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import faviconSvg from "../assets/favicon.svg";
 import {
@@ -749,6 +749,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                   <div className="setup-pill-group">
                     {[
                       { id: "", label: t("tools.providerNone") },
+                      { id: "bocha", label: "Bocha" },
                       { id: "tavily", label: "Tavily" },
                       { id: "brave", label: "Brave" },
                     ].map((p) => (
@@ -772,7 +773,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                         type={showSearchKey ? "text" : "password"}
                         value={searchKey}
                         onChange={(e) => setSearchKey(e.target.value)}
-                        placeholder={t("tools.apiKeyPlaceholder", { provider: searchProvider })}
+                        placeholder={
+                          searchProvider === "tavily"
+                            ? "tvly-..."
+                            : searchProvider === "bocha"
+                            ? "sk-..."
+                            : "BSA..."
+                        }
                       />
                       <button className="setup-key-toggle" onClick={() => setShowSearchKey(!showSearchKey)} type="button">
                         {showSearchKey ? <Eye size={14} /> : <EyeOff size={14} />}

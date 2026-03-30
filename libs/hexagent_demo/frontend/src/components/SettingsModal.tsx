@@ -1,4 +1,4 @@
-﻿import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { X, Plus, Trash2, Monitor, Moon, Sun, Unplug, SlidersHorizontal, Cpu, ChevronDown, ChevronRight, Check, Loader2, Eye, EyeOff, GripVertical, Bot, Wrench, Globe, ScrollText, Zap, FolderOpen, FolderPlus, Server, CircleCheck, CircleAlert, Upload, Package, Download, AppWindow, TriangleAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Settings } from "../hooks/useSettings";
@@ -1301,6 +1301,7 @@ function McpTab({ config, onConfigChange }: ConfigTabProps) {
 
 const SEARCH_PROVIDERS = [
   { id: "", label: "None" },
+  { id: "bocha", label: "Bocha" },
   { id: "tavily", label: "Tavily" },
   { id: "brave", label: "Brave" },
 ];
@@ -1398,7 +1399,13 @@ function ToolsTab({ config, onConfigChange }: ConfigTabProps) {
                   data-form-type="other"
                   value={tools.search_api_key}
                   onChange={(e) => updateTools({ search_api_key: e.target.value })}
-                  placeholder={tools.search_provider === "tavily" ? "tvly-..." : "BSA..."}
+                  placeholder={
+                    tools.search_provider === "tavily"
+                      ? "tvly-..."
+                      : tools.search_provider === "bocha"
+                      ? "sk-..."
+                      : "BSA..."
+                  }
                 />
                 <button
                   className="mc-key-toggle"

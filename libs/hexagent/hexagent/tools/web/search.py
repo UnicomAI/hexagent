@@ -6,6 +6,7 @@ Provides WebSearchTool for agents to search the web.
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING, Literal
 
 import httpx
@@ -69,6 +70,9 @@ class WebSearchTool(BaseAgentTool[WebSearchToolParams]):
         Returns:
             ToolResult with formatted search results.
         """
+        logger = logging.getLogger(__name__)
+        logger.info(f"Executing WebSearch for query: '{params.query}' using provider: {self._provider.name}")
+        
         # Check cache first
         cache = get_search_cache()
         key = cache_key(self._provider.name, params.query, str(MAX_SEARCH_RESULTS))
@@ -81,43 +85,55 @@ class WebSearchTool(BaseAgentTool[WebSearchToolParams]):
                     params.query,
                     max_results=MAX_SEARCH_RESULTS,
                 )
+                logger.debug(f"Search provider returned {len(result.items)} items")
                 cache[key] = result
             except (ConfigurationError, WebAPIError) as exc:
                 msg = f"Search provider: {exc}"
+                logger.error(f"Search provider error: {msg}")
                 return ToolResult(error=msg)
             except httpx.HTTPError as exc:
                 msg = f"Search for '{params.query}' failed: {exc}"
+                logger.error(f"HTTP error during search: {msg}")
                 return ToolResult(error=msg)
             except Exception as exc:
                 msg = f"An unexpected error occurred while searching for '{params.query}': {exc}"
+                logger.exception(f"Unexpected error during search: {msg}")
                 return ToolResult(error=msg)
 
         if not result.items:
+            logger.info(f"No search results found for query: '{params.query}'")
             return ToolResult(output=f'No results found for query: "{params.query}".')
 
         # Resolve AI summary: use provider's if available, else generate one.
         ai_summary = result.ai_summary
         if not ai_summary and self._model:
-            formatted_results = "\n\n".join(
-                f"[{i}] {item.title}" + (f"\nDate: {item.date.strftime('%-d %b %Y')}" if item.date else "") + f"\nURL: {item.url}\n{item.snippet}"
-                for i, item in enumerate(result.items, 1)
-            )
-            user_msg = substitute(
-                load("agent_prompt_websearch_summarizer"),
-                FORMATTED_SEARCH_RESULTS=formatted_results,
-                SEARCH_QUERY=params.query,
-            )
-            ai_summary = await self._model.complete(
-                system=(
-                    "You are a search result synthesizer. Produce a direct, accurate"
-                    " answer by combining information across the provided search results."
-                    " Include all key facts, figures, dates, and named entities that are"
-                    " relevant to the query. When results conflict, note the discrepancy."
-                    " Prefer the most recent information when timeliness matters. Never"
-                    " fabricate information beyond what the results contain."
-                ),
-                user=user_msg,
-            )
+            logger.info("No provider summary, generating AI summary using model...")
+            try:
+                formatted_results = "\n\n".join(
+                    f"[{i}] {item.title}" + (f"\nDate: {item.date.strftime('%d %b %Y')}" if item.date else "") + f"\nURL: {item.url}\n{item.snippet}"
+                    for i, item in enumerate(result.items, 1)
+                )
+                user_msg = substitute(
+                    load("agent_prompt_websearch_summarizer"),
+                    FORMATTED_SEARCH_RESULTS=formatted_results,
+                    SEARCH_QUERY=params.query,
+                )
+                ai_summary = await self._model.complete(
+                    system=(
+                        "You are a search result synthesizer. Produce a direct, accurate"
+                        " answer by combining information across the provided search results."
+                        " Include all key facts, figures, dates, and named entities that are"
+                        " relevant to the query. When results conflict, note the discrepancy."
+                        " Prefer the most recent information when timeliness matters. Never"
+                        " fabricate information beyond what the results contain."
+                    ),
+                    user=user_msg,
+                )
+                logger.debug("AI summary generated successfully")
+            except Exception as exc:
+                logger.exception(f"Error generating AI summary: {exc}")
+                # Fallback to no summary if generation fails
+                ai_summary = None
 
         # Format output based on summary availability
         if ai_summary:
