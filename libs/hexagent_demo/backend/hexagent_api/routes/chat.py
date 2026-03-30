@@ -768,43 +768,44 @@ _SOFFICE_SEARCH_PATHS = [
     "/Applications/LibreOffice.app/Contents/MacOS/soffice",  # macOS
     "/usr/bin/soffice",  # Linux
     "/usr/local/bin/soffice",  # Linux (manual install)
+    os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "LibreOffice", "program", "soffice.exe"),  # Windows
+    os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "LibreOffice", "program", "soffice.exe"),  # Windows x86 path
+    os.path.join(os.environ.get("LOCALAPPDATA", r"C:\Users\Public\AppData\Local"), "Programs", "LibreOffice", "program", "soffice.exe"),  # Windows per-user
 ]
 
 
 def _find_soffice() -> str | None:
     """Find the soffice binary on the host machine."""
-    found = shutil.which("soffice")
-    if found:
-        return found
-
-    # On Windows, try common Program Files paths
-    if sys.platform == "win32":
-        for root in [
-            os.environ.get("ProgramFiles", "C:\\Program Files"),
-            os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"),
-        ]:
-            path = os.path.join(root, "LibreOffice", "program", "soffice.exe")
-            if os.path.isfile(path):
-                return path
-    elif sys.platform == "darwin":
-        # On macOS, check standard app locations
-        for p in [
-            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-            os.path.expanduser("~/Applications/LibreOffice.app/Contents/MacOS/soffice"),
-        ]:
-            if os.path.isfile(p) and os.access(p, os.X_OK):
-                return p
-    else:
-        # On Linux, try common package manager paths
-        for p in [
-            "/usr/bin/soffice",
-            "/usr/local/bin/soffice",
-            "/usr/bin/libreoffice",
-            "/snap/bin/libreoffice",
-        ]:
-            if os.path.isfile(p) and os.access(p, os.X_OK):
-                return p
+    for binary in ("soffice", "soffice.exe"):
+        found = shutil.which(binary)
+        if found:
+            return found
+    search_paths = list(_SOFFICE_SEARCH_PATHS)
+    if sys.platform == "darwin":
+        search_paths.append(os.path.expanduser("~/Applications/LibreOffice.app/Contents/MacOS/soffice"))
+    elif sys.platform != "win32":
+        search_paths.extend(["/usr/bin/libreoffice", "/snap/bin/libreoffice"])
+    for p in search_paths:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
     return None
+
+
+def _libreoffice_install_hint() -> str:
+    if os.name == "nt":
+        return (
+            "Install it to enable presentation preview: "
+            "winget install TheDocumentFoundation.LibreOffice"
+        )
+    if sys.platform == "darwin":
+        return (
+            "Install it to enable presentation preview: "
+            "brew install --cask libreoffice"
+        )
+    return (
+        "Install it to enable presentation preview (for example: "
+        "sudo apt install libreoffice)."
+    )
 
 
 def _cleanup_dir(dir_path: str) -> None:
@@ -1086,8 +1087,10 @@ async def preview_office_file(
 
     soffice_bin = _find_soffice()
     if soffice_bin is None:
-        # Fallback to client-side rendering if LibreOffice is missing
-        raise HTTPException(status_code=404, detail="LibreOffice not found, skipping server-side conversion")
+        raise HTTPException(
+            status_code=422,
+            detail=f"LibreOffice is not installed. {_libreoffice_install_hint()}",
+        )
 
     # Wait for any in-flight pre-conversion for this file (OPTIONAL: only wait if no cache at all)
     task_key = f"{conversation_id}:{path}"

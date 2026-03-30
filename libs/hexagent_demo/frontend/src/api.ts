@@ -1,14 +1,7 @@
-﻿import type { Conversation } from "./types";
+import type { Conversation } from "./types";
+import { getApiBase } from "./apiBase";
 
-const API_BASE = (() => {
-  if (typeof window !== 'undefined' && window.electronAPI?.backendPort) {
-    const base = `http://localhost:${window.electronAPI.backendPort}`;
-    console.log('[api] Electron mode, API_BASE:', base);
-    return base;
-  }
-  console.log('[api] Browser mode, API_BASE: (empty, using relative URLs)');
-  return '';
-})();
+const API_BASE = getApiBase();
 
 export async function listConversations(): Promise<Conversation[]> {
   const res = await fetch(`${API_BASE}/api/conversations`);
@@ -34,7 +27,7 @@ export async function getConversation(id: string): Promise<Conversation> {
   return res.json();
 }
 
-// 鈹€鈹€ Warm session (pre-conversation) 鈹€鈹€
+// ── Warm session (pre-conversation) ──
 
 export interface WarmSessionResponse {
   session_id: string;
@@ -264,7 +257,7 @@ export function subscribeToStream(
   return controller;
 }
 
-// 鈹€鈹€ File upload 鈹€鈹€
+// ── File upload ──
 
 export interface UploadResult {
   filename: string;
@@ -295,7 +288,7 @@ export async function deleteChatFile(conversationId: string, filename: string): 
   }
 }
 
-// 鈹€鈹€ Folder picker 鈹€鈹€
+// ── Folder picker ──
 
 export async function browseFolder(): Promise<string | null> {
   const res = await fetch(`${API_BASE}/api/browse-folder`, { method: "POST" });
@@ -304,7 +297,7 @@ export async function browseFolder(): Promise<string | null> {
   return data.path || null;
 }
 
-// 鈹€鈹€ Server config 鈹€鈹€
+// ── Server config ──
 
 export interface ModelConfig {
   id: string;
@@ -389,7 +382,7 @@ export async function testMcpConnection(server: McpServerEntry): Promise<{ ok: b
   return res.json();
 }
 
-// 鈹€鈹€ Skills 鈹€鈹€
+// ── Skills ──
 
 export interface SkillsList {
   public: string[];
@@ -447,7 +440,7 @@ export async function toggleSkill(name: string, enabled: boolean): Promise<void>
   if (!res.ok) throw new Error(`Failed to toggle skill: ${res.statusText}`);
 }
 
-// 鈹€鈹€ Setup / VM backend 鈹€鈹€
+// ── Setup / VM backend ──
 
 export interface VMStatus {
   supported: boolean;
@@ -482,7 +475,7 @@ export function installVMBackend(
   });
 }
 
-// 鈹€鈹€ VM Build 鈹€鈹€
+// ── VM Build ──
 
 export interface VMBuildStatus {
   status: "idle" | "running" | "done" | "error";
@@ -563,7 +556,7 @@ export function buildVM(
   });
 }
 
-// 鈹€鈹€ VM Provision 鈹€鈹€
+// ── VM Provision ──
 
 export interface ProvisionStepDef {
   id: string;

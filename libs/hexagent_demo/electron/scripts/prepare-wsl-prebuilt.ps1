@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$HexagentRoot = Resolve-Path "$ScriptDir\..\..\.."
-$PrebuiltDir = Join-Path $HexagentRoot "hexagent\sandbox\vm\wsl\prebuilt"
+$ElectronDir = Resolve-Path "$ScriptDir\.."
+$PrebuiltDir = Join-Path $ElectronDir "prebuilt"
 $PrebuiltTar = Join-Path $PrebuiltDir "hexagent-prebuilt.tar"
 $LegacyPrebuiltTar = Join-Path $PrebuiltDir "openagent-prebuilt.tar"
 $DistroName = if ($env:HEXAGENT_WSL_DISTRO) { $env:HEXAGENT_WSL_DISTRO } else { "hexagent" }

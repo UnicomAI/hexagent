@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-# Build HexAgent desktop app for specified platforms.
+﻿#!/usr/bin/env bash
+# Build UniClaw desktop app for specified platforms.
 #
 # Usage:
 #   bash build-all.sh                    # macOS arm64 (default)
@@ -14,7 +14,7 @@ ELECTRON_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TARGET="${1:-mac-arm64}"
 
 echo "========================================="
-echo "  HexAgent Desktop — Build ($TARGET)"
+echo "  UniClaw Desktop 鈥?Build ($TARGET)"
 echo "========================================="
 
 echo ""
@@ -101,3 +101,4 @@ echo "========================================="
 echo "  Build complete! Output in dist/"
 echo "========================================="
 ls -lh "$ELECTRON_DIR/dist/"*.{dmg,exe,blockmap} 2>/dev/null || true
+

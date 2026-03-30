@@ -1,7 +1,7 @@
 {
   "name": "hexagent",
   "version": "0.0.6-20260329-1156",
-  "description": "ClawWork Desktop App",
+  "description": "UniClaw-Work Desktop App",
   "main": "main.js",
   "scripts": {
     "dev": "cross-env ELECTRON_DEV=1 electron .",
@@ -23,7 +23,7 @@
   },
   "build": {
     "appId": "com.hexagent.app",
-    "productName": "ClawWork",
+    "productName": "UniClaw-Work",
     "directories": {
       "buildResources": "resources",
       "output": "dist"
@@ -47,7 +47,7 @@
         "to": "lima"
       }
     ],
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "artifactName": "${productName}.${ext}",
     "mac": {
       "target": [
         {
@@ -66,10 +66,6 @@
     "afterPack": "./scripts/afterPack.js",
     "win": {
       "extraResources": [
-        {
-          "from": "resources/wsl/",
-          "to": "wsl"
-        },
         {
           "from": "resources/icon.ico",
           "to": "app-icon.ico"

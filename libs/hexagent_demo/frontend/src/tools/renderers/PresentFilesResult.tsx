@@ -9,6 +9,7 @@ import { useMemo, useCallback, memo } from "react";
 import { FileText, FileCode, Image, FileSpreadsheet, Music, Video, File, Download, AlertCircle } from "lucide-react";
 import { useAppContext } from "../../store";
 import ScrollableText from "../../components/ScrollableText";
+import { withApiBase } from "../../apiBase";
 import type { ResultRendererProps } from "../types";
 
 interface PresentedFile {
@@ -24,11 +25,18 @@ function parseOutput(output: string): { files: PresentedFile[]; error?: string }
   }
 
   const files: PresentedFile[] = [];
+  const seen = new Set<string>();
   const fileRegex =
     /<file>\s*<file_path>([\s\S]*?)<\/file_path>\s*<mime_type>([\s\S]*?)<\/mime_type>\s*<\/file>/g;
   let match;
   while ((match = fileRegex.exec(output)) !== null) {
-    files.push({ path: match[1].trim(), mimeType: match[2].trim() });
+    const path = match[1].trim();
+    const mimeType = match[2].trim();
+    // Deduplicate repeated PresentToUser entries for the same file in one render batch.
+    const key = path.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    files.push({ path, mimeType });
   }
   return { files };
 }
@@ -184,7 +192,9 @@ export default memo(function PresentFilesResult({ output }: ResultRendererProps)
   const handleDownload = useCallback((e: React.MouseEvent, file: PresentedFile) => {
     e.stopPropagation();
     if (!conversationId) return;
-    const url = `/api/files/${conversationId}?path=${encodeURIComponent(file.path)}`;
+    const url = withApiBase(
+      `/api/files/${conversationId}?path=${encodeURIComponent(file.path)}`,
+    );
     const a = document.createElement("a");
     a.href = url;
     a.download = basename(file.path);

@@ -1,5 +1,5 @@
-{
-  "brand": "ClawWork",
+﻿{
+  "brand": "UniClaw-Work",
   "openSidebar": "Open sidebar",
   "closeSidebar": "Close sidebar",
   "newChat": "New chat",
@@ -14,3 +14,4 @@
   "delete": "Delete",
   "user": "User"
 }
+

@@ -27,6 +27,7 @@ to an isolated Linux user on the WSL distro.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shlex
 import uuid
@@ -299,7 +300,7 @@ class LocalVM:
             return
         await self._vm.stop()
 
-    async def mount(  # noqa: PLR0912
+    async def mount(  # noqa: PLR0912, PLR0915
         self,
         mounts: Mount | list[Mount],
         *,
@@ -324,6 +325,7 @@ class LocalVM:
             VMError: Session does not exist on the distro.
         """
         from hexagent.computer.local._wsl import wsl_log
+
         mount_list = [mounts] if isinstance(mounts, Mount) else list(mounts)
         if not mount_list:
             return

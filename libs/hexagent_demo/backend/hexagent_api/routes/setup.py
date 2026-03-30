@@ -358,14 +358,41 @@ def _wsl_prebuilt_tar_path() -> Path | None:
     """Return an offline WSL rootfs archive if present.
 
     Search order:
-    1. Backend-bundled VM assets (PyInstaller ``sandbox/vm/wsl/prebuilt``)
-    2. Electron extraResources path from ``HEXAGENT_WSL_OFFLINE_DIR`` (if set)
+    1. Explicit file path from ``HEXAGENT_WSL_PREBUILT_TAR``
+    2. ``HEXAGENT_WSL_PREBUILT_DIR`` / ``HEXAGENT_APP_DIR`` / CWD
+    3. Legacy bundled locations (for backward compatibility)
     """
-    candidate_dirs: list[Path] = [vm_setup_dir().parent / "wsl" / "prebuilt"]
+    explicit_tar = os.environ.get("HEXAGENT_WSL_PREBUILT_TAR", "").strip()
+    if explicit_tar:
+        explicit_path = Path(explicit_tar)
+        if explicit_path.is_file():
+            return explicit_path
 
-    offline_dir = os.environ.get("HEXAGENT_WSL_OFFLINE_DIR", "").strip()
-    if offline_dir:
-        candidate_dirs.append(Path(offline_dir))
+    candidate_dirs: list[Path] = []
+    seen: set[str] = set()
+
+    def add_dir(raw: str) -> None:
+        raw = (raw or "").strip()
+        if not raw:
+            return
+        try:
+            p = Path(raw).resolve()
+        except Exception:  # pragma: no cover - defensive
+            return
+        key = str(p).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        candidate_dirs.append(p)
+
+    # Preferred external locations for split package distribution.
+    add_dir(os.environ.get("HEXAGENT_WSL_PREBUILT_DIR", ""))
+    add_dir(os.environ.get("HEXAGENT_APP_DIR", ""))
+    add_dir(str(Path.cwd()))
+
+    # Backward-compatible locations.
+    add_dir(str(vm_setup_dir().parent / "wsl" / "prebuilt"))
+    add_dir(os.environ.get("HEXAGENT_WSL_OFFLINE_DIR", ""))
 
     for prebuilt_dir in candidate_dirs:
         for name in _WSL_PREBUILT_CANDIDATES:
@@ -1190,9 +1217,9 @@ class _BuildManager(_ProcessManager):
         prebuilt_tar = _wsl_prebuilt_tar_path()
         import_dir = data_dir() / "wsl" / _WSL_INSTANCE / "disk"
 
-        # Distro does not exist: prefer bundled prebuilt HexAgent rootfs.
+        # Distro does not exist: prefer external prebuilt rootfs if available.
         if prebuilt_tar is not None:
-            self._emit("progress", {"step": "creating", "message": "Importing bundled HexAgent VM image..."})
+            self._emit("progress", {"step": "creating", "message": f"Importing local HexAgent VM image ({prebuilt_tar.name})..."})
             if import_dir.exists():
                 shutil.rmtree(import_dir, ignore_errors=True)
             import_dir.mkdir(parents=True, exist_ok=True)
@@ -1206,12 +1233,12 @@ class _BuildManager(_ProcessManager):
             _, err_b = await self._communicate_with_heartbeat(
                 proc_import,
                 step="creating",
-                message="Importing bundled HexAgent VM image...",
+                message="Importing local HexAgent VM image...",
                 progress_info=lambda: f"(image ~{(prebuilt_tar.stat().st_size / (1024 * 1024)):.1f} MB)",
             )
             if proc_import.returncode != 0:
                 err = _decode_wsl_output(err_b or b"").strip()
-                self._emit("error", {"message": err or f"Bundled image import failed (exit {proc_import.returncode})"})
+                self._emit("error", {"message": err or f"Local prebuilt image import failed (exit {proc_import.returncode})"})
                 self._status = "error"
                 self._error = f"exit {proc_import.returncode}"
                 return
@@ -1226,7 +1253,7 @@ class _BuildManager(_ProcessManager):
                 retries_on_missing_disk=6,
             )
             if ok:
-                self._emit("done", {"message": "WSL distro imported from bundled image and started successfully"})
+                self._emit("done", {"message": "WSL distro imported from local prebuilt image and started successfully"})
                 self._status = "done"
             else:
                 self._emit("error", {"message": err})
@@ -1234,7 +1261,7 @@ class _BuildManager(_ProcessManager):
                 self._error = err
             return
 
-        # Fallback: bootstrap from Ubuntu export.
+        # Fallback: bootstrap from network Ubuntu install/export.
         self._emit("progress", {"step": "creating", "message": "Preparing source distro (Ubuntu)..."})
         entries = await _wsl_list()
         source_distro = _pick_wsl_source_distro(entries)

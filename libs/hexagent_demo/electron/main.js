@@ -146,6 +146,7 @@ async function spawnBackend() {
   }
   const port = IS_DEV ? 8000 : await findFreePort();
   backendPort = port;
+  const appDir = IS_DEV ? __dirname : path.dirname(process.execPath);
   const wslOfflineDir = IS_DEV
     ? path.join(__dirname, "resources", "wsl")
     : path.join(process.resourcesPath, "wsl");
@@ -199,6 +200,9 @@ async function spawnBackend() {
     const newPath = fs.existsSync(limaBin)
       ? `${limaBin}${path.delimiter}${envPath}`
       : envPath;
+    wslLog(
+      `Backend env dirs: appDir=${appDir}, wslOfflineDir=${wslOfflineDir}`
+    );
 
     backendProcess = spawn(binaryPath, [], {
       cwd: userDataDir,
@@ -209,6 +213,7 @@ async function spawnBackend() {
         HOST: "127.0.0.1",
         PORT: String(port),
         HEXAGENT_DATA_DIR: userDataDir,
+        HEXAGENT_APP_DIR: appDir,
         HEXAGENT_WSL_OFFLINE_DIR: wslOfflineDir,
       },
     });
@@ -564,7 +569,7 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error("Failed to start backend:", err);
     dialog.showErrorBox(
-      "ClawWork - Failed to Start",
+      "UniClaw-Work - Failed to Start",
       `The backend server could not be started.\n\n${err.message}`
     );
     app.quit();
