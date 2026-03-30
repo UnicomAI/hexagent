@@ -139,7 +139,7 @@ for fp in filepaths:
         if os.path.exists(parent) and os.path.isdir(parent):
             files = os.listdir(parent)
             if files:
-                suggestion = f". Files in directory '{parent}': " + ", ".join(files[:10])
+                suggestion = f". Files in directory '{{parent}}': " + ", ".join(files[:10])
         print(f"ERR{{delim}}Path does not exist: {{fp}}{{suggestion}}")
         continue
     if not os.path.isfile(fp):

@@ -406,26 +406,32 @@ class ReadToolParams(BaseModel):
 class WriteToolParams(BaseModel):
     """Input schema for write tool."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     description: str | None = Field(
         default=None,
         description="Clear, concise description of what this Write does in active voice. (Always generate this param first)",
     )
-    file_path: str = Field(description="The absolute path to the target file to write (must be absolute, not relative)")
+    file_path: str = Field(
+        validation_alias=AliasChoices("file_path", "path"),
+        description="The absolute path to the target file to write (must be absolute, not relative)",
+    )
     content: str = Field(description="The content to write to the file")
 
 
 class EditToolParams(BaseModel):
     """Input schema for edit tool."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     description: str | None = Field(
         default=None,
         description="Clear, concise description of what this Edit does in active voice. (Always generate this param first)",
     )
-    file_path: str = Field(description="The absolute path to the file to modify")
+    file_path: str = Field(
+        validation_alias=AliasChoices("file_path", "path"),
+        description="The absolute path to the file to modify",
+    )
     old_string: str = Field(description="The text to replace")
     new_string: str = Field(description="The text to replace it with (must be different from old_string)")
     replace_all: bool = Field(default=False, description="Replace all occurences of old_string (default false)")
