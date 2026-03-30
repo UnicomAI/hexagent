@@ -30,6 +30,10 @@ def _resolve_config_path() -> Path:
 CONFIG_PATH = _resolve_config_path()
 
 
+# Default max_tokens for LLM responses
+DEFAULT_MAX_TOKENS = 40960
+
+
 @dataclass
 class ModelConfig:
     id: str = ""
@@ -39,6 +43,7 @@ class ModelConfig:
     model: str = ""
     provider: str = ""
     context_window: int = 0
+    max_tokens: int = DEFAULT_MAX_TOKENS
     supported_modalities: list[str] = field(default_factory=lambda: ["text"])
 
 

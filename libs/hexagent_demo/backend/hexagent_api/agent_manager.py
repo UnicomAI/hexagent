@@ -306,23 +306,27 @@ class AgentManager:
             fast_cfg = cfg.fast_model or target
 
             def _make_chat_model(mc: Any) -> Any:
+                max_tokens = getattr(mc, "max_tokens", None) or 40960
                 if mc.provider == "anthropic":
                     return ChatAnthropic(
                         model=mc.model,
                         api_key=mc.api_key,
                         base_url=mc.base_url,
+                        max_tokens=max_tokens,
                     )
                 if mc.provider == "deepseek":
                     return ChatDeepSeek(
                         model=mc.model,
                         api_key=mc.api_key,
                         api_base=mc.base_url,
+                        max_tokens=max_tokens,
                     )
                 # Default: openai
                 return ChatOpenAI(
                     model=mc.model,
                     api_key=mc.api_key,
                     base_url=mc.base_url,
+                    max_tokens=max_tokens,
                 )
 
             main_model = ModelProfile(
