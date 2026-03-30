@@ -1,5 +1,5 @@
 // main.js — Electron main process
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain } = require("electron");
 const path = require("path");
 const net = require("net");
 const fs = require("fs");
@@ -532,6 +532,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    autoHideMenuBar: true,
     icon: fs.existsSync(winIconPath) ? winIconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -551,6 +552,9 @@ function createWindow() {
     mainWindow.loadFile(indexPath);
   }
 
+  // Hide native menu bar in desktop app window.
+  mainWindow.setMenuBarVisibility(false);
+
   // Open DevTools with Cmd+Shift+I (mac) or Ctrl+Shift+I (win/linux)
   mainWindow.webContents.on("before-input-event", (_event, input) => {
     if (input.type === "keyDown" && input.key === "I" && input.shift && (input.meta || input.control)) {
@@ -563,6 +567,11 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   ensureUserData();
+
+  // On Windows/Linux, remove default application menu (File/Edit/View...).
+  if (process.platform !== "darwin") {
+    Menu.setApplicationMenu(null);
+  }
 
   try {
     await spawnBackend();
