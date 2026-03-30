@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, fields, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, Protocol, TypedDict, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -386,7 +386,8 @@ class ReadToolParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    description: str = Field(
+    description: str | None = Field(
+        default=None,
         description="Clear, concise description of what this Read does in active voice. (Always generate this param first)",
     )
     file_path: str = Field(description="The absolute path to the file to read")
@@ -407,10 +408,11 @@ class WriteToolParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    description: str = Field(
+    description: str | None = Field(
+        default=None,
         description="Clear, concise description of what this Write does in active voice. (Always generate this param first)",
     )
-    file_path: str = Field(description="The absolute path to the file to write (must be absolute, not relative)")
+    file_path: str = Field(description="The absolute path to the target file to write (must be absolute, not relative)")
     content: str = Field(description="The content to write to the file")
 
 
@@ -419,7 +421,8 @@ class EditToolParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    description: str = Field(
+    description: str | None = Field(
+        default=None,
         description="Clear, concise description of what this Edit does in active voice. (Always generate this param first)",
     )
     file_path: str = Field(description="The absolute path to the file to modify")
@@ -433,7 +436,8 @@ class GlobToolParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    description: str = Field(
+    description: str | None = Field(
+        default=None,
         description="Clear, concise description of what this Glob does in active voice. (Always generate this param first)",
     )
     pattern: str = Field(description="The glob pattern to match files against")
@@ -453,7 +457,8 @@ class GrepToolParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    description: str = Field(
+    description: str | None = Field(
+        default=None,
         description="Clear, concise description of what this Grep does in active voice. (Always generate this param first)",
     )
     pattern: str = Field(description="The regular expression pattern to search for in file contents")
@@ -606,7 +611,7 @@ class TaskStopToolParams(BaseModel):
 class TodoItem(BaseModel):
     """A single todo item."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     content: str = Field(min_length=1, description="The todo item content")
     status: Literal["pending", "in_progress", "completed"] = Field(
@@ -614,6 +619,7 @@ class TodoItem(BaseModel):
     )
     active_form: str = Field(
         min_length=1,
+        validation_alias=AliasChoices("active_form", "activeForm"),
         description="The active form of the todo item",
     )
 

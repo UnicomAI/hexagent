@@ -9,6 +9,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 import logging
+
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
@@ -23,12 +24,22 @@ _LOG_DIR = data_dir() / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 _LOG_FILE = _LOG_DIR / "backend.log"
 
+class FlushingStreamHandler(logging.StreamHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+class FlushingFileHandler(logging.FileHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(_LOG_FILE, encoding="utf-8"),
+        FlushingFileHandler(_LOG_FILE, encoding="utf-8"),
     ],
     force=True,
 )

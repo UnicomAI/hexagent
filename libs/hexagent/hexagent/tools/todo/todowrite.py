@@ -8,8 +8,12 @@ from __future__ import annotations
 
 from typing import Literal
 
+import logging
+
 from hexagent.tools.base import BaseAgentTool
 from hexagent.types import TodoItem, TodoWriteToolParams, ToolResult
+
+logger = logging.getLogger(__name__)
 
 
 class TodoWriteTool(BaseAgentTool[TodoWriteToolParams]):
@@ -46,20 +50,30 @@ class TodoWriteTool(BaseAgentTool[TodoWriteToolParams]):
         Returns:
             ToolResult with a summary of the updated todo list.
         """
-        self._todos = list(params.todos)
+        logger.info("TodoWriteTool.execute called with %d items. Raw params: %s", len(params.todos), params)
+        try:
+            self._todos = list(params.todos)
 
-        total = len(self._todos)
-        if total == 0:
-            return ToolResult(output="Todo list cleared.")
+            total = len(self._todos)
+            if total == 0:
+                logger.info("Todo list cleared.")
+                return ToolResult(output="Todo list cleared.")
 
-        by_status: dict[str, int] = {"pending": 0, "in_progress": 0, "completed": 0}
-        for item in self._todos:
-            by_status[item.status] += 1
+            by_status: dict[str, int] = {"pending": 0, "in_progress": 0, "completed": 0}
+            for item in self._todos:
+                if item.status not in by_status:
+                    logger.warning("Unknown todo status: %s", item.status)
+                    by_status[item.status] = 0
+                by_status[item.status] += 1
 
-        summary = (
-            f"Todo list updated: {total} item(s) — "
-            f"{by_status['completed']} completed, "
-            f"{by_status['in_progress']} in progress, "
-            f"{by_status['pending']} pending."
-        )
-        return ToolResult(output=summary)
+            summary = (
+                f"Todo list updated: {total} item(s) — "
+                f"{by_status['completed']} completed, "
+                f"{by_status['in_progress']} in progress, "
+                f"{by_status['pending']} pending."
+            )
+            logger.info("Todo list summary: %s", summary)
+            return ToolResult(output=summary)
+        except Exception as e:
+            logger.exception("Failed to update todo list")
+            return ToolResult(error=f"Failed to update todo list: {str(e)}")

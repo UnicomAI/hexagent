@@ -132,7 +132,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [error, setError] = useState("");
   const [config, setConfig] = useState<ServerConfig | null>(null);
 
-  // 鈹€鈹€ Step 1: Model 鈹€鈹€
+  // ── Step 1: Model ──
   const [selectedProvider, setSelectedProvider] = useState<ProviderOption | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [modelId, setModelId] = useState("");
@@ -141,7 +141,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [showKey, setShowKey] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // 鈹€鈹€ Step 2: Summarizer 鈹€鈹€
+  // ── Step 2: Summarizer ──
   const [sumProvider, setSumProvider] = useState<ProviderOption | null>(null);
   const [sumApiKey, setSumApiKey] = useState("");
   const [sumModelId, setSumModelId] = useState("");
@@ -151,7 +151,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [sumSameAsMain, setSumSameAsMain] = useState(true);
   const [sumShowAdvanced, setSumShowAdvanced] = useState(false);
 
-  // 鈹€鈹€ Step 3: Web Tools 鈹€鈹€
+  // ── Step 3: Web Tools ──
   const [searchProvider, setSearchProvider] = useState("");
   const [searchKey, setSearchKey] = useState("");
   const [fetchProvider, setFetchProvider] = useState("");
@@ -159,9 +159,9 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [showSearchKey, setShowSearchKey] = useState(false);
   const [showFetchKey, setShowFetchKey] = useState(false);
 
-  // 鈹€鈹€ Step 4: Compute 鈹€鈹€
+  // ── Step 4: Compute ──
 
-  // VM setup 鈥?shared with Settings via VMSetupProvider (single source of truth)
+  // VM setup —shared with Settings via VMSetupProvider (single source of truth)
   const vm = useVMSetup();
   const vmAutoBootstrapping = vm.autoBootstrapping;
   const [vmSkipped, setVmSkipped] = useState(false);
@@ -244,7 +244,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
 
   if (!open) return null;
 
-  // 鈹€鈹€ Navigation 鈹€鈹€
+  // ── Navigation ──
   const goNext = () => {
     const idx = stepIndex(step);
     if (idx < STEPS.length - 1) {
@@ -260,7 +260,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
     }
   };
 
-  // 鈹€鈹€ Save all config at the end 鈹€鈹€
+  // ── Save all config at the end ──
   const handleFinish = async () => {
     if (!config) return;
     if (!selectedProvider || !apiKey.trim() || !modelId.trim()) {
@@ -329,7 +329,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
     }
   };
 
-  // 鈹€鈹€ Validation for model step 鈹€鈹€
+  // ── Validation for model step ──
   const isCustomProvider = selectedProvider?.id === "custom";
   const canProceedFromModel =
     selectedProvider &&
@@ -341,7 +341,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
     <div className="setup-overlay">
       <div className="setup-modal">
 
-        {/* 鈹€鈹€ Step 0: Welcome 鈥?Name & Theme 鈹€鈹€ */}
+        {/* ── Step 0: Welcome —Name & Theme ── */}
         {step === "welcome" && (
           <div className="setup-step setup-welcome">
             <div className="setup-welcome-brand">
@@ -390,7 +390,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           </div>
         )}
 
-        {/* 鈹€鈹€ Step 1: Provider selection 鈹€鈹€ */}
+        {/* ── Step 1: Provider selection ── */}
         {step === "provider" && (
           <div className="setup-step">
             <div className="setup-step-header">
@@ -430,7 +430,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           </div>
         )}
 
-        {/* 鈹€鈹€ Step 2: Model credentials 鈹€鈹€ */}
+        {/* ── Step 2: Model credentials ── */}
         {step === "model" && selectedProvider && (
           <div className="setup-step">
             <div className="setup-step-header">
@@ -555,7 +555,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           </div>
         )}
 
-        {/* 鈹€鈹€ Step 2: Summarizer 鈹€鈹€ */}
+        {/* ── Step 2: Summarizer ── */}
         {step === "summarizer" && (
           <div className="setup-step">
             <div className="setup-step-header">
@@ -722,7 +722,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           </div>
         )}
 
-        {/* 鈹€鈹€ Step 3: Web Tools 鈹€鈹€ */}
+        {/* ── Step 3: Web Tools ── */}
         {step === "tools" && (
           <div className="setup-step">
             <div className="setup-step-header">
@@ -838,7 +838,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           </div>
         )}
 
-        {/* 鈹€鈹€ Step 4: Compute 鈹€鈹€ */}
+        {/* ── Step 4: Compute ── */}
         {step === "compute" && (
           <div className="setup-step">
             <div className="setup-step-header">
@@ -1079,7 +1079,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           </div>
         )}
 
-        {/* 鈹€鈹€ Step 5: Done 鈹€鈹€ */}
+        {/* ── Step 5: Done ── */}
         {step === "done" && (
           <div className="setup-step">
             <div className="setup-done-icon">

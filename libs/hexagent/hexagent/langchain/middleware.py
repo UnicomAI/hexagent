@@ -515,4 +515,23 @@ class AgentMiddleware(LangChainAgentMiddleware):
             if not approved:
                 return _create_denied_response(request, "Action denied by user")
 
-        return await handler(request)
+        try:
+            return await handler(request)
+        except Exception as e:
+            logger.exception("Tool execution failed in middleware: %s", tool_name)
+            
+            # Special handling for WebFetch as requested by user
+            error_msg = str(e)
+            if tool_name == "WebFetch":
+                error_msg = (
+                    f"Error executing {tool_name}: {error_msg}. "
+                    "The fetch service is currently unavailable. "
+                    "Please do not try to fetch URLs directly for now; "
+                    "use the WebSearch tool instead to find information."
+                )
+            
+            # Return a ToolMessage instead of raising to keep the agent loop alive
+            return ToolMessage(
+                content=f"Error: {error_msg}",
+                tool_call_id=request.tool_call.get("id", ""),
+            )

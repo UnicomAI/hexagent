@@ -832,13 +832,20 @@ function PptxPreview({
   visible: boolean;
 }) {
   const cacheKey = `${conversationId}:${path}`;
-  const [pdfUrl, setPdfUrl] = useState<string | null>(
-    () => _pptxPdfCache.get(cacheKey) ?? null,
-  );
+  const [pdfUrl, setPdfUrl] = useState<string | null>(() => {
+    const val = _pptxPdfCache.get(cacheKey);
+    return typeof val === "string" ? val : null;
+  });
+  const [images, setImages] = useState<string[] | null>(() => {
+    const val = _pptxPdfCache.get(cacheKey);
+    return Array.isArray(val) ? val : null;
+  });
 
   useEffect(() => {
     if (_pptxPdfCache.has(cacheKey)) {
-      setPdfUrl(_pptxPdfCache.get(cacheKey)!);
+      const val = _pptxPdfCache.get(cacheKey)!;
+      if (Array.isArray(val)) setImages(val);
+      else setPdfUrl(val);
       return;
     }
 
@@ -850,23 +857,49 @@ function PptxPreview({
     fetch(previewEndpoint)
       .then(async (res) => {
         if (!res.ok) throw new Error("server conversion failed");
-        return res.blob();
+        const contentType = res.headers.get("Content-Type");
+        if (contentType?.includes("application/json")) {
+          const data = await res.json();
+          if (data.type === "images") return { type: "images", data: data.images };
+        }
+        return { type: "pdf", data: await res.blob() };
       })
-      .then((blob) => {
-        if (!cancelled) {
-          const url = URL.createObjectURL(blob);
+      .then((result) => {
+        if (cancelled) return;
+        if (result.type === "images") {
+          _pptxPdfCache.set(cacheKey, result.data);
+          setImages(result.data);
+        } else {
+          const url = URL.createObjectURL(result.data as Blob);
           _pptxPdfCache.set(cacheKey, url);
           setPdfUrl(url);
         }
       })
       .catch(() => {
-        // LibreOffice unavailable or failed — client-side render stays
+        // Fallback to client-side render
       });
 
     return () => {
       cancelled = true;
     };
   }, [conversationId, path, cacheKey]);
+
+  if (images) {
+    return (
+      <div className="pdf-viewer">
+        <div className="document-pages pdf-viewer-pages">
+          {images.map((src, i) => (
+            <div key={i} className="document-page pdf-page">
+              <img src={src} style={{ width: "100%", display: "block" }} alt={`Slide ${i + 1}`} />
+              <span className="document-page-number">
+                {i + 1} / {images.length}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   if (pdfUrl) {
     return (
