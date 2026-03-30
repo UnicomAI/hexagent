@@ -116,10 +116,13 @@ class WebFetchTool(BaseAgentTool[WebFetchToolParams]):
                 cache[key] = result
             except (ConfigurationError, WebAPIError) as exc:
                 msg = f"Fetch provider: {exc}"
-                raise ToolError(msg) from exc
+                return ToolResult(error=msg)
             except httpx.HTTPError as exc:
                 msg = f"Fetch for '{params.url}' failed: {exc}"
-                raise ToolError(msg) from exc
+                return ToolResult(error=msg)
+            except Exception as exc:
+                msg = f"An unexpected error occurred while fetching '{params.url}': {exc}"
+                return ToolResult(error=msg)
 
         if not result.content:
             return ToolResult(output="Page returned no content.")

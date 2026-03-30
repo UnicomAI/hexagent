@@ -84,10 +84,13 @@ class WebSearchTool(BaseAgentTool[WebSearchToolParams]):
                 cache[key] = result
             except (ConfigurationError, WebAPIError) as exc:
                 msg = f"Search provider: {exc}"
-                raise ToolError(msg) from exc
+                return ToolResult(error=msg)
             except httpx.HTTPError as exc:
                 msg = f"Search for '{params.query}' failed: {exc}"
-                raise ToolError(msg) from exc
+                return ToolResult(error=msg)
+            except Exception as exc:
+                msg = f"An unexpected error occurred while searching for '{params.query}': {exc}"
+                return ToolResult(error=msg)
 
         if not result.items:
             return ToolResult(output=f'No results found for query: "{params.query}".')

@@ -518,10 +518,12 @@ class AgentMiddleware(LangChainAgentMiddleware):
         try:
             return await handler(request)
         except Exception as e:
-            logger.exception("Tool execution failed in middleware: %s", tool_name)
+            # ToolNode may have already logged the error, but we log it again for clarity
+            logger.error("Tool execution caught in middleware: %s (Error: %s)", tool_name, e)
+            
+            error_msg = str(e)
             
             # Special handling for WebFetch as requested by user
-            error_msg = str(e)
             if tool_name == "WebFetch":
                 error_msg = (
                     f"Error executing {tool_name}: {error_msg}. "
@@ -529,9 +531,18 @@ class AgentMiddleware(LangChainAgentMiddleware):
                     "Please do not try to fetch URLs directly for now; "
                     "use the WebSearch tool instead to find information."
                 )
+            elif tool_name == "WebSearch":
+                error_msg = (
+                    f"Error executing {tool_name}: {error_msg}. "
+                    "The search service is currently experiencing issues. "
+                    "You may try a different query or use other tools."
+                )
+            else:
+                error_msg = f"Error executing {tool_name}: {error_msg}"
             
             # Return a ToolMessage instead of raising to keep the agent loop alive
+            # This ensures that astream_events doesn't die and the agent can continue.
             return ToolMessage(
-                content=f"Error: {error_msg}",
+                content=f"Tool Execution Error: {error_msg}",
                 tool_call_id=request.tool_call.get("id", ""),
             )
