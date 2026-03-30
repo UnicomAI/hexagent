@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Python script executed on the target computer.
 #
-# Receives a base64-encoded JSON payload as sys.argv[1] with keys:
+# Receives a base64-encoded JSON payload via stdin with keys:
 #   fp  — file path
 #   old — old string to find
 #   new — replacement string
@@ -40,11 +40,21 @@ if TYPE_CHECKING:
 _EDIT_SCRIPT = r"""
 import base64, json, sys
 
-params = json.loads(base64.b64decode(sys.argv[1]))
-fp = params["fp"]
-old = params["old"]
-new = params["new"]
-all_ = params["all"]
+try:
+    # Read payload from stdin to avoid WinError 206 (command line too long)
+    raw_payload = sys.stdin.read().strip()
+    if not raw_payload:
+        print("Empty payload received via stdin", file=sys.stderr)
+        sys.exit(1)
+        
+    params = json.loads(base64.b64decode(raw_payload).decode('utf-8'))
+    fp = params["fp"]
+    old = params["old"]
+    new = params["new"]
+    all_ = params["all"]
+except Exception as e:
+    print(f"Failed to parse payload: {e}", file=sys.stderr)
+    sys.exit(1)
 
 if not old:
     print("old_string must not be empty.", file=sys.stderr)
@@ -140,8 +150,8 @@ async def edit_file(
         }
     )
     encoded = base64.b64encode(payload.encode()).decode()
-    command = f"python3 -c {shlex.quote(_EDIT_SCRIPT)} {encoded}"
-    return await computer.run(command)
+    command = f"python3 -c {shlex.quote(_EDIT_SCRIPT)}"
+    return await computer.run(command, input=encoded)
 
 
 class EditTool(BaseAgentTool[EditToolParams]):
