@@ -321,6 +321,14 @@ async def create_agent(
             _connect_mcps(mcp_servers, resources),
         )
 
+        # Log skill discovery results
+        logger.info(
+            "[create_agent] Skill discovery complete: skill_paths=%s, skills_found=%d, skill_names=%s",
+            list(skill_paths),
+            len(skills),
+            [s.name for s in skills],
+        )
+
         # 6. Assemble base tools (synchronous — everything needed is resolved)
         base_tools: list[BaseAgentTool[Any]] = [
             *create_cli_tools(computer, registry),
@@ -367,6 +375,12 @@ async def create_agent(
             mcps=mcp_clients,
             environment=env,
             agents=agents_map,
+        )
+        logger.info(
+            "[create_agent] AgentContext built: tools_count=%d, skills_count=%d, skill_names=%s",
+            len(all_tools),
+            len(ctx.skills),
+            [s.name for s in ctx.skills],
         )
 
         # 11. Compose system prompt
