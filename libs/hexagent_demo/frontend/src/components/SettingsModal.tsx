@@ -528,7 +528,7 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
                     {isDefault && <span className="ml-default-badge">{t("common:default")}</span>}
                   </div>
                   <div className="ml-row-meta">
-                    {preset.label}{m.model ? ` 路 ${m.model}` : ""}
+                    {preset.label}{m.model ? ` · ${m.model}` : ""}
                   </div>
                 </div>
                 <div className="ml-row-actions">
