@@ -10,8 +10,8 @@ How to invoke:
 
 Important:
 - Available skills are listed in system-reminder messages in the conversation
-- When a skill matches the user's request, this is a BLOCKING REQUIREMENT: invoke the relevant Skill tool BEFORE generating any other response about the task. NO EXCEPTIONS are made for "standard" or "common" tasks. 
-- For example, if the user asks for a PPT, you MUST call `skill: "pptx"` first.
+- When users ask you to perform tasks, check if any of the available skills match.
+- **Mandatory for PPT**: For any presentation or slide-related task, you MUST invoke the `pptx` skill first before taking any other action. 
 - NEVER mention a skill without actually calling this tool
 - Do not invoke a skill that is already running
 - If you see a <command-name> tag in the current conversation turn, the skill has ALREADY been loaded - follow the instructions directly instead of calling this tool again
