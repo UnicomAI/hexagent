@@ -122,12 +122,14 @@ class _VMSessionComputer(AsyncComputerMixin):
         command: str,
         *,
         timeout: float | None = None,  # noqa: ASYNC109
+        input: str | None = None,
     ) -> CLIResult:
         """Execute a command as the session user.
 
         Args:
             command: Shell command to run.
             timeout: Timeout in milliseconds (Computer protocol).
+            input: Optional stdin to pass to the command.
 
         Returns:
             CLIResult with stdout, stderr, exit_code, and metadata.
@@ -140,6 +142,7 @@ class _VMSessionComputer(AsyncComputerMixin):
                 user=self._session_name,
                 cwd=self._default_cwd,
                 timeout=timeout_ms / 1000,
+                input=input,
             )
         except VMError as e:
             raise CLIError(str(e)) from e

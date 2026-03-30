@@ -85,7 +85,13 @@ class Computer(Protocol):
         """Start the computer. Idempotent."""
         ...
 
-    async def run(self, command: str, *, timeout: float | None = None) -> CLIResult:  # noqa: ASYNC109
+    async def run(
+        self,
+        command: str,
+        *,
+        timeout: float | None = None,
+        input: str | None = None,
+    ) -> CLIResult:  # noqa: ASYNC109
         """Execute a command. Auto-starts if needed."""
         ...
 

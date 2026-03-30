@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import json
+import shlex
 from typing import TYPE_CHECKING, Literal
 
 from hexagent.exceptions import CLI_INFRA_ERROR_SYSTEM_REMINDER, CLIError
@@ -40,145 +41,56 @@ if TYPE_CHECKING:
 # avoids the need to double-brace all Python braces in the template.
 # ---------------------------------------------------------------------------
 
-_WRITE_SCRIPT_TEMPLATE = """\
-python3 <<'__WRITE_PYEOF__'
-import base64, json, os, sys
-
-data = json.loads(base64.b64decode("BASE64_PLACEHOLDER"))
-path = data["path"]
-content = data["content"]
-
+_WRITE_SCRIPT_TEMPLATE = r"""
+import sys, base64, json, os
 try:
-    existed = os.path.isfile(path) and os.path.getsize(path) > 0
-    parent = os.path.dirname(os.path.abspath(path))
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(path, "w") as f:
+    # Read base64 payload from stdin to avoid command line length limits (WinError 206)
+    raw_payload = sys.stdin.read().strip()
+    if not raw_payload:
+        print("ERR@@WRITE@@Empty payload received via stdin")
+        sys.exit(1)
+    payload = json.loads(base64.b64decode(raw_payload).decode('utf-8'))
+    path = payload['path']
+    content = payload['content']
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
         f.write(content)
-except Exception as exc:
-    print(str(exc), file=sys.stderr)
+    print("OK@@WRITE@@File written successfully")
+except Exception as e:
+    print(f"ERR@@WRITE@@{str(e)}")
     sys.exit(1)
-
-if not existed:
-    print("File created successfully at: " + path)
-else:
-    with open(path) as f:
-        lines = f.readlines()
-    numbered = ""
-    for i, line in enumerate(lines, 1):
-        numbered += "%6d\\t%s" % (i, line.rstrip("\\n")) + "\\n"
-    print("The file " + path + " has been updated. Here's the result of running `cat -n` on a snippet of the edited file:")
-    print(numbered, end="")
-__WRITE_PYEOF__"""
-
-
-def _build_write_command(file_path: str, content: str) -> str:
-    """Build the shell command to write *content* to *file_path*.
-
-    The content is JSON-serialised together with the path, base64-encoded,
-    and embedded in a Python script delivered via a single-quoted heredoc.
-    This guarantees that no shell interpretation occurs on the content
-    regardless of what characters it contains.
-
-    Args:
-        file_path: Absolute path to the target file.
-        content: The text content to write.
-
-    Returns:
-        A shell command string safe for ``computer.run()``.
-    """
-    payload = json.dumps({"path": file_path, "content": content})
-    b64 = base64.b64encode(payload.encode()).decode()
-    return _WRITE_SCRIPT_TEMPLATE.replace("BASE64_PLACEHOLDER", b64)
-
-
-async def run_write(computer: Computer, file_path: str, content: str) -> CLIResult:
-    """Write *content* to *file_path* on *computer*.
-
-    Creates parent directories as needed.  Returns a :class:`CLIResult`
-    whose *stdout* contains a human-readable status message on success,
-    or whose *stderr* / *exit_code* describe the failure.
-
-    Args:
-        computer: The Computer to execute the write on.
-        file_path: Absolute path to the target file.
-        content: The text content to write.
-
-    Returns:
-        CLIResult with the outcome of the write operation.
-
-    Raises:
-        CLIError: If the computer infrastructure itself fails.
-    """
-    command = _build_write_command(file_path, content)
-    return await computer.run(command)
+"""
 
 
 class WriteTool(BaseAgentTool[WriteToolParams]):
-    """Tool for writing content to files.
-
-    Delegates the actual write to :func:`run_write` and converts the
-    resulting :class:`CLIResult` into a :class:`ToolResult`.
-
-    Attributes:
-        name: Tool name for API registration.
-        description: Tool description for LLM.
-        args_schema: Pydantic model for input validation.
-
-    Examples:
-        Basic usage:
-        ```python
-        computer = LocalNativeComputer()
-        tool = WriteTool(computer)
-        result = await tool(file_path="/tmp/hello.txt", content="Hello!")
-        print(result.output)  # "File created successfully at: /tmp/hello.txt"
-        ```
-    """
+    """Tool for writing content to a file."""
 
     name: Literal["Write"] = "Write"
-    description: str = "Write content to a file. Creates parent directories as needed."
+    description: str = "Write content to a file. Overwrites if exists."
     args_schema = WriteToolParams
 
-    def __init__(self, computer: Computer) -> None:
-        """Initialize the WriteTool.
-
-        Args:
-            computer: The Computer instance to execute commands on.
-        """
-        self._computer = computer
-
     async def execute(self, params: WriteToolParams) -> ToolResult:
-        """Write content to a file.
+        """Execute the write operation."""
+        # Check if we are in a session to resolve paths
+        computer = self.context.get("computer")
+        if not computer:
+            return ToolResult(error="No computer session active")
 
-        Args:
-            params: Validated parameters containing file_path and content.
+        # Build payload
+        payload = json.dumps({"path": params.file_path, "content": params.content})
+        b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")
 
-        Returns:
-            ToolResult with output on success, or error on failure.
-            Never both — output and error are mutually exclusive.
-        """
-        if not params.file_path.startswith("/"):
-            return ToolResult(
-                error=f"file_path must be an absolute path (starts with /), got: {params.file_path}",
-            )
+        # Execute via python script on the guest, passing payload via stdin
+        cmd = f"python3 -c {shlex.quote(_WRITE_SCRIPT_TEMPLATE)}"
+        result = await computer.run(cmd, input=b64_payload)
 
-        try:
-            result: CLIResult = await run_write(
-                self._computer,
-                params.file_path,
-                params.content,
-            )
-        except CLIError as exc:
-            return ToolResult(error=str(exc), system=CLI_INFRA_ERROR_SYSTEM_REMINDER)
+        if result.exit_code != 0:
+            return ToolResult(error=result.stderr or result.stdout or "Unknown error during write")
 
-        if result.exit_code == 0:
-            parts = [p for p in (result.stdout, result.stderr) if p]
-            return ToolResult(output="\n".join(parts) if parts else "")
+        output = result.stdout.strip()
+        if output.startswith("OK@@WRITE@@"):
+            return ToolResult(output=output.removeprefix("OK@@WRITE@@"))
+        if output.startswith("ERR@@WRITE@@"):
+            return ToolResult(error=output.removeprefix("ERR@@WRITE@@"))
 
-        # Non-zero exit: exit code + stderr (tightly coupled), then stdout
-        error = f"Exit code {result.exit_code}"
-        if result.stderr:
-            error += f"\n{result.stderr}"
-        if result.stdout:
-            error += f"\n\n{result.stdout}"
-        return ToolResult(error=error)
+        return ToolResult(error=f"Unexpected output from write script: {output}")

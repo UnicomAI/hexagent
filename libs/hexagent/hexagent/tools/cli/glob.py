@@ -47,7 +47,7 @@ files = []
 for p in pats:
     for f in d.glob(p):
         s = str(f)
-        if f.is_file() and s not in seen:
+        if s not in seen:
             seen.add(s)
             try:
                 mt = f.stat().st_mtime

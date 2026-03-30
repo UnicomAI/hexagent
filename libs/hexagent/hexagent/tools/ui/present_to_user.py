@@ -133,7 +133,14 @@ def get_mime(fp):
 
 for fp in filepaths:
     if not os.path.exists(fp):
-        print(f"ERR{{delim}}Path does not exist: {{fp}}")
+        # Help the agent find the file if it made a typo
+        parent = os.path.dirname(fp)
+        suggestion = ""
+        if os.path.exists(parent) and os.path.isdir(parent):
+            files = os.listdir(parent)
+            if files:
+                suggestion = f". Files in directory '{parent}': " + ", ".join(files[:10])
+        print(f"ERR{{delim}}Path does not exist: {{fp}}{{suggestion}}")
         continue
     if not os.path.isfile(fp):
         print(f"ERR{{delim}}Path is not a file: {{fp}}")
