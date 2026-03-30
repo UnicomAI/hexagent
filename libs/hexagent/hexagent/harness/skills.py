@@ -8,6 +8,7 @@ skill content on demand (always fresh from disk).
 from __future__ import annotations
 
 import logging
+import shlex
 from typing import TYPE_CHECKING
 
 from hexagent.exceptions import SkillError
@@ -100,23 +101,47 @@ class SkillResolver:
         self._skills.clear()
         discovered: list[Skill] = []
 
+        logger.info("Starting skill discovery in %d paths: %s", len(self._search_paths), self._search_paths)
+
         for base_path in self._search_paths:
-            # Single batched command: find SKILL.md or skill.md files,
-            # print delimiter + directory path + file content for each.
-            # Uses shell glob (no `find` dependency) and quoting.
-            # Iterates both casing variants; only the first match per
-            # directory wins because duplicates are filtered downstream.
-            globs = " ".join(f'"{base_path}"/*/{name}' for name in _SKILL_FILENAMES)
-            cmd = f'for f in {globs}; do [ -f "$f" ] && printf "{_SKILL_DELIMITER}:%s\\n" "$(dirname "$f")" && cat "$f" && printf "\\n"; done'
+            # Single batched command using 'find':
+            # 1. -maxdepth 2 -mindepth 2: Look exactly in search_path/*/file.md
+            # 2. \( -name ... -o -name ... \): Match either SKILL.md or skill.md
+            # 3. -printf: Print delimiter and the directory (%h)
+            # 4. -exec cat: Print the file content
+            # 
+            # This avoids shell glob issues and nested shell escaping bugs ($1).
+            qbase = shlex.quote(base_path)
+            name_filters = " -o ".join(f'-name "{name}"' for name in _SKILL_FILENAMES)
+            cmd = (
+                f"find {qbase} -maxdepth 2 -mindepth 2 "
+                f"\\( {name_filters} \\) "
+                f'-printf "{_SKILL_DELIMITER}:%h\\n" -exec cat {{}} \\; -printf "\\n"'
+            )
+            
+            logger.debug("Scanning path %s with command: %s", base_path, cmd)
             result = await self._computer.run(cmd)
-            if result.exit_code != 0 or not result.stdout.strip():
+            
+            # find returns 0 even if no files match. We only care about output.
+            if result.exit_code != 0:
+                logger.warning("Skill discovery command failed in %s (exit %d): %s", base_path, result.exit_code, result.stderr)
                 continue
+
+            if not result.stdout.strip():
+                logger.info("No skill files found in %s", base_path)
+                continue
+
+            logger.debug("Raw discovery output from %s:\n%s", base_path, result.stdout)
 
             # Parse batched output into individual skill chunks.
             # A directory may appear twice (SKILL.md + skill.md); first wins.
             seen_dirs: set[str] = set()
-            for skill_dir, raw_content in self._parse_batch_output(result.stdout):
+            chunks = self._parse_batch_output(result.stdout)
+            logger.info("Found %d potential skill chunks in %s", len(chunks), base_path)
+
+            for skill_dir, raw_content in chunks:
                 if skill_dir in seen_dirs:
+                    logger.debug("Skipping duplicate directory: %s", skill_dir)
                     continue
                 seen_dirs.add(skill_dir)
 
@@ -125,15 +150,17 @@ class SkillResolver:
                     # Spec requires name to match the directory name
                     dir_basename = skill_dir.rsplit("/", 1)[-1]
                     validate_skill_dir_name(spec.frontmatter.name, dir_basename)
-                except SkillError:
-                    logger.warning("Skipping %s: invalid SKILL.md", skill_dir)
+                except SkillError as e:
+                    logger.warning("Skipping %s: invalid SKILL.md or directory mismatch. Error: %s", skill_dir, str(e))
                     continue
 
                 fm = spec.frontmatter
                 skill = Skill(name=fm.name, description=fm.description, path=skill_dir)
+                logger.info("Discovered skill: %s (at %s)", fm.name, skill_dir)
                 self._skills[fm.name] = skill
                 discovered.append(skill)
 
+        logger.info("Discovery complete. Total skills found: %d", len(discovered))
         return discovered
 
     async def load_content(self, name: str) -> str:
