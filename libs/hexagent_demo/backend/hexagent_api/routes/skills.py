@@ -76,11 +76,13 @@ async def list_skills() -> dict[str, list[str]]:
     """
     inactive_public = _list_skills(INACTIVE_DIR / "public")
     inactive_private = _list_skills(INACTIVE_DIR / "private")
+    # Use set-union to avoid duplicate rows when a skill appears in both
+    # active and inactive roots (possible for bundled public skills).
     return {
-        "public": sorted(_list_skills(PUBLIC_DIR) + inactive_public),
-        "private": sorted(_list_skills(PRIVATE_DIR) + inactive_private),
+        "public": sorted(set(_list_skills(PUBLIC_DIR)) | set(inactive_public)),
+        "private": sorted(set(_list_skills(PRIVATE_DIR)) | set(inactive_private)),
         "examples": _list_skills(EXAMPLES_DIR),
-        "disabled": inactive_public + inactive_private,
+        "disabled": sorted(set(inactive_public + inactive_private)),
     }
 
 
@@ -305,16 +307,26 @@ async def _sync_skill_to_vm(skill_name: str, subdir: str, enabled: bool) -> None
 async def toggle_skill(skill_name: str, body: ToggleRequest) -> dict[str, bool]:
     """Enable or disable a skill by moving it between active/inactive dirs."""
     if body.enabled:
-        # Move from skills-inactive/ back to the appropriate active directory
+        # Move from skills-inactive/ back to the appropriate active directory.
         for subdir, active_dir in _ACTIVE_DIRS.items():
             inactive_path = INACTIVE_DIR / subdir / skill_name
-            if inactive_path.is_dir():
+            if not inactive_path.is_dir():
+                continue
+
+            if subdir == "public":
+                # Bundled public skills live in app resources and should not be
+                # moved from user data. Enabling just removes the inactive flag.
+                shutil.rmtree(inactive_path)
+            else:
                 dest = active_dir / skill_name
                 dest.parent.mkdir(parents=True, exist_ok=True)
+                if dest.exists():
+                    shutil.rmtree(dest)
                 shutil.move(str(inactive_path), str(dest))
-                logger.info("Skill enabled: %s", skill_name)
-                await _sync_skill_to_vm(skill_name, subdir, enabled=True)
-                return {"enabled": True}
+
+            logger.info("Skill enabled: %s", skill_name)
+            await _sync_skill_to_vm(skill_name, subdir, enabled=True)
+            return {"enabled": True}
         raise HTTPException(status_code=404, detail=f"Inactive skill not found: {skill_name}")
     else:
         # Move from active directory to skills-inactive/
@@ -323,7 +335,18 @@ async def toggle_skill(skill_name: str, body: ToggleRequest) -> dict[str, bool]:
             if active_path.is_dir():
                 dest = INACTIVE_DIR / subdir / skill_name
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(active_path), str(dest))
+
+                if subdir == "public":
+                    # Public skills are bundled under installation resources
+                    # (often read-only). Keep files in place and use the
+                    # inactive dir as a marker for disabled state.
+                    if not dest.exists():
+                        dest.mkdir(parents=True, exist_ok=True)
+                else:
+                    if dest.exists():
+                        shutil.rmtree(dest)
+                    shutil.move(str(active_path), str(dest))
+
                 logger.info("Skill disabled: %s", skill_name)
                 await _sync_skill_to_vm(skill_name, subdir, enabled=False)
                 return {"enabled": False}
