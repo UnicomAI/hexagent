@@ -10,6 +10,7 @@ pipeline runs: intercepts -> appenders -> image extraction -> annotators.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, NotRequired
@@ -536,6 +537,10 @@ class AgentMiddleware(LangChainAgentMiddleware):
 
         try:
             return await handler(request)
+        except asyncio.CancelledError:
+            # Re-raise cancellation so the agent loop actually stops.
+            logger.info("Tool execution cancelled for %s", tool_name)
+            raise
         except Exception as e:
             # ToolNode may have already logged the error, but we log it again for clarity
             logger.error("Tool execution caught in middleware: %s (Error: %s)", tool_name, e)

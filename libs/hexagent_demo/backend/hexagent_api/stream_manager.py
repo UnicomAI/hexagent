@@ -141,7 +141,9 @@ class StreamManager:
                 stream.push(event_str)
         except asyncio.CancelledError:
             logger.info("Stream cancelled for %s", stream.conversation_id)
-            status = "error"
+            # Send an interrupt event to the frontend before closing
+            stream.push("event: message_interrupt\ndata: {}\n\n")
+            status = "done"  # It's an intentional interrupt, not a fatal error
         except Exception:
             logger.exception(
                 "Background stream error for %s", stream.conversation_id

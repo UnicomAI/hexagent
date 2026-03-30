@@ -23,8 +23,12 @@ import os
 import shlex
 import sys
 from typing import Any
-
 from collections.abc import AsyncIterator
+
+import aiosqlite
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from hexagent.tasks import TaskRegistry
+from hexagent_api.paths import checkpoints_dir
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,10 @@ class AgentManager:
         self._setup_lock = asyncio.Lock()
         # Per-cache-key locks to prevent duplicate agent creation
         self._agent_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        # conversation_id -> AsyncSqliteSaver
+        self._checkpointers: dict[str, AsyncSqliteSaver] = {}
+        # conversation_id -> TaskRegistry
+        self._task_registries: dict[str, TaskRegistry] = {}
         # session_name -> (working_dir_source, mount_target)
         self._session_working_dirs: dict[str, tuple[str, str]] = {}
         # Background warm-up task: auto-start VM manager after app startup.
@@ -540,15 +548,64 @@ class AgentManager:
             LangGraph v2 event dicts.
         """
         agent, _ = await self._get_or_create_agent(model_id, mode, session_name)
+
+        # Ensure per-conversation persistent checkpointer
+        if conversation_id not in self._checkpointers:
+            db_path = checkpoints_dir() / f"{conversation_id}.sqlite"
+            # Note: AsyncSqliteSaver.from_conn_string(str(db_path)) works for standard sqlite
+            # But we use the aio version for better performance in FastAPI.
+            conn = await aiosqlite.connect(str(db_path))
+            # We don't use 'async with' here because we want to keep it open
+            # until the agent manager is stopped or the conversation is closed.
+            saver = AsyncSqliteSaver(conn)
+            await saver.setup()
+            self._checkpointers[conversation_id] = saver
+
+        saver = self._checkpointers[conversation_id]
+        
+        # Ensure per-conversation task registry
+        if conversation_id not in self._task_registries:
+            self._task_registries[conversation_id] = TaskRegistry()
+        registry = self._task_registries[conversation_id]
+
+        # Use with_checkpointer to create a conversation-specific graph
+        agent = agent.with_checkpointer(saver, task_registry=registry)
+
         config = {"configurable": {"thread_id": conversation_id}, "recursion_limit": 10_000}
+
+        # Check if the graph has an active checkpoint. If so, LangGraph automatically
+        # resumes from the last state if input_dict is empty or None.
+        # But our input_dict always contains 'messages'. LangGraph handles this by
+        # appending the messages to the existing history.
         async for event in agent.astream_events(input_dict, config=config):
             yield event
+
+    async def cancel_conversation(self, conversation_id: str) -> None:
+        """Cancel all background tasks for a conversation."""
+        if conversation_id in self._task_registries:
+            registry = self._task_registries[conversation_id]
+            logger.info("Cancelling all background tasks for conversation %s...", conversation_id)
+            await registry.cancel_all()
 
     async def stop(self) -> None:
         """Shut down all agents and computers."""
         if self._vm_warm_task is not None and not self._vm_warm_task.done():
             self._vm_warm_task.cancel()
             self._vm_warm_task = None
+
+        # Close all checkpointers
+        for conv_id, saver in self._checkpointers.items():
+            logger.info("Closing checkpointer for conversation %s...", conv_id)
+            try:
+                # AsyncSqliteSaver has a connection that should be closed.
+                # It doesn't have an explicit 'close' method in some versions,
+                # but we should close the aiosqlite connection.
+                if hasattr(saver, "conn") and saver.conn:
+                    await saver.conn.close()
+            except Exception:
+                logger.exception("Error closing checkpointer for %s", conv_id)
+        self._checkpointers.clear()
+
         for key, agent in self._agents.items():
             logger.info("Closing agent for %s...", key)
             await agent.aclose()

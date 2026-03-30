@@ -8,6 +8,7 @@ in state["messages"] by the middleware, not by LangChain's auto-prepend.
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 from contextlib import AsyncExitStack
 from dataclasses import replace
@@ -85,6 +86,7 @@ class Agent:
         system_prompt: str,
         task_registry: TaskRegistry,
         computer: Computer | None = None,
+        middleware: list[AgentMiddleware] | None = None,
     ) -> None:
         """Initialize the agent with context, graph, and resources."""
         self._context = context
@@ -93,6 +95,7 @@ class Agent:
         self._system_prompt = system_prompt
         self._task_registry = task_registry
         self._computer = computer
+        self._middleware = middleware or []
 
     @property
     def model(self) -> ModelProfile:
@@ -139,6 +142,102 @@ class Agent:
         """The underlying LangGraph compiled graph."""
         return self._graph
 
+    @property
+    def task_registry(self) -> TaskRegistry:
+        """The agent's task registry for managing background work."""
+        return self._task_registry
+
+    def with_checkpointer(
+        self,
+        checkpointer: Checkpointer | None,
+        task_registry: TaskRegistry | None = None,
+    ) -> Agent:
+        """Return a copy of the agent using a different checkpointer and registry.
+
+        The new agent shares the same context and resources but has a
+        different compiled graph.  This is useful for conversation-specific
+        persistence and task isolation while reusing MCP connections and tools.
+        """
+        registry = task_registry or self._task_registry
+
+        # 1. Clone tools and swap registry if they have one.
+        # This ensures background tasks are associated with the correct registry.
+        new_tools = []
+        for tool in self._context.tools:
+            # We check for both _registry and registry (different tool versions)
+            if hasattr(tool, "_registry") or hasattr(tool, "registry"):
+                cloned_tool = copy.copy(tool)
+                if hasattr(cloned_tool, "_registry"):
+                    cloned_tool._registry = registry
+                if hasattr(cloned_tool, "registry"):
+                    cloned_tool.registry = registry
+                
+                # Special handling for AgentTool: isolate its runner's tools too
+                if isinstance(cloned_tool, AgentTool):
+                    cloned_runner = copy.copy(cloned_tool._runner)
+                    if hasattr(cloned_runner, "_base_tools"):
+                        # Clone the base tools list for the subagent runner
+                        cloned_base_tools = []
+                        for t in cloned_runner._base_tools:
+                            if hasattr(t, "_registry") or hasattr(t, "registry"):
+                                ct = copy.copy(t)
+                                if hasattr(ct, "_registry"):
+                                    ct._registry = registry
+                                if hasattr(ct, "registry"):
+                                    ct.registry = registry
+                                cloned_base_tools.append(ct)
+                            else:
+                                cloned_base_tools.append(t)
+                        cloned_runner._base_tools = cloned_base_tools
+                    cloned_tool._runner = cloned_runner
+                
+                new_tools.append(cloned_tool)
+            else:
+                new_tools.append(tool)
+
+        # 2. Update AgentContext with isolated tools
+        new_ctx = replace(self._context, tools=new_tools)
+
+        # 3. Clone and update the middleware to use the new context.
+        # We assume the first middleware is the main HexAgent middleware.
+        new_middleware_list = []
+        for m in self._middleware:
+            if isinstance(m, AgentMiddleware):
+                # Re-initialize the middleware with the new context.
+                # Note: We rely on AgentMiddleware constructor being pure.
+                cloned_m = AgentMiddleware(
+                    context=new_ctx,
+                    system_prompt=self._system_prompt,
+                    permission_gate=m._permission_gate,
+                    approval_callback=m._approval_callback,
+                    environment_resolver=m._environment_resolver,
+                    skill_resolver=m._skill_resolver,
+                    reminders=m._reminders,
+                    prompt_profile=m._prompt_profile,
+                    custom_prompt=m._custom_prompt,
+                )
+                new_middleware_list.append(cloned_m)
+            else:
+                new_middleware_list.append(m)
+
+        # 4. Re-compile the graph with the new checkpointer and middleware.
+        new_graph: CompiledStateGraph[Any] = _create_langchain_agent(
+            self._context.model.model,
+            middleware=new_middleware_list,
+            checkpointer=checkpointer,
+            name="HexAgent",
+        ).with_config({"recursion_limit": 10_000})
+
+        return Agent(
+            new_ctx,
+            new_graph,
+            self._resources,
+            system_prompt=self._system_prompt,
+            task_registry=registry,
+            computer=self._computer,
+            middleware=new_middleware_list,
+        )
+
     async def ainvoke(
         self,
         input: dict[str, Any],  # noqa: A002
@@ -162,6 +261,8 @@ class Agent:
         self,
         input: dict[str, Any],  # noqa: A002
         config: RunnableConfig | None = None,
+        interrupt_before: Sequence[str] | None = None,
+        interrupt_after: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[Any]:
         """Stream detailed events including subagent internals.
@@ -171,6 +272,12 @@ class Agent:
         propagate through the shared callback infrastructure and appear
         in this stream alongside the parent's own events.
         """
+        config = config or {}
+        if interrupt_before:
+            config["interrupt_before"] = interrupt_before
+        if interrupt_after:
+            config["interrupt_after"] = interrupt_after
+
         async for event in self._graph.astream_events(input, config, version="v2", **kwargs):
             yield event
 
@@ -423,6 +530,7 @@ async def create_agent(
             system_prompt=assembled_prompt,
             task_registry=registry,
             computer=computer,
+            middleware=[middleware],
         )
 
     except BaseException:

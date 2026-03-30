@@ -546,12 +546,24 @@ class WslVM:
                 process.communicate(input=input.encode() if input is not None else None),
                 timeout=timeout,
             )
-        except TimeoutError:
-            process.kill()
-            await process.wait()
+        except (TimeoutError, asyncio.TimeoutError):
+            if process.returncode is None:
+                try:
+                    process.terminate()
+                    await process.wait()
+                except ProcessLookupError:
+                    pass
             msg = f"timed out after {timeout}s"
             wsl_log("WSL Shell TIMEOUT (Instance: %s): %s", self._instance, msg, level=logging.ERROR)
             raise WslError(msg) from None
+        except asyncio.CancelledError:
+            if process.returncode is None:
+                try:
+                    process.terminate()
+                    await process.wait()
+                except ProcessLookupError:
+                    pass
+            raise
 
         stdout = _decode_wsl_output(stdout_bytes).removesuffix("\n")
         stderr = _decode_wsl_output(stderr_bytes).removesuffix("\n")
@@ -628,12 +640,24 @@ class WslVM:
                 proc.communicate(),
                 timeout=timeout,
             )
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
+        except (TimeoutError, asyncio.TimeoutError):
+            if proc.returncode is None:
+                try:
+                    proc.terminate()
+                    await proc.wait()
+                except ProcessLookupError:
+                    pass
             msg = f"wsl.exe timed out after {timeout}s: {' '.join(cmd[:3])}"
             wsl_log("WSL.exe TIMEOUT (Instance: %s): %s", self._instance, msg, level=logging.ERROR)
             raise WslError(msg) from None
+        except asyncio.CancelledError:
+            if proc.returncode is None:
+                try:
+                    proc.terminate()
+                    await proc.wait()
+                except ProcessLookupError:
+                    pass
+            raise
 
         stdout = _decode_wsl_output(stdout_bytes)
         stderr = _decode_wsl_output(stderr_bytes)

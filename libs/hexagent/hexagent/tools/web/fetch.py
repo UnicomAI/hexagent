@@ -5,6 +5,7 @@ Provides WebFetchTool for agents to fetch and extract web page content.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Final, Literal
 
 import httpx
@@ -117,6 +118,8 @@ class WebFetchTool(BaseAgentTool[WebFetchToolParams]):
             except (ConfigurationError, WebAPIError) as exc:
                 msg = f"Fetch provider: {exc}"
                 return ToolResult(error=msg)
+            except asyncio.CancelledError:
+                raise
             except httpx.HTTPError as exc:
                 msg = f"Fetch for '{params.url}' failed: {exc}"
                 return ToolResult(error=msg)

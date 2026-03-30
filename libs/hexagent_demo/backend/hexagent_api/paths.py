@@ -78,6 +78,13 @@ def uploads_dir() -> Path:
     return Path(tempfile.gettempdir()) / f"{_PROJECT_DIR_NAME}_uploads"
 
 
+def checkpoints_dir() -> Path:
+    """Persistent directory for LangGraph conversation checkpoints."""
+    path = data_dir() / "checkpoints"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def pdf_cache_dir() -> Path:
     """Cache directory for LibreOffice PDF conversions."""
     return Path(tempfile.gettempdir()) / f"{_PROJECT_DIR_NAME}_pdf_cache"

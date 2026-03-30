@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Paperclip, ArrowUp, ArrowDown, X, FileText, Loader2, CircleAlert } from "lucide-react";
+import { Paperclip, ArrowUp, ArrowDown, X, FileText, Loader2, CircleAlert, Square } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAppContext } from "../store";
-import { uploadChatFile, deleteChatFile } from "../api";
+import { uploadChatFile, deleteChatFile, interruptChat } from "../api";
 import { useFileDrop } from "../hooks/useFileDrop";
 import ModelPicker from "./ModelPicker";
 import InputSettingsMenu from "./InputSettingsMenu";
@@ -107,6 +107,15 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
       textareaRef.current.style.height = "auto";
     }
   }, [value, doneFiles, anyUploading, state.streamingByConversation, conversationId, isPreparingRequest, onSend, missingE2bKey, flashE2bHint]);
+
+  const handleInterrupt = useCallback(async () => {
+    try {
+      await interruptChat(conversationId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("interruptFailed");
+      dispatch({ type: "SHOW_NOTIFICATION", payload: { message, type: "error" } });
+    }
+  }, [conversationId, dispatch, t]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -299,14 +308,24 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
             <div className="input-toolbar-right">
               <ModelPicker dropUp />
               <div className="input-send-wrapper">
-                <button
-                  className="input-send"
-                  onClick={handleSubmit}
-                  disabled={(!value.trim() && doneFiles.length === 0) || !!state.streamingByConversation[conversationId] || isPreparingRequest || anyUploading || noModels || missingE2bKey}
-                  title={noModels ? t("configureModel") : isPreparingRequest ? t("preparingRequest") : t("sendMessage")}
-                >
-                  {isPreparingRequest ? <Loader2 className="model-save-spinner" /> : <ArrowUp />}
-                </button>
+                {state.streamingByConversation[conversationId] ? (
+                  <button
+                    className="input-stop"
+                    onClick={handleInterrupt}
+                    title={t("stopGeneration")}
+                  >
+                    <Square size={16} fill="currentColor" />
+                  </button>
+                ) : (
+                  <button
+                    className="input-send"
+                    onClick={handleSubmit}
+                    disabled={(!value.trim() && doneFiles.length === 0) || isPreparingRequest || anyUploading || noModels || missingE2bKey}
+                    title={noModels ? t("configureModel") : isPreparingRequest ? t("preparingRequest") : t("sendMessage")}
+                  >
+                    {isPreparingRequest ? <Loader2 className="model-save-spinner" /> : <ArrowUp />}
+                  </button>
+                )}
                 {isPreparingRequest && (
                   <div className="mount-hint mount-hint-visible">
                     <Loader2 size={12} className="model-save-spinner" />

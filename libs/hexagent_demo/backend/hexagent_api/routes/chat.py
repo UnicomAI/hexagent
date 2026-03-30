@@ -494,6 +494,26 @@ async def send_message(conversation_id: str, body: MessageRequest) -> StreamingR
     return StreamingResponse(sse_subscriber(), media_type="text/event-stream")
 
 
+@router.post("/api/chat/{conversation_id}/interrupt")
+async def interrupt_chat(conversation_id: str) -> dict[str, str]:
+    """Manually interrupt an active agent stream."""
+    stream = stream_manager.get_stream(conversation_id)
+    if not stream or stream.status != "streaming":
+        return {"status": "no active stream"}
+
+    if not stream._task.done():
+        logger.info("Interrupting active stream for conversation %s", conversation_id)
+        # 1. Cancel the background task running the agent stream
+        stream._task.cancel()
+        
+        # 2. Force-cancel any background tasks in the conversation's registry (bash, subagents, etc.)
+        await agent_manager.cancel_conversation(conversation_id)
+        
+        return {"status": "interrupted"}
+
+    return {"status": "already finished"}
+
+
 @router.get("/api/chat/{conversation_id}/stream")
 async def subscribe_stream(
     conversation_id: str,

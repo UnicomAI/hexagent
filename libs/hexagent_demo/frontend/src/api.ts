@@ -102,6 +102,11 @@ export async function deleteConversation(id: string): Promise<void> {
   if (!res.ok) throw new Error(`Failed to delete conversation: ${res.statusText}`);
 }
 
+export async function interruptChat(conversationId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/chat/${conversationId}/interrupt`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to interrupt chat: ${res.statusText}`);
+}
+
 export interface StreamCallbacks {
   onMessageStart: (id: string) => void;
   onTextDelta: (delta: string, ts?: number) => void;
@@ -115,6 +120,7 @@ export interface StreamCallbacks {
   onSubagentToolStart: (data: { task_id: string; id: string; name: string; input: Record<string, unknown> }) => void;
   onSubagentToolResult: (data: { task_id: string; id: string; output: string }) => void;
   onMessageEnd: (id: string) => void;
+  onInterrupt?: () => void;
   onError: (error: string) => void;
 }
 
@@ -180,6 +186,9 @@ async function _parseSSEStream(
               break;
             case "message_end":
               callbacks.onMessageEnd(data.id);
+              break;
+            case "message_interrupt":
+              callbacks.onInterrupt?.();
               break;
             case "error":
               callbacks.onError(data.message);

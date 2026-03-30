@@ -2290,7 +2290,8 @@
   color: var(--text-secondary);
 }
 
-.input-send {
+.input-send,
+.input-stop {
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -2301,12 +2302,18 @@
   transition: all 200ms ease;
 }
 
-.input-send:hover:not(:disabled) {
+.input-stop {
+  background: var(--accent-red, #ef4444);
+}
+
+.input-send:hover:not(:disabled),
+.input-stop:hover:not(:disabled) {
   opacity: 0.85;
   transform: translateY(-1px);
 }
 
-.input-send:active:not(:disabled) {
+.input-send:active:not(:disabled),
+.input-stop:active:not(:disabled) {
   transform: translateY(0) scale(0.95);
 }
 
@@ -2315,7 +2322,8 @@
   cursor: not-allowed;
 }
 
-.input-send svg {
+.input-send svg,
+.input-stop svg {
   width: 15px;
   height: 15px;
   color: var(--bg-primary);

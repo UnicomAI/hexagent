@@ -3,6 +3,15 @@ revision = 3
 requires-python = ">=3.12"
 
 [[package]]
+name = "aiosqlite"
+version = "0.22.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4e/8a/64761f4005f17809769d23e518d915db74e6310474e733e3593cfc854ef1/aiosqlite-0.22.1.tar.gz", hash = "sha256:043e0bd78d32888c0a9ca90fc788b38796843360c855a7262a532813133a0650", size = 14821, upload-time = "2025-12-23T19:25:43.997Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/00/b7/e3bf5133d697a08128598c8d0abc5e16377b51465a33756de24fa7dee953/aiosqlite-0.22.1-py3-none-any.whl", hash = "sha256:21c002eb13823fad740196c5a2e9d8e62f6243bd9e7e4a1f87fb5e44ecb4fceb", size = 17405, upload-time = "2025-12-23T19:25:42.139Z" },
+]
+
+[[package]]
 name = "annotated-doc"
 version = "0.0.4"
 source = { registry = "https://pypi.org/simple" }
@@ -350,6 +359,84 @@ wheels = [
 ]
 
 [[package]]
+name = "hexagent"
+source = { editable = "../../hexagent" }
+dependencies = [
+    { name = "cachetools" },
+    { name = "e2b" },
+    { name = "httpx" },
+    { name = "langchain" },
+    { name = "langchain-anthropic" },
+    { name = "langchain-core" },
+    { name = "langchain-deepseek" },
+    { name = "langchain-openai" },
+    { name = "mcp" },
+    { name = "petname" },
+    { name = "pyyaml" },
+    { name = "tenacity" },
+    { name = "wcmatch" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "braintrust", marker = "extra == 'braintrust'", specifier = ">=0.7.0" },
+    { name = "braintrust", marker = "extra == 'observe'", specifier = ">=0.7.0" },
+    { name = "braintrust-langchain", marker = "extra == 'braintrust'", specifier = ">=0.2.1" },
+    { name = "braintrust-langchain", marker = "extra == 'observe'", specifier = ">=0.2.1" },
+    { name = "cachetools", specifier = ">=5.0.0" },
+    { name = "e2b", specifier = ">=2.0.0,<3.0.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "langchain", specifier = ">=1.2.3,<2.0.0" },
+    { name = "langchain-anthropic", specifier = ">=1.3.1,<2.0.0" },
+    { name = "langchain-core", specifier = ">=1.2.6,<2.0.0" },
+    { name = "langchain-deepseek", specifier = ">=1.0.1" },
+    { name = "langchain-openai", specifier = ">=1.0.2,<2.0.0" },
+    { name = "langsmith", marker = "extra == 'langsmith'", specifier = ">=0.1.0" },
+    { name = "langsmith", marker = "extra == 'observe'", specifier = ">=0.1.0" },
+    { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
+    { name = "petname", specifier = ">=2.9" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "tenacity", specifier = ">=8.0.0" },
+    { name = "wcmatch" },
+]
+provides-extras = ["braintrust", "langsmith", "observe"]
+
+[package.metadata.requires-dev]
+test = [
+    { name = "mypy", specifier = ">=1.18.1,<1.19.0" },
+    { name = "pytest" },
+    { name = "pytest-asyncio", specifier = ">=1.3.0" },
+    { name = "pytest-cov" },
+    { name = "pytest-xdist" },
+    { name = "ruff", specifier = ">=0.12.2,<0.13.0" },
+    { name = "types-cachetools" },
+    { name = "types-pyyaml" },
+]
+
+[[package]]
+name = "hexagent-demo-backend"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "fastapi" },
+    { name = "hexagent" },
+    { name = "langchain-deepseek" },
+    { name = "langgraph-checkpoint-sqlite" },
+    { name = "python-dotenv" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "hexagent", editable = "../../hexagent" },
+    { name = "langchain-deepseek", specifier = ">=0.1.0" },
+    { name = "langgraph-checkpoint-sqlite", specifier = ">=3.0.3" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
+]
+
+[[package]]
 name = "httpcore"
 version = "1.0.9"
 source = { registry = "https://pypi.org/simple" }
@@ -645,6 +732,20 @@ wheels = [
 ]
 
 [[package]]
+name = "langgraph-checkpoint-sqlite"
+version = "3.0.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiosqlite" },
+    { name = "langgraph-checkpoint" },
+    { name = "sqlite-vec" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/04/61/40b7f8f29d6de92406e668c35265f409f57064907e31eae84ab3f2a3e3e1/langgraph_checkpoint_sqlite-3.0.3.tar.gz", hash = "sha256:438c234d37dabda979218954c9c6eb1db73bee6492c2f1d3a00552fe23fa34ed", size = 123876, upload-time = "2026-01-19T00:38:44.473Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a3/d8/84ef22ee1cc485c4910df450108fd5e246497379522b3c6cfba896f71bf6/langgraph_checkpoint_sqlite-3.0.3-py3-none-any.whl", hash = "sha256:02eb683a79aa6fcda7cd4de43861062a5d160dbbb990ef8a9fd76c979998a952", size = 33593, upload-time = "2026-01-19T00:38:43.288Z" },
+]
+
+[[package]]
 name = "langgraph-prebuilt"
 version = "1.0.8"
 source = { registry = "https://pypi.org/simple" }
@@ -734,82 +835,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729, upload-time = "2022-08-14T12:40:10.846Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
-]
-
-[[package]]
-name = "hexagent"
-source = { editable = "../../hexagent" }
-dependencies = [
-    { name = "cachetools" },
-    { name = "e2b" },
-    { name = "httpx" },
-    { name = "langchain" },
-    { name = "langchain-anthropic" },
-    { name = "langchain-core" },
-    { name = "langchain-deepseek" },
-    { name = "langchain-openai" },
-    { name = "mcp" },
-    { name = "petname" },
-    { name = "pyyaml" },
-    { name = "tenacity" },
-    { name = "wcmatch" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "braintrust", marker = "extra == 'braintrust'", specifier = ">=0.7.0" },
-    { name = "braintrust", marker = "extra == 'observe'", specifier = ">=0.7.0" },
-    { name = "braintrust-langchain", marker = "extra == 'braintrust'", specifier = ">=0.2.1" },
-    { name = "braintrust-langchain", marker = "extra == 'observe'", specifier = ">=0.2.1" },
-    { name = "cachetools", specifier = ">=5.0.0" },
-    { name = "e2b", specifier = ">=2.0.0,<3.0.0" },
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "langchain", specifier = ">=1.2.3,<2.0.0" },
-    { name = "langchain-anthropic", specifier = ">=1.3.1,<2.0.0" },
-    { name = "langchain-core", specifier = ">=1.2.6,<2.0.0" },
-    { name = "langchain-deepseek", specifier = ">=1.0.1" },
-    { name = "langchain-openai", specifier = ">=1.0.2,<2.0.0" },
-    { name = "langsmith", marker = "extra == 'langsmith'", specifier = ">=0.1.0" },
-    { name = "langsmith", marker = "extra == 'observe'", specifier = ">=0.1.0" },
-    { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
-    { name = "petname", specifier = ">=2.9" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "tenacity", specifier = ">=8.0.0" },
-    { name = "wcmatch" },
-]
-provides-extras = ["braintrust", "langsmith", "observe"]
-
-[package.metadata.requires-dev]
-test = [
-    { name = "mypy", specifier = ">=1.18.1,<1.19.0" },
-    { name = "pytest" },
-    { name = "pytest-asyncio", specifier = ">=1.3.0" },
-    { name = "pytest-cov" },
-    { name = "pytest-xdist" },
-    { name = "ruff", specifier = ">=0.12.2,<0.13.0" },
-    { name = "types-cachetools" },
-    { name = "types-pyyaml" },
-]
-
-[[package]]
-name = "hexagent-demo-backend"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "fastapi" },
-    { name = "langchain-deepseek" },
-    { name = "hexagent" },
-    { name = "python-dotenv" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "langchain-deepseek", specifier = ">=0.1.0" },
-    { name = "hexagent", editable = "../../hexagent" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]
 
 [[package]]
@@ -1419,6 +1444,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
+]
+
+[[package]]
+name = "sqlite-vec"
+version = "0.1.8"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0c/99/58265099abe9801291df0bc896d478dc635c72fc61eb45c0f51fa4f9c271/sqlite_vec-0.1.8-py3-none-macosx_10_6_x86_64.whl", hash = "sha256:cfd7e62a756c6121545abe6b6cdb47a0e5bb6fcd6e73bdc5f823167b3e17580f", size = 131171, upload-time = "2026-03-30T02:06:08.596Z" },
+    { url = "https://files.pythonhosted.org/packages/41/49/0cecd5c03d6e137a73e277ad3e1042cc42b6154b03fcb8d65d70240550b3/sqlite_vec-0.1.8-py3-none-macosx_11_0_arm64.whl", hash = "sha256:54c3c68554fb4144e1176ee6cf395b935ed783f8be4b0d965882c3b85635008f", size = 165434, upload-time = "2026-03-30T02:06:09.7Z" },
+    { url = "https://files.pythonhosted.org/packages/13/3f/57be73b85bd8c566a68e3a72c2baf64e99cbb874ff165b30a89b3d368fdf/sqlite_vec-0.1.8-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d5922eaa30c30766fcb970fe229af92e83a935b282eaaed58441ae0d2503af0a", size = 160076, upload-time = "2026-03-30T02:06:10.884Z" },
+    { url = "https://files.pythonhosted.org/packages/71/50/87c26d250589c7d7e7bced6d51a113b6b00feae152aa33e0fee43d54007e/sqlite_vec-0.1.8-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.manylinux1_x86_64.whl", hash = "sha256:62d10a56c22a64a5b0cac0f4e83c50a3c2d26d2eb2d4772947a2a4cc0a41d7d1", size = 163388, upload-time = "2026-03-30T02:06:12.15Z" },
+    { url = "https://files.pythonhosted.org/packages/55/a3/572acad88096216d5861cef3dd199bfb0c387a101a094538fec702757d2a/sqlite_vec-0.1.8-py3-none-win_amd64.whl", hash = "sha256:41269df891363cc6e47acec432f240fae082d2c43b8ec6969c40d35a94a187a2", size = 292804, upload-time = "2026-03-30T02:06:13.289Z" },
 ]
 
 [[package]]

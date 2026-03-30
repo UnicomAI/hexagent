@@ -5,6 +5,7 @@ Provides WebSearchTool for agents to search the web.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import TYPE_CHECKING, Literal
@@ -91,6 +92,9 @@ class WebSearchTool(BaseAgentTool[WebSearchToolParams]):
                 msg = f"Search provider: {exc}"
                 logger.error(f"Search provider error: {msg}")
                 return ToolResult(error=msg)
+            except asyncio.CancelledError:
+                logger.info(f"WebSearch for '{params.query}' was cancelled")
+                raise
             except httpx.HTTPError as exc:
                 msg = f"Search for '{params.query}' failed: {exc}"
                 logger.error(f"HTTP error during search: {msg}")

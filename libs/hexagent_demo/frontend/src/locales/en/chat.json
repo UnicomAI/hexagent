@@ -8,6 +8,8 @@
   "attachFile": "Attach file",
   "scrollToBottom": "Scroll to bottom",
   "sendMessage": "Send message",
+  "stopGeneration": "Stop generation",
+  "interruptFailed": "Failed to interrupt",
   "preparingRequest": "Preparing request...",
   "configureModel": "Configure a model in Settings first",
   "e2bKeyRequired": "E2B API key required",
