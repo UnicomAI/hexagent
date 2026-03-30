@@ -69,20 +69,23 @@ class WriteTool(BaseAgentTool[WriteToolParams]):
     description: str = "Write content to a file. Overwrites if exists."
     args_schema = WriteToolParams
 
+    def __init__(self, computer: Computer) -> None:
+        """Initialize the WriteTool.
+
+        Args:
+            computer: The Computer instance to execute commands on.
+        """
+        self._computer = computer
+
     async def execute(self, params: WriteToolParams) -> ToolResult:
         """Execute the write operation."""
-        # Check if we are in a session to resolve paths
-        computer = self.context.get("computer")
-        if not computer:
-            return ToolResult(error="No computer session active")
-
         # Build payload
         payload = json.dumps({"path": params.file_path, "content": params.content})
         b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")
 
         # Execute via python script on the guest, passing payload via stdin
         cmd = f"python3 -c {shlex.quote(_WRITE_SCRIPT_TEMPLATE)}"
-        result = await computer.run(cmd, input=b64_payload)
+        result = await self._computer.run(cmd, input=b64_payload)
 
         if result.exit_code != 0:
             return ToolResult(error=result.stderr or result.stdout or "Unknown error during write")

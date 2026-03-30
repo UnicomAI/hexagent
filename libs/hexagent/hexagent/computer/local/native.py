@@ -76,6 +76,7 @@ class LocalNativeComputer(AsyncComputerMixin):
         command: str,
         *,
         timeout: float | None = None,  # noqa: ASYNC109
+        input: str | None = None,
     ) -> CLIResult:
         """Execute a command in a new subprocess.
 
@@ -84,6 +85,7 @@ class LocalNativeComputer(AsyncComputerMixin):
             timeout: Command timeout in milliseconds. ``None`` means no timeout
                 (block until the process exits or the task is cancelled).
                 When specified, capped at ``BASH_MAX_TIMEOUT_MS``.
+            input: Optional stdin to pass to the command.
         """
         env = os.environ.copy()
         env["NO_COLOR"] = "1"
@@ -91,7 +93,7 @@ class LocalNativeComputer(AsyncComputerMixin):
 
         process = await asyncio.create_subprocess_shell(
             command,
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.PIPE if input is not None else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
@@ -100,11 +102,11 @@ class LocalNativeComputer(AsyncComputerMixin):
 
         try:
             if timeout is None:
-                stdout_bytes, stderr_bytes = await process.communicate()
+                stdout_bytes, stderr_bytes = await process.communicate(input=input.encode() if input is not None else None)
             else:
                 effective_timeout = min(timeout, BASH_MAX_TIMEOUT_MS) / 1000
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    process.communicate(),
+                    process.communicate(input=input.encode() if input is not None else None),
                     timeout=effective_timeout,
                 )
         except TimeoutError:

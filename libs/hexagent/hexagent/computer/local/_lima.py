@@ -282,6 +282,7 @@ class LimaVM:
         user: str | None = None,
         cwd: str | None = None,
         timeout: float | None = None,  # noqa: ASYNC109
+        input: str | None = None,
     ) -> CLIResult:
         """Execute a command inside the VM via ``limactl shell``.
 
@@ -291,6 +292,7 @@ class LimaVM:
             cwd: Working directory inside the VM. For session users without
                 explicit cwd, defaults to ``cd`` (home directory).
             timeout: Timeout in **seconds**. ``None`` means wait indefinitely.
+            input: Optional stdin to pass to the command.
 
         Returns:
             CLIResult with stdout, stderr, exit_code, and metadata.
@@ -322,14 +324,14 @@ class LimaVM:
 
         process = await asyncio.create_subprocess_exec(
             *exec_args,
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.PIPE if input is not None else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
 
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(),
+                process.communicate(input=input.encode() if input is not None else None),
                 timeout=timeout,
             )
         except TimeoutError:
