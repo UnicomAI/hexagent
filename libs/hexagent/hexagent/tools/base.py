@@ -5,6 +5,7 @@ This module defines the abstract interface for agent tools.
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Any, Generic, TypeVar
 
@@ -87,7 +88,16 @@ class BaseAgentTool(ABC, Generic[ParamsT]):
             err_msg = f"<tool_call_error>{_format_validation_errors(e, self.name)}</tool_call_error>"
             return ToolResult(error=err_msg)
 
-        return await self.execute(params)
+        try:
+            return await self.execute(params)
+        except asyncio.CancelledError:
+            # Re-raise cancellation so the agent loop stops immediately.
+            raise
+        except Exception as e:
+            # Standard tools shouldn't catch all exceptions, but if they do,
+            # we ensure they don't swallow cancellation.
+            # This is a fallback for tools that might have their own try-except blocks.
+            raise e
 
     @abstractmethod
     async def execute(self, params: ParamsT) -> ToolResult:

@@ -7,6 +7,7 @@ The :class:`~hexagent.types.SubagentRunner` protocol and
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 from typing import TYPE_CHECKING, Any
@@ -86,6 +87,9 @@ class AgentTool(BaseAgentTool[AgentToolParams]):
         # Foreground — run synchronously, then deposit result in registry
         try:
             result = await self._run_and_save(agent_id, params, prior_messages)
+        except asyncio.CancelledError:
+            # Re-raise so the agent loop actually stops.
+            raise
         except Exception as exc:  # noqa: BLE001
             error_result = ToolResult(error=str(exc))
             self._registry.complete(agent_id, error_result, status="failed")
