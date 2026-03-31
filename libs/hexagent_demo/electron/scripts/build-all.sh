@@ -17,6 +17,25 @@ echo "========================================="
 echo "  UniClaw Desktop 鈥?Build ($TARGET)"
 echo "========================================="
 
+# ---------------------------------------------------------------------------
+# Build flags — control runtime behaviour of the packaged app.
+# Override via environment variable before running this script, e.g.:
+#   CLEAR_USER_DATA_ON_START=false bash build-all.sh
+#
+#   CLEAR_USER_DATA_ON_START=true  — wipe ~/Library/Application Support/…
+#                                    on every app start (default: dev builds)
+#   CLEAR_USER_DATA_ON_START=false — preserve user data across restarts
+#                                    (set this for production/release builds)
+# ---------------------------------------------------------------------------
+CLEAR_USER_DATA_ON_START="${CLEAR_USER_DATA_ON_START:-true}"
+
+echo "Build flags: CLEAR_USER_DATA_ON_START=$CLEAR_USER_DATA_ON_START"
+cat > "$ELECTRON_DIR/build_flags.json" << EOF
+{
+  "clear_user_data_on_start": $CLEAR_USER_DATA_ON_START
+}
+EOF
+
 echo ""
 echo "[1/3] Building frontend..."
 bash "$SCRIPT_DIR/build-frontend.sh"
