@@ -418,6 +418,7 @@ name = "hexagent-demo-backend"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "aiosqlite" },
     { name = "fastapi" },
     { name = "hexagent" },
     { name = "langchain-deepseek" },
@@ -428,6 +429,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "hexagent", editable = "../../hexagent" },
     { name = "langchain-deepseek", specifier = ">=0.1.0" },
