@@ -6,10 +6,12 @@ $Target = if ($args.Count -gt 0) { $args[0] } else { 'win' }
 $EmbedWslPrebuilt = ($env:HEXAGENT_EMBED_WSL_PREBUILT -eq "1" -or $env:OPENAGENT_EMBED_WSL_PREBUILT -eq "1")
 $PrepareOfflineWsl = ($env:HEXAGENT_PREPARE_OFFLINE_WSL -eq "1")
 $SourcePrebuiltTar = Join-Path $ElectronDir "prebuilt\hexagent-prebuilt.tar"
+$SourceOfflineWslDir = Join-Path $ElectronDir "resources\wsl"
 $DistDir = Join-Path $ElectronDir "dist"
 $DistPrebuiltTar = Join-Path $DistDir "hexagent-prebuilt.tar"
-$ProductNameEn = "UniClaw-Work"
-$ProductNameZh = "UniClaw-工作虾"
+$DistOfflineRootfs = Join-Path $DistDir "ubuntu-base-24.04-amd64.tar.gz"
+$ProductNameEn = "UniClawWorkSetup"
+$ProductNameZh = "UniClaw安装程序"
 $InstallerExeName = "$ProductNameEn.exe"
 $DistReadme = Join-Path $DistDir "安装说明.txt"
 $DistBundleZip = Join-Path $DistDir "${ProductNameZh}.zip"
@@ -85,11 +87,47 @@ if (-not (Test-Path $DistPrebuiltTar)) {
     }
 }
 
+$DistOfflineWslMsi = $null
+if (Test-Path $SourceOfflineWslDir) {
+    $SourceOfflineWslMsi = Get-ChildItem "$SourceOfflineWslDir\wsl*.x64.msi" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($SourceOfflineWslMsi) {
+        $DistOfflineWslMsi = Join-Path $DistDir $SourceOfflineWslMsi.Name
+        Copy-Item -Force $SourceOfflineWslMsi.FullName $DistOfflineWslMsi
+        Write-Host "Copied offline WSL MSI to dist/: $($SourceOfflineWslMsi.Name)"
+    } else {
+        Write-Warning "Offline WSL MSI not found under $SourceOfflineWslDir"
+    }
+
+    $SourceOfflineRootfs = Join-Path $SourceOfflineWslDir "ubuntu-base-24.04-amd64.tar.gz"
+    if (Test-Path $SourceOfflineRootfs) {
+        Copy-Item -Force $SourceOfflineRootfs $DistOfflineRootfs
+        Write-Host "Copied offline Ubuntu rootfs to dist/: $(Split-Path $DistOfflineRootfs -Leaf)"
+    } else {
+        Write-Warning "Offline Ubuntu rootfs not found: $SourceOfflineRootfs"
+    }
+}
+
 # Clean up old legacy-named artifacts to avoid confusing release folders.
 Get-ChildItem "$DistDir\ClawWork-*.exe", "$DistDir\ClawWork-*.exe.blockmap", "$DistDir\INSTALL-WINDOWS.txt" -ErrorAction SilentlyContinue |
     Remove-Item -Force -ErrorAction SilentlyContinue
 
-$installGuide = "欢迎使用UniClaw-Work，双击UniClaw-Work.exe即可安装使用。"
+$installGuide = @"
+UniClaw-Work Windows 安装说明
+
+请将以下文件放在同一个文件夹后再安装：
+1. UniClaw-Work.exe
+2. hexagent-prebuilt.tar
+3. wsl*.x64.msi（例如 wsl.2.6.3.0.x64.msi）
+4. ubuntu-base-24.04-amd64.tar.gz
+
+安装流程说明：
+1. 双击 UniClaw-Work.exe，安装器会先检查 BIOS/UEFI 虚拟化状态，并自动启用 WSL 相关 Windows 功能。
+2. 安装器会自动执行同目录下的 wsl*.x64.msi，然后继续安装 UniClaw-Work 主程序。
+3. 如果安装过程中提示需要重启，请先重启电脑，再启动 UniClaw-Work。
+4. ubuntu-base-24.04-amd64.tar.gz 和 hexagent-prebuilt.tar 仍需和安装器放在同目录，供程序后续离线导入 VM 使用。
+"@
 Set-Content -Path $DistReadme -Value $installGuide -Encoding UTF8
 
 $InstallerExePath = Join-Path $DistDir $InstallerExeName
@@ -112,8 +150,12 @@ if (-not (Test-Path $InstallerExePath)) {
     }
 }
 
-$BundleItems = @($InstallerExePath, $DistPrebuiltTar, $DistReadme) | Where-Object { $_ -and (Test-Path $_) }
-if ($BundleItems.Count -eq 3) {
+$CoreBundleItems = @($InstallerExePath, $DistPrebuiltTar, $DistReadme)
+$OptionalBundleItems = @()
+if ($DistOfflineWslMsi -and (Test-Path $DistOfflineWslMsi)) { $OptionalBundleItems += $DistOfflineWslMsi }
+if (Test-Path $DistOfflineRootfs) { $OptionalBundleItems += $DistOfflineRootfs }
+$BundleItems = @($CoreBundleItems + $OptionalBundleItems) | Where-Object { $_ -and (Test-Path $_) }
+if ((Test-Path $InstallerExePath) -and (Test-Path $DistPrebuiltTar) -and (Test-Path $DistReadme)) {
     if (Test-Path $DistBundleZip) {
         Remove-Item -Force $DistBundleZip
     }
@@ -121,7 +163,7 @@ if ($BundleItems.Count -eq 3) {
     $BundleCreated = $false
     $TarExe = Get-Command tar.exe -ErrorAction SilentlyContinue
     if ($TarExe) {
-        $BundleEntryNames = @($InstallerExeName, 'hexagent-prebuilt.tar', (Split-Path $DistReadme -Leaf))
+        $BundleEntryNames = $BundleItems | ForEach-Object { Split-Path $_ -Leaf }
         Push-Location $DistDir
         try {
             & $TarExe.Source -a -c -f $DistBundleZip @BundleEntryNames
@@ -147,4 +189,4 @@ if ($BundleItems.Count -eq 3) {
     if (-not (Test-Path $DistReadme)) { Write-Warning " - $DistReadme" }
 }
 
-Get-ChildItem "$DistDir\*.exe", "$DistDir\*.blockmap", "$DistDir\hexagent-prebuilt.tar", $DistReadme, $DistBundleZip -ErrorAction SilentlyContinue | Format-Table -AutoSize
+Get-ChildItem "$DistDir\*.exe", "$DistDir\*.blockmap", "$DistDir\hexagent-prebuilt.tar", "$DistDir\wsl*.x64.msi", "$DistDir\ubuntu-base-24.04-amd64.tar.gz", $DistReadme, $DistBundleZip -ErrorAction SilentlyContinue | Format-Table -AutoSize
