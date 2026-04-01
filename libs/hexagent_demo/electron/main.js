@@ -420,56 +420,24 @@ ipcMain.handle("install-wsl-runtime", async () => {
     path.join(process.resourcesPath, "wsl", "wsl.x64.msi"),
   ];
   const offlineMsiPath = offlineMsiCandidates.find((x) => fs.existsSync(x)) || "";
-  if (offlineMsiPath) {
-    let offlineMsiSize = "unknown";
-    try {
-      offlineMsiSize = String(fs.statSync(offlineMsiPath).size);
-    } catch {
-      // no-op: keep best-effort logging only
-    }
-    wslLog(`Offline WSL MSI found: ${offlineMsiPath} (size=${offlineMsiSize})`);
-  } else {
-    wslLog("Offline WSL MSI not found, use online install");
-  }
+  wslLog(offlineMsiPath ? `Offline WSL MSI found: ${offlineMsiPath}` : "Offline WSL MSI not found, use online install");
 
   const psScript = `
 $ErrorActionPreference = 'Stop'
 $offlineMsi = "${offlineMsiPath}"
 $wslPath = Join-Path $env:SystemRoot "System32\\wsl.exe"
-$msiExecPath = Join-Path $env:SystemRoot "System32\\msiexec.exe"
 if (-not (Test-Path $wslPath)) {
   $wslPath = Join-Path $env:SystemRoot "Sysnative\\wsl.exe"
 }
 if (-not (Test-Path $wslPath)) {
   throw "wsl.exe not found under %SystemRoot%."
 }
-if (-not (Test-Path $msiExecPath)) {
-  $msiExecPath = Join-Path $env:SystemRoot "Sysnative\\msiexec.exe"
-}
-if (-not (Test-Path $msiExecPath)) {
-  throw "msiexec.exe not found under %SystemRoot%."
-}
 try {
   $code = 0
   if (-not [string]::IsNullOrWhiteSpace($offlineMsi) -and (Test-Path $offlineMsi)) {
-    $msiCheckExists = Test-Path -LiteralPath $offlineMsi
-    Write-Output ("MSI_CHECK:offlineMsiPath=" + $offlineMsi)
-    Write-Output ("MSI_CHECK:testPath=" + $msiCheckExists)
-    if ($msiCheckExists) {
-      $item = Get-Item -LiteralPath $offlineMsi
-      Write-Output ("MSI_CHECK:itemFullName=" + $item.FullName)
-      Write-Output ("MSI_CHECK:itemLength=" + $item.Length)
-    }
-    $msiLogPath = Join-Path $env:TEMP ("uniclaw-wsl-msi-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".log")
-    $offlineMsiQuoted = '"' + $offlineMsi + '"'
-    $msiLogPathQuoted = '"' + $msiLogPath + '"'
-    $msiArgs = @("/i", $offlineMsiQuoted, "/qn", "/norestart", "/L*v", $msiLogPathQuoted)
-    Write-Output ("MSI_CHECK:msiLogPath=" + $msiLogPath)
-    Write-Output ("MSI_CHECK:msiArgs=" + ($msiArgs -join " "))
-    $proc = Start-Process -FilePath $msiExecPath -ArgumentList $msiArgs -Verb RunAs -Wait -PassThru
+    $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList @("/i",$offlineMsi,"/qn","/norestart") -Verb RunAs -Wait -PassThru
     if ($null -eq $proc) { throw "Start-Process returned null process." }
     $code = $proc.ExitCode
-    Write-Output ("MSI_CHECK:msiExitCode=" + $code)
     if ($code -ne 0 -and $code -ne 3010) {
       $proc = Start-Process -FilePath $wslPath -ArgumentList @("--install","--no-distribution") -Verb RunAs -Wait -PassThru
       if ($null -eq $proc) { throw "Start-Process returned null process." }

@@ -26,7 +26,7 @@ import shlex
 import shutil
 import sys
 import time
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
 from hexagent.computer.base import ExecutionMetadata
@@ -163,31 +163,6 @@ def _stable_host_cwd() -> str:
     return str(Path.cwd())
 
 
-def _safe_wsl_subprocess_env() -> dict[str, str]:
-    """Return a sanitized environment for launching ``wsl.exe``.
-
-    The parent process (especially packaged desktop apps) may prepend many
-    app-private paths (Python embedded runtimes, temp unpack dirs, etc.) to
-    ``PATH``. WSL may try to translate those paths into Linux during startup,
-    which can fail on some hosts and break command execution.
-
-    We keep the current process environment but replace ``PATH`` with a minimal
-    stable Windows system path and clear ``WSLENV`` pass-through noise.
-    """
-    env = dict(os.environ)
-    system_root = env.get("SYSTEMROOT") or env.get("WINDIR") or r"C:\Windows"
-    system_paths = [
-        str(Path(system_root) / "System32"),
-        system_root,
-        str(Path(system_root) / "System32" / "Wbem"),
-        str(Path(system_root) / "System32" / "WindowsPowerShell" / "v1.0"),
-    ]
-    env["PATH"] = ";".join(system_paths)
-    # Avoid host-side variable propagation rules from interfering with WSL startup.
-    env["WSLENV"] = ""
-    return env
-
-
 def _ensure_proactor_event_loop() -> None:
     """Switch to ``ProactorEventLoop`` if not already active.
 
@@ -287,8 +262,6 @@ class WslVM:
                 "--verbose",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=_stable_host_cwd(),
-                env=_safe_wsl_subprocess_env(),
             )
             stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=30.0)
         except (TimeoutError, asyncio.TimeoutError):
@@ -566,7 +539,6 @@ class WslVM:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=_stable_host_cwd(),
-            env=_safe_wsl_subprocess_env(),
         )
 
         try:
@@ -611,80 +583,21 @@ class WslVM:
         Raises:
             WslError: If the copy fails.
         """
-        preferred_prefix = await self._resolve_unc_prefix()
-        prefixes = [preferred_prefix, *[p for p in _UNC_PREFIXES if p != preferred_prefix]]
-        last_error: OSError | None = None
+        unc_prefix = await self._resolve_unc_prefix()
 
-        for unc_prefix in prefixes:
-            try:
-                await self._copy_via_unc(src, dst, host_to_guest=host_to_guest, unc_prefix=unc_prefix)
-                self._unc_prefix = unc_prefix
-                return
-            except OSError as e:
-                last_error = e
-                if not self._is_unc_unavailable_error(e):
-                    break
-                wsl_log(
-                    "WSL UNC copy failed with unavailable network path; will retry with alternate prefix. "
-                    "instance=%s prefix=%s error=%s",
-                    self._instance,
-                    unc_prefix,
-                    str(e),
-                    level=logging.WARNING,
-                )
-                self._unc_prefix = None
-                # Probe distro to encourage WSL UNC provider readiness.
-                with contextlib.suppress(WslError):
-                    await self.shell("true", timeout=15)
-
-        # Host->guest upload can proceed without UNC by copying from /mnt/<drive>.
-        if host_to_guest and self._is_unc_unavailable_error(last_error):
-            try:
-                await self._copy_host_to_guest_via_drvfs(src, dst)
-                return
-            except WslError as fallback_err:
-                if last_error is not None:
-                    msg = f"File copy failed: {last_error}; fallback failed: {fallback_err}"
-                    raise WslError(msg) from fallback_err
-                raise
-
-        if last_error is not None:
-            msg = f"File copy failed: {last_error}"
-            raise WslError(msg) from last_error
-        raise WslError("File copy failed: unknown error")
-
-    async def _copy_via_unc(self, src: str, dst: str, *, host_to_guest: bool, unc_prefix: str) -> None:
-        if host_to_guest:
-            unc_dst = f"{unc_prefix}\\{self._instance}{dst.replace('/', os.sep)}"
-            # Ensure parent directory exists on guest side.
-            unc_parent = str(Path(unc_dst).parent)
-            await asyncio.to_thread(os.makedirs, unc_parent, exist_ok=True)
-            await asyncio.to_thread(shutil.copy2, src, unc_dst)
-        else:
-            unc_src = f"{unc_prefix}\\{self._instance}{src.replace('/', os.sep)}"
-            await asyncio.to_thread(shutil.copy2, unc_src, dst)
-
-    async def _copy_host_to_guest_via_drvfs(self, src: str, dst: str) -> None:
-        """Fallback copy path that avoids UNC and uses guest-side drvfs access."""
-        src_wsl = _win_path_to_wsl(src)
-        await self._ensure_drvfs_mount_for_wsl_path(src_wsl)
-        dst_parent = str(PurePosixPath(dst).parent)
-        qsrc = shlex.quote(src_wsl)
-        qdst = shlex.quote(dst)
-        qparent = shlex.quote(dst_parent)
-        result = await self.shell(f"mkdir -p {qparent} && cp -f {qsrc} {qdst}", user="root")
-        if result.exit_code != 0:
-            msg = result.stderr or result.stdout or f"Failed to copy {src_wsl} -> {dst}"
-            raise WslError(msg)
-
-    @staticmethod
-    def _is_unc_unavailable_error(err: BaseException | None) -> bool:
-        if not isinstance(err, OSError):
-            return False
-        if getattr(err, "winerror", None) == 67:
-            return True
-        text = str(err).lower()
-        return "\\\\wsl.localhost\\" in text or "\\\\wsl$\\" in text or "network name" in text
+        try:
+            if host_to_guest:
+                unc_dst = f"{unc_prefix}\\{self._instance}{dst.replace('/', os.sep)}"
+                # Ensure parent directory exists on guest side.
+                unc_parent = str(Path(unc_dst).parent)
+                await asyncio.to_thread(os.makedirs, unc_parent, exist_ok=True)
+                await asyncio.to_thread(shutil.copy2, src, unc_dst)
+            else:
+                unc_src = f"{unc_prefix}\\{self._instance}{src.replace('/', os.sep)}"
+                await asyncio.to_thread(shutil.copy2, unc_src, dst)
+        except OSError as e:
+            msg = f"File copy failed: {e}"
+            raise WslError(msg) from e
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -709,7 +622,6 @@ class WslVM:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=_stable_host_cwd(),
-            env=_safe_wsl_subprocess_env(),
         )
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
@@ -760,19 +672,14 @@ class WslVM:
         wsl_log("WSL Current System Mounts:\n%s", all_mounts.stdout or "(empty)")
 
         for m in mounts:
-            # Always canonicalize drive-letter host paths to /mnt/<drive>/...
-            # directly. Relying on `wslpath -u` here can resolve to an existing
-            # bind-mount target under /sessions/... and accidentally create
-            # chained mounts across sessions.
-            try:
+            # Use wslpath to get the accurate Linux path for the Windows host path.
+            # This handles drive letters, mount points, and case-sensitivity correctly.
+            wsl_host_res = await self.shell(f"wslpath -u {shlex.quote(m.host_path)}", user="root")
+            if wsl_host_res.exit_code == 0 and wsl_host_res.stdout.strip():
+                wsl_host = wsl_host_res.stdout.strip()
+            else:
                 wsl_host = _win_path_to_wsl(m.host_path)
-            except WslError:
-                # Non-drive paths still use wslpath as a best-effort fallback.
-                wsl_host_res = await self.shell(f"wslpath -u {shlex.quote(m.host_path)}", user="root")
-                if wsl_host_res.exit_code == 0 and wsl_host_res.stdout.strip():
-                    wsl_host = wsl_host_res.stdout.strip()
-                else:
-                    raise
+                wsl_log("WSL wslpath failed for %s, falling back to %s", m.host_path, wsl_host, level=logging.WARNING)
 
             # When distro automount is disabled (e.g. via /etc/wsl.conf),
             # /mnt/<drive> may not exist. Mount the specific drive on-demand

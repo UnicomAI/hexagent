@@ -123,10 +123,9 @@ UniClaw-Work Windows 安装说明
 4. ubuntu-base-24.04-amd64.tar.gz
 
 安装流程说明：
-1. 双击 UniClaw-Work.exe，安装器会先检查 BIOS/UEFI 虚拟化状态，并自动启用 WSL 相关 Windows 功能。
-2. 安装器会自动执行同目录下的 wsl*.x64.msi，然后继续安装 UniClaw-Work 主程序。
-3. 如果安装过程中提示需要重启，请先重启电脑，再启动 UniClaw-Work。
-4. ubuntu-base-24.04-amd64.tar.gz 和 hexagent-prebuilt.tar 仍需和安装器放在同目录，供程序后续离线导入 VM 使用。
+1. 双击 UniClaw-Work.exe 完成安装。
+2. 首次进入「沙盒/虚拟机」时，程序会优先使用同目录离线包安装 WSL 并导入 VM。
+3. 如离线导入失败，会自动回退到网络安装。
 "@
 Set-Content -Path $DistReadme -Value $installGuide -Encoding UTF8
 
