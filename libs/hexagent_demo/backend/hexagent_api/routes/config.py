@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter
@@ -38,6 +39,15 @@ async def put_config(body: dict[str, Any]) -> dict[str, Any]:
     """Update config, save to disk, and restart the agent."""
     current = load_config()
 
+    # Handle yuanjing_api_key first (before models processing)
+    if "yuanjing_api_key" in body:
+        yj_key = body["yuanjing_api_key"]
+        # If key is masked, preserve existing value
+        if isinstance(yj_key, str) and yj_key.startswith("****"):
+            pass  # Keep current.yuanjing_api_key unchanged
+        else:
+            current.yuanjing_api_key = yj_key
+
     if "models" in body:
         # Build a lookup of existing models to preserve unmasked api_keys
         existing_by_id = {m.id: m for m in current.models}
@@ -55,6 +65,15 @@ async def put_config(body: dict[str, Any]) -> dict[str, Any]:
             m_data["context_window"] = int(cw) if cw else 0
             new_models.append(ModelConfig(**m_data))
         current.models = new_models
+
+    # Sync yuanjing_api_key to all YuanJing models
+    if current.yuanjing_api_key:
+        for i, m in enumerate(current.models):
+            if m.provider == "yuanjing":
+                current.models[i] = ModelConfig(
+                    **{k: v for k, v in asdict(m).items() if k != "api_key"},
+                    api_key=current.yuanjing_api_key
+                )
 
     if "main_model_id" in body:
         current.main_model_id = body["main_model_id"]

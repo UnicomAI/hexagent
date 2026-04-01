@@ -417,6 +417,14 @@ class AgentManager:
                         base_url=mc.base_url,
                         max_tokens=max_tokens,
                     )
+                if mc.provider == "yuanjing":
+                    # YuanJing uses Anthropic-compatible API
+                    return ChatAnthropic(
+                        model=mc.model,
+                        api_key=mc.api_key,
+                        base_url=mc.base_url,
+                        max_tokens=max_tokens,
+                    )
                 if mc.provider == "deepseek":
                     return ChatDeepSeek(
                         model=mc.model,

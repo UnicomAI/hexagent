@@ -432,10 +432,20 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
   const rowRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const dragFromHandle = useRef(false);
 
-  // YuanJing unified API key state - derived from first YuanJing model's api_key
-  const yuanjingModels = config.models.filter((m) => m.provider === "yuanjing");
+  // YuanJing unified API key state - from config.yuanjing_api_key
   const [showYuanjingKey, setShowYuanjingKey] = useState(false);
-  const [yuanjingApiKey, setYuanjingApiKey] = useState(() => yuanjingModels[0]?.api_key ?? "");
+  const yuanjingApiKey = config.yuanjing_api_key ?? "";
+
+  // Update YuanJing API key and sync to all YuanJing models
+  const updateYuanjingApiKey = (newKey: string) => {
+    onConfigChange((prev) => ({
+      ...prev,
+      yuanjing_api_key: newKey,
+      models: prev.models.map((m) =>
+        m.provider === "yuanjing" ? { ...m, api_key: newKey } : m
+      ),
+    }));
+  };
 
   const updateModel = (id: string, updates: Partial<ModelConfig>) => {
     onConfigChange((prev) => ({
@@ -449,7 +459,7 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
     const newModel: ModelConfig = {
       id: crypto.randomUUID(),
       display_name: "",
-      api_key: "",
+      api_key: preset.provider === "yuanjing" ? yuanjingApiKey : "",
       base_url: preset.base_url,
       model: "",
       provider: preset.provider,
@@ -596,6 +606,16 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
                             const cached = providerUrlCache.current[m.id]?.[p.id];
                             const updates: Partial<ModelConfig> = { provider: p.provider };
                             updates.base_url = cached ?? (p.custom_url ? "" : p.base_url);
+
+                            // Handle API key for YuanJing provider
+                            if (p.provider === "yuanjing") {
+                              // Switching to YuanJing: use the unified yuanjing_api_key
+                              updates.api_key = yuanjingApiKey;
+                            } else if (m.provider === "yuanjing") {
+                              // Switching away from YuanJing: clear the api_key
+                              updates.api_key = "";
+                            }
+
                             updateModel(m.id, updates);
                           }}
                           type="button"
@@ -628,14 +648,22 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
                   </div>
 
                   <div className="mc-field">
-                    <label className="mc-label">{t("model.apiKey")}</label>
+                    <label className="mc-label">
+                      {t("model.apiKey")}
+                      {m.provider === "yuanjing" && <span className="tools-key-hint" style={{ marginLeft: 8 }}>{t("model.yuanjingKeyManaged")}</span>}
+                    </label>
                     <div className="mc-key-wrap">
                       <input
-                        className="mc-input mc-input--key"
+                        className={`mc-input mc-input--key${m.provider === "yuanjing" ? " mc-input--readonly" : ""}`}
                         type={isKeyVisible ? "text" : "password"}
-                        value={m.api_key}
-                        onChange={(e) => updateModel(m.id, { api_key: e.target.value })}
-                        placeholder="sk-..."
+                        value={m.provider === "yuanjing" ? yuanjingApiKey : m.api_key}
+                        onChange={(e) => {
+                          if (m.provider !== "yuanjing") {
+                            updateModel(m.id, { api_key: e.target.value });
+                          }
+                        }}
+                        readOnly={m.provider === "yuanjing"}
+                        placeholder={m.provider === "yuanjing" ? t("model.yuanjingKeyPlaceholder") : "sk-..."}
                       />
                       <button
                         className="mc-key-toggle"
@@ -726,52 +754,40 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
         </div>
       )}
 
-      {/* ── YuanJing Unified Key ── */}
-      {config.models.some((m) => m.provider === "yuanjing") && (
-        <div className="tools-group" style={{ marginTop: 16 }}>
-          <div className="tools-group-header">
-            <Zap size={14} className="tools-group-icon" />
-            <span className="tools-group-title">{t("model.yuanjingKey")}</span>
-            <span className="tools-group-desc">{t("model.yuanjingKeyDesc")}</span>
-          </div>
-          <div className="tools-group-body">
-            <div className="mc-field">
-              <label className="mc-label">{t("model.apiKey")}</label>
-              <div className="mc-key-wrap">
-                <input
-                  className="mc-input mc-input--key"
-                  type={showYuanjingKey ? "text" : "password"}
-                  autoComplete="off"
-                  data-1p-ignore
-                  data-lpignore="true"
-                  data-form-type="other"
-                  value={yuanjingApiKey}
-                  onChange={(e) => {
-                    const newKey = e.target.value;
-                    setYuanjingApiKey(newKey);
-                    // Update all YuanJing models' api_key
-                    onConfigChange((prev) => ({
-                      ...prev,
-                      models: prev.models.map((m) =>
-                        m.provider === "yuanjing" ? { ...m, api_key: newKey } : m
-                      ),
-                    }));
-                  }}
-                  placeholder="sk-..."
-                />
-                <button
-                  className="mc-key-toggle"
-                  onClick={() => setShowYuanjingKey(!showYuanjingKey)}
-                  title={showYuanjingKey ? t("common:hide") : t("common:show")}
-                  type="button"
-                >
-                  {showYuanjingKey ? <Eye size={14} /> : <EyeOff size={14} />}
-                </button>
-              </div>
+      {/* ── YuanJing Unified Key (always visible) ── */}
+      <div className="tools-group" style={{ marginTop: 16 }}>
+        <div className="tools-group-header">
+          <Zap size={14} className="tools-group-icon" />
+          <span className="tools-group-title">{t("model.yuanjingKey")}</span>
+          <span className="tools-group-desc">{t("model.yuanjingKeyDesc")}</span>
+        </div>
+        <div className="tools-group-body">
+          <div className="mc-field">
+            <label className="mc-label">{t("model.apiKey")}</label>
+            <div className="mc-key-wrap">
+              <input
+                className="mc-input mc-input--key"
+                type={showYuanjingKey ? "text" : "password"}
+                autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
+                data-form-type="other"
+                value={yuanjingApiKey}
+                onChange={(e) => updateYuanjingApiKey(e.target.value)}
+                placeholder="sk-..."
+              />
+              <button
+                className="mc-key-toggle"
+                onClick={() => setShowYuanjingKey(!showYuanjingKey)}
+                title={showYuanjingKey ? t("common:hide") : t("common:show")}
+                type="button"
+              >
+                {showYuanjingKey ? <Eye size={14} /> : <EyeOff size={14} />}
+              </button>
             </div>
           </div>
         </div>
-      )}
+      </div>
 
       {/* ── Summarizer Model ── */}
       {config.models.length > 0 && (

@@ -34,6 +34,8 @@
     "summarizerDesc": "fast model for web page summarization",
     "yuanjingKey": "YuanJing API Key",
     "yuanjingKeyDesc": "Unified key for all YuanJing models",
+    "yuanjingKeyManaged": "Managed via YuanJing API Key below",
+    "yuanjingKeyPlaceholder": "Set in YuanJing API Key section",
     "deleteModelTitle": "Delete \"{{name}}\"?",
     "deleteModelBody": "This will permanently remove the model configuration. This action cannot be undone."
   },

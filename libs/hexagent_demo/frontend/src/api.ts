@@ -353,6 +353,7 @@ export interface ServerConfig {
   sandbox: SandboxConfig;
   mcp_servers: McpServerEntry[];
   language: string;
+  yuanjing_api_key: string;
 }
 
 export async function getServerConfig(): Promise<ServerConfig> {
