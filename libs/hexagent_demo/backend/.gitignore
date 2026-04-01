@@ -15,7 +15,6 @@ build/
 # Virtual environments (dev + build)
 .venv/
 .venv-build*/
-.uv-x86_64/
 venv/
 env/
 

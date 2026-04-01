@@ -8,21 +8,6 @@ const treeKill = require("tree-kill");
 
 const IS_DEV = !!process.env.ELECTRON_DEV;
 
-// Read build-time flags written by build-all.sh into build_flags.json.
-// In dev mode fall back to sensible defaults (clear data = false).
-function readBuildFlags() {
-  try {
-    const flagsPath = IS_DEV
-      ? path.join(__dirname, "build_flags.json")
-      : path.join(process.resourcesPath, "build_flags.json");
-    if (fs.existsSync(flagsPath)) {
-      return JSON.parse(fs.readFileSync(flagsPath, "utf8"));
-    }
-  } catch (_) {}
-  return {};
-}
-const BUILD_FLAGS = readBuildFlags();
-
 let backendProcess = null;
 let backendPort = null;
 let mainWindow = null;
@@ -230,7 +215,6 @@ async function spawnBackend() {
         HEXAGENT_DATA_DIR: userDataDir,
         HEXAGENT_APP_DIR: appDir,
         HEXAGENT_WSL_OFFLINE_DIR: wslOfflineDir,
-        HEXAGENT_CLEAR_USER_DATA_ON_START: BUILD_FLAGS.clear_user_data_on_start ? "1" : "0",
       },
     });
   }

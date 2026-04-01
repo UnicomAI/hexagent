@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
-from pathlib import Path
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -19,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from hexagent_api.agent_manager import agent_manager
-from hexagent_api.paths import config_path, data_dir
+from hexagent_api.paths import data_dir
 from hexagent_api.routes import chat, config, conversations, sessions, setup, skills
 
 _LOG_DIR = data_dir() / "logs"
@@ -84,51 +82,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ensure_managed_deps_on_path()
 
     logger.info("Starting agent manager...")
-
-    # Clear user data directory if requested by build flags (macOS only).
-    # Controlled by HEXAGENT_CLEAR_USER_DATA_ON_START env var, set from
-    # build_flags.json at packaging time via Electron main.js.
-    if os.environ.get("HEXAGENT_CLEAR_USER_DATA_ON_START") == "1":
-        import shutil as _shutil
-        data = data_dir()
-        if data.exists():
-            logger.info("HEXAGENT_CLEAR_USER_DATA_ON_START=1 — clearing user data: %s", data)
-            for item in data.iterdir():
-                try:
-                    if item.is_dir():
-                        _shutil.rmtree(item)
-                    else:
-                        item.unlink()
-                except Exception:
-                    logger.warning("Failed to remove %s", item, exc_info=True)
-
-        # Restore bundled config.json so pre-configured models/keys are available
-        # immediately after the wipe, without waiting for Electron to re-seed it.
-        bundled_config: Path | None = None
-        if getattr(sys, "frozen", False):
-            candidate = Path(sys._MEIPASS) / "config.json"  # type: ignore[attr-defined]
-            if candidate.is_file():
-                bundled_config = candidate
-        if bundled_config is not None:
-            dst = config_path()
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            _shutil.copy2(bundled_config, dst)
-            logger.info("Restored bundled config.json → %s", dst)
-        else:
-            logger.debug("No bundled config.json found in _MEIPASS; Electron will seed it")
-
     await agent_manager.start()
     logger.info("Agent manager started.")
-
-    # Tear down stale Lima instance if the app was reinstalled (macOS only).
-    # Must run before the first GET /api/setup/vm so the frontend sees the
-    # correct "not ready" state and shows the rebuild prompt.
-    if sys.platform == "darwin":
-        try:
-            from hexagent_api.routes.mac_setup import teardown_lima_if_reinstalled
-            await teardown_lima_if_reinstalled()
-        except Exception:
-            logger.exception("Failed to run Lima reinstall check at startup")
     cleanup_task = asyncio.create_task(_cleanup_expired_sessions())
     yield
     cleanup_task.cancel()

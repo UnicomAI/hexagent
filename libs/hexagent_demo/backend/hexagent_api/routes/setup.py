@@ -1295,11 +1295,62 @@ class _BuildManager(_ProcessManager):
         return False, "WSL start failed"
 
     async def _run_lima(self) -> None:
-        # Delegate to mac_setup which handles prebuilt restore, boot-done fix,
-        # and all macOS-specific Lima lifecycle concerns.
-        from hexagent_api.routes.mac_setup import build_run_lima
+        # Ensure limactl has the virtualization entitlement before any VM
+        # operation 鈥?otherwise VZ will fail with a cryptic entitlement error.
+        await _ensure_limactl_entitlement()
 
-        await build_run_lima(self)
+        instance_status = await _lima_instance_status()
+
+        if instance_status == "Running":
+            self._emit("done", {"message": "VM is already running"})
+            self._status = "done"
+            return
+
+        if instance_status == "Stopped":
+            self._emit("progress", {"step": "starting", "message": "Starting existing VM..."})
+            proc = await asyncio.create_subprocess_exec(
+                "limactl", "start", _LIMA_INSTANCE, "--tty=false",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            self._process = proc
+            last_line = await self._stream_stderr(proc)
+            await proc.wait()
+            if proc.returncode == 0:
+                self._emit("done", {"message": "VM started successfully"})
+                self._status = "done"
+            else:
+                detail = f" 鈥?{last_line}" if last_line else ""
+                self._emit("error", {"message": f"VM start failed (exit {proc.returncode}){detail}"})
+                self._status = "error"
+                self._error = f"exit {proc.returncode}"
+            return
+
+        # Instance doesn't exist 鈥?full build
+        yaml_path = vm_lima_dir() / "hexagent.yaml"
+        if not yaml_path.is_file():
+            self._emit("error", {"message": f"VM config not found: {yaml_path}"})
+            self._status = "error"
+            self._error = "Config not found"
+            return
+
+        self._emit("progress", {"step": "creating", "message": "Creating VM (downloading base image)..."})
+        proc = await asyncio.create_subprocess_exec(
+            "limactl", "start", f"--name={_LIMA_INSTANCE}", str(yaml_path), "--tty=false",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        self._process = proc
+        last_line = await self._stream_stderr(proc)
+        await proc.wait()
+        if proc.returncode == 0:
+            self._emit("done", {"message": "VM created successfully"})
+            self._status = "done"
+        else:
+            detail = f" 鈥?{last_line}" if last_line else ""
+            self._emit("error", {"message": f"VM creation failed (exit {proc.returncode}){detail}"})
+            self._status = "error"
+            self._error = f"exit {proc.returncode}"
 
     async def _run_wsl(self) -> None:
         wsl_exe = _wsl_cmd()
@@ -1643,11 +1694,91 @@ class _ProvisionManager(_ProcessManager):
         self._error = "Unsupported backend"
 
     async def _run_lima(self, **kwargs: object) -> None:
-        # Delegate to mac_setup which handles prebuilt provisioning skip
-        # and all macOS-specific Lima concerns.
-        from hexagent_api.routes.mac_setup import provision_run_lima
+        force = bool(kwargs.get("force", False))
 
-        await provision_run_lima(self, **kwargs)
+        # 1. Verify VM is running
+        instance_status = await _lima_instance_status()
+        if instance_status != "Running":
+            self._emit("error", {"message": f"VM is not running (status: {instance_status})"})
+            self._status = "error"
+            self._error = "VM not running"
+            return
+
+        # 2. Copy setup directory into VM
+        self._emit("progress", {"step": "copying", "message": "Copying setup files to VM..."})
+        setup_dir = vm_setup_lite_dir()
+        if not setup_dir.is_dir():
+            self._emit("error", {"message": f"Setup directory not found: {setup_dir}"})
+            self._status = "error"
+            self._error = "Setup dir not found"
+            return
+
+        # Tar locally, copy tarball, extract in VM
+        with tempfile.TemporaryDirectory(prefix="hexagent_setup_") as tmp:
+            tar_path = os.path.join(tmp, "setup.tar.gz")
+            _sp.run(
+                ["tar", "-czf", tar_path, "-C", str(setup_dir.parent), setup_dir.name],
+                check=True,
+            )
+            copy_proc = await asyncio.create_subprocess_exec(
+                "limactl", "copy", tar_path, f"{_LIMA_INSTANCE}:/tmp/hexagent-setup.tar.gz",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await copy_proc.communicate()
+            if copy_proc.returncode != 0:
+                self._emit("error", {"message": "Failed to copy setup files to VM"})
+                self._status = "error"
+                self._error = "Copy failed"
+                return
+
+        # Extract in VM
+        rc, _, err = await _lima_shell(
+            f"sudo rm -rf {_SETUP_VM_DIR} && sudo mkdir -p {_SETUP_VM_DIR} && "
+            f"sudo tar -xzf /tmp/hexagent-setup.tar.gz -C {_SETUP_VM_DIR} --strip-components=1 && "
+            f"rm -f /tmp/hexagent-setup.tar.gz",
+            timeout=30,
+        )
+        if rc != 0:
+            self._emit("error", {"message": f"Failed to extract setup files in VM: {err}"})
+            self._status = "error"
+            self._error = "Extract failed"
+            return
+
+        # 3. Run setup.sh with progress streaming
+        self._emit("progress", {"step": "starting", "message": "Starting provisioning..."})
+
+        cmd = f"sudo bash {_SETUP_VM_DIR}/setup.sh"
+        if force:
+            cmd += " --force"
+
+        proc = await asyncio.create_subprocess_exec(
+            "limactl", "shell", _LIMA_INSTANCE, "--", "bash", "-c", cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        self._process = proc
+
+        # Read stdout line by line 鈥?setup.sh writes only @@SETUP: lines here
+        assert proc.stdout is not None
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").strip()
+            if not text:
+                continue
+            if text.startswith("@@SETUP:"):
+                self._handle_setup_line(text)
+
+        await proc.wait()
+        if proc.returncode == 0:
+            self._emit("done", {"message": "Provisioning complete"})
+            self._status = "done"
+        else:
+            self._emit("error", {"message": f"Provisioning failed (exit {proc.returncode})"})
+            self._status = "error"
+            self._error = f"exit {proc.returncode}"
 
     async def _run_wsl(self, **kwargs: object) -> None:
         force = bool(kwargs.get("force", False))

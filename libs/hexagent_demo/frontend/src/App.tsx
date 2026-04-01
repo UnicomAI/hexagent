@@ -3,9 +3,6 @@ import i18n from "./i18n";
 import { AppContext, initialState, reducer } from "./store";
 import { listConversations, createConversation, createWarmSession, deleteWarmSession, sendMessage, subscribeToStream, getServerConfig, getVMStatus, type ServerConfig } from "./api";
 import { useSettings } from "./hooks/useSettings";
-import { useAuth } from "./hooks/useAuth";
-import LoginPage from "./components/LoginPage";
-import "./components/LoginPage.css";
 import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
 import RightPanel from "./components/RightPanel";
@@ -26,7 +23,6 @@ function App() {
   const serverConfigRef = useRef<ServerConfig | null>(null);
   serverConfigRef.current = state.serverConfig;
   const { settings, setSettings } = useSettings();
-  const { isAuthenticated, user, login: authLogin, logout: authLogout } = useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -448,13 +444,6 @@ function App() {
     : undefined;
   const activeStreamingBlocks = activeStreamingEntry?.blocks;
 
-  if (!isAuthenticated) {
-    return <LoginPage onLoginSuccess={authLogin} />;
-  }
-
-  // Derive display name from auth user info (phone or name)
-  const authUserName = (user?.phone as string) || settings.fullName;
-
   return (
     <AppContext.Provider value={{ state, dispatch }}>
       <VMSetupProvider>
@@ -463,8 +452,7 @@ function App() {
             onNewConversation={handleNewConversation}
             onOpenSettings={() => openSettings()}
             onOpenSearch={() => setSearchOpen(true)}
-            userName={authUserName}
-            onLogout={authLogout}
+            userName={settings.fullName}
           />
           <div
             className={`sidebar-backdrop ${state.sidebarCollapsed ? "hidden" : ""}`}
