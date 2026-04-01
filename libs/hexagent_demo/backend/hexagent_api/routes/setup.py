@@ -1,4 +1,4 @@
-"""Setup endpoints — VM backend detection, installation, build & provisioning.
+﻿"""Setup endpoints 鈥?VM backend detection, installation, build & provisioning.
 
 Currently supports Lima (macOS). WSL (Windows) support planned.
 Platform dispatch happens here; the frontend only sees generic
@@ -59,8 +59,8 @@ def _resolve_arch() -> str:
     """Return the *real* hardware architecture for Lima release asset names.
 
     ``platform.machine()`` lies when Python runs under Rosetta 2 on Apple
-    Silicon — it returns ``x86_64`` instead of ``arm64``.  We detect this via
-    ``sysctl.proc_translated`` (``1`` ⇒ Rosetta) and correct accordingly.
+    Silicon 鈥?it returns ``x86_64`` instead of ``arm64``.  We detect this via
+    ``sysctl.proc_translated`` (``1`` 鈬?Rosetta) and correct accordingly.
 
     Lima release naming differs by OS:
       - macOS (Darwin): ``arm64``, ``x86_64``
@@ -143,7 +143,7 @@ async def _resolve_lima_version() -> str:
         if await _check_url_exists(url):
             return version
 
-    # Nothing reachable — return newest anyway, let the download fail
+    # Nothing reachable 鈥?return newest anyway, let the download fail
     # with a clear error rather than silently picking something wrong.
     return candidates[0]
 
@@ -184,6 +184,13 @@ _WSL_EXPORT_SOURCE = "Ubuntu"
 _WSL_PREBUILT_CANDIDATES = (
     "hexagent-prebuilt.tar",
     "hexagent.tar",
+    "ubuntu-base-24.04-amd64.tar.gz",
+)
+_WSL_OFFLINE_MSI_CANDIDATES = (
+    "wsl.2.6.3.0.x64.msi",
+    "wsl.x64.msi",
+)
+_WSL_OFFLINE_ROOTFS_CANDIDATES = (
     "ubuntu-base-24.04-amd64.tar.gz",
 )
 
@@ -230,8 +237,8 @@ def _looks_like_wsl_usage(msg: str) -> bool:
     return (
         "usage: wsl" in low
         or "usage: wsl.exe" in low
-        or "用法: wsl" in text
-        or "用法: wsl.exe" in text
+        or "鐢ㄦ硶: wsl" in text
+        or "鐢ㄦ硶: wsl.exe" in text
     )
 
 
@@ -249,7 +256,7 @@ def _looks_like_wsl_localhost_proxy_warning(msg: str) -> bool:
     text = (msg or "").lower()
     return (
         ("localhost" in text and "proxy" in text and "wsl" in text and "nat" in text)
-        or ("localhost 代理" in (msg or "") and "未镜像到 wsl" in (msg or ""))
+        or ("localhost 浠ｇ悊" in (msg or "") and "鏈暅鍍忓埌 wsl" in (msg or ""))
     )
 
 
@@ -263,8 +270,8 @@ def _wsl2_blocker_reason(text: str) -> str | None:
         "enablevirtualization",
         "virtual machine platform",
         "bios",
-        "当前计算机配置不支持 wsl2",
-        "虚拟机平台",
+        "褰撳墠璁＄畻鏈洪厤缃笉鏀寔 wsl2",
+        "virtual machine platform",
     )
     if any(k in t for k in blockers):
         return (
@@ -402,6 +409,75 @@ def _wsl_prebuilt_tar_path() -> Path | None:
     return None
 
 
+def _wsl_offline_candidate_dirs() -> list[Path]:
+    """Return candidate directories for offline WSL assets."""
+    candidate_dirs: list[Path] = []
+    seen: set[str] = set()
+
+    def add_dir(raw: str) -> None:
+        raw = (raw or "").strip()
+        if not raw:
+            return
+        try:
+            p = Path(raw).resolve()
+        except Exception:  # pragma: no cover - defensive
+            return
+        key = str(p).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        candidate_dirs.append(p)
+
+    add_dir(os.environ.get("HEXAGENT_WSL_PREBUILT_DIR", ""))
+    add_dir(os.environ.get("HEXAGENT_APP_DIR", ""))
+    add_dir(str(Path.cwd()))
+    add_dir(str(vm_setup_dir().parent / "wsl" / "prebuilt"))
+    add_dir(os.environ.get("HEXAGENT_WSL_OFFLINE_DIR", ""))
+    return candidate_dirs
+
+
+def _wsl_offline_msi_path() -> Path | None:
+    """Return an offline WSL MSI installer when available."""
+    explicit = os.environ.get("HEXAGENT_WSL_MSI_PATH", "").strip()
+    if explicit:
+        p = Path(explicit)
+        if p.is_file():
+            return p
+
+    for base in _wsl_offline_candidate_dirs():
+        for name in _WSL_OFFLINE_MSI_CANDIDATES:
+            candidate = base / name
+            if candidate.is_file():
+                return candidate
+        try:
+            dynamic = sorted(
+                [p for p in base.glob("wsl*.x64.msi") if p.is_file()],
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+        except Exception:
+            dynamic = []
+        if dynamic:
+            return dynamic[0]
+    return None
+
+
+def _wsl_offline_rootfs_path() -> Path | None:
+    """Return an offline Ubuntu rootfs archive when available."""
+    explicit = os.environ.get("HEXAGENT_WSL_UBUNTU_ROOTFS_PATH", "").strip()
+    if explicit:
+        p = Path(explicit)
+        if p.is_file():
+            return p
+
+    for base in _wsl_offline_candidate_dirs():
+        for name in _WSL_OFFLINE_ROOTFS_CANDIDATES:
+            candidate = base / name
+            if candidate.is_file():
+                return candidate
+    return None
+
+
 async def _wsl_probe_start() -> tuple[bool, str]:
     """Best-effort probe that distro can actually start.
 
@@ -448,6 +524,43 @@ async def _wait_for_wsl_vhdx(import_dir: Path, timeout_s: float = 45.0) -> Path 
         await asyncio.sleep(0.5)
     return None
 
+async def _wsl_apply_post_start_policy(wsl_exe: str) -> tuple[bool, str]:
+    """Apply post-start policy and restart distro to take effect."""
+    policy_cmd = (
+        "mkdir -p /etc && "
+        "cat >/etc/wsl.conf <<'EOF'\n"
+        "[automount]\n"
+        "enabled = false\n"
+        "mountFsTab = false\n"
+        "EOF"
+    )
+    proc = await asyncio.create_subprocess_exec(
+        wsl_exe,
+        "-d",
+        _WSL_INSTANCE,
+        "-u",
+        "root",
+        "--",
+        "bash",
+        "-lc",
+        policy_cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out_b, err_b = await proc.communicate()
+    if proc.returncode != 0:
+        return False, _combine_wsl_output(out_b, err_b) or "Failed to write /etc/wsl.conf"
+
+    proc_term = await asyncio.create_subprocess_exec(
+        wsl_exe,
+        "--terminate",
+        _WSL_INSTANCE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    await proc_term.communicate()
+    return True, ""
+
 
 # ``wsl -l -v`` uses the Windows display language for the STATE column.
 # Cowork only needs the ``hexagent`` distro to exist; WSL starts it on demand.
@@ -455,7 +568,7 @@ _WSL_COWORK_READY_STATES = frozenset(
     {
         "Running",
         "Stopped",
-        "正在运行",
+        "姝ｅ湪杩愯",
         "已停止",
     }
 )
@@ -463,14 +576,14 @@ _WSL_COWORK_READY_STATES = frozenset(
 _WSL_RUNNING_STATES = frozenset(
     {
         "Running",
-        "姝ｅ湪杩愯",
+        "濮濓絽婀潻鎰攽",
     }
 )
 
 _WSL_STOPPED_STATES = frozenset(
     {
         "Stopped",
-        "宸插仠姝?",
+        "瀹告彃浠犲?",
     }
 )
 
@@ -685,30 +798,115 @@ async def _install_wsl_stream():
     def sse(event: str, data: dict[str, object]) -> str:
         return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
-    wsl = _wsl_cmd()
-    if wsl:
-        yield sse("done", {"message": f"WSL already installed ({wsl})"})
+    def _is_ok_code(code: int) -> bool:
+        return code in {0, 3010}
+
+    async def _run(*args: str, timeout: float = 600) -> tuple[int, str]:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return 1, f"Timed out: {' '.join(args)}"
+        msg = _combine_wsl_output(out_b, err_b).strip()
+        return proc.returncode or 0, msg
+
+    status = _wsl_status()
+    if status.get("installed"):
+        yield sse("done", {"message": f"WSL already installed ({status.get('path')})"})
         return
 
-    yield sse("progress", {"step": "installing", "message": "Installing WSL components..."})
-    # ``wsl.exe`` may exist in System32 even when not on PATH
-    wsl_for_install = _wsl_cmd() or str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "wsl.exe")
-    proc = await asyncio.create_subprocess_exec(
-        wsl_for_install,
-        "--install",
-        "--no-distribution",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out_b, err_b = await proc.communicate()
-    out = _decode_wsl_output(out_b or b"").strip()
-    err = _decode_wsl_output(err_b or b"").strip()
-    if proc.returncode != 0:
-        msg = err or out or "Failed to install WSL. Please run 'wsl --install' as Administrator."
-        yield sse("error", {"message": msg})
+    reboot_required = False
+    using_offline = False
+
+    yield sse("progress", {"step": "installing", "message": "Enabling WSL optional components..."})
+    dism = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "dism.exe")
+    for feature in ("Microsoft-Windows-Subsystem-Linux", "VirtualMachinePlatform"):
+        code, msg = await _run(
+            dism,
+            "/online",
+            "/enable-feature",
+            f"/featurename:{feature}",
+            "/all",
+            "/norestart",
+            timeout=900,
+        )
+        if not _is_ok_code(code):
+            yield sse("error", {"message": msg or f"Failed to enable feature: {feature}"})
+            return
+        reboot_required = reboot_required or code == 3010
+
+    offline_msi = _wsl_offline_msi_path()
+    if offline_msi is not None:
+        yield sse(
+            "progress",
+            {"step": "installing", "message": f"Installing WSL from local offline package ({offline_msi.name})..."},
+        )
+        code, msg = await _run(
+            "msiexec.exe",
+            "/i",
+            str(offline_msi),
+            "/qn",
+            "/norestart",
+            timeout=1800,
+        )
+        if _is_ok_code(code):
+            using_offline = True
+            reboot_required = reboot_required or code == 3010
+        else:
+            yield sse(
+                "progress",
+                {"step": "installing", "message": "Local WSL package install failed, falling back to online install..."},
+            )
+            if msg:
+                logger.warning("Offline WSL MSI install failed: %s", msg)
+
+    if not using_offline:
+        yield sse("progress", {"step": "installing", "message": "Installing WSL from network..."})
+        # ``wsl.exe`` may exist in System32 even when not on PATH
+        wsl_for_install = _wsl_cmd() or str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "wsl.exe")
+        code, msg = await _run(
+            wsl_for_install,
+            "--install",
+            "--no-distribution",
+            timeout=1800,
+        )
+        if not _is_ok_code(code):
+            msg = msg or "Failed to install WSL. Please run 'wsl --install' as Administrator."
+            yield sse("error", {"message": msg})
+            return
+        reboot_required = reboot_required or code == 3010
+
+    # Align behavior with `wsl --install`: default to WSL2 for newly imported distros.
+    wsl_after = _wsl_cmd()
+    if wsl_after:
+        code, msg = await _run(wsl_after, "--set-default-version", "2", timeout=60)
+        if not _is_ok_code(code):
+            logger.warning("Failed to set WSL default version to 2: %s", msg)
+
+    ready, reason = _probe_wsl2_readiness()
+    source = "offline package" if using_offline else "network"
+    if ready:
+        suffix = " A reboot may be required before continuing." if reboot_required else ""
+        yield sse("done", {"message": f"WSL installed successfully via {source}.{suffix}"})
         return
 
-    yield sse("done", {"message": "WSL installed. A reboot may be required before continuing."})
+    if reboot_required:
+        detail = f" ({reason})" if reason else ""
+        yield sse("done", {"message": f"WSL installation via {source} completed. Please reboot and retry VM setup{detail}."})
+        return
+
+    if reason:
+        yield sse("error", {"message": reason})
+        return
+
+    yield sse("error", {"message": "WSL install finished but runtime is still unavailable."})
+    return
 
 
 # ---------------------------------------------------------------------------
@@ -760,7 +958,7 @@ def _runtime_vm_backend() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Endpoints — generic /vm, frontend doesn't need to know Lima vs WSL
+# Endpoints 鈥?generic /vm, frontend doesn't need to know Lima vs WSL
 # ---------------------------------------------------------------------------
 
 
@@ -769,7 +967,7 @@ async def get_vm_status() -> dict[str, object]:
     """Check whether the VM backend is available.
 
     Returns ``vm_ready: true`` when cowork can start: Lima needs the instance
-    **Running**; WSL accepts **Running** or **Stopped** (distro exists — WSL
+    **Running**; WSL accepts **Running** or **Stopped** (distro exists 鈥?WSL
     starts it on first ``wsl -d``). Localized ``wsl -l -v`` state strings are
     recognized where known.
     """
@@ -824,7 +1022,7 @@ async def install_vm_backend() -> StreamingResponse:
 
 
 # ---------------------------------------------------------------------------
-# Process Manager — base class for long-running subprocess operations
+# Process Manager 鈥?base class for long-running subprocess operations
 # ---------------------------------------------------------------------------
 # Decouples subprocess lifecycle from HTTP request lifecycle so that:
 #   - Provisioning continues if the SSE connection drops (tab close)
@@ -861,7 +1059,7 @@ async def _lima_shell(cmd: str, *, timeout: float = 60) -> tuple[int, str, str]:
 
 
 async def _lima_instance_status() -> str | None:
-    """Return the Lima instance status ('Running', 'Stopped', …) or None."""
+    """Return the Lima instance status ('Running', 'Stopped', 鈥? or None."""
     proc = await asyncio.create_subprocess_exec(
         "limactl", "list", "--json",
         stdout=asyncio.subprocess.PIPE,
@@ -915,7 +1113,7 @@ class _ProcessManager(abc.ABC):
             while cursor < len(self._events):
                 yield self._events[cursor]
                 cursor += 1
-            # Terminal — stop streaming
+            # Terminal 鈥?stop streaming
             if self._status in ("done", "error"):
                 return
             # Wait for the next event
@@ -946,7 +1144,7 @@ class _ProcessManager(abc.ABC):
         try:
             await self._run(**kwargs)
             if self._status == "running":
-                # _run didn't set a terminal status — assume success
+                # _run didn't set a terminal status 鈥?assume success
                 self._status = "done"
         except asyncio.CancelledError:
             self._status = "error"
@@ -956,13 +1154,13 @@ class _ProcessManager(abc.ABC):
             logger.exception("%s failed", self.__class__.__name__)
             self._status = "error"
             self._error = "Internal error"
-            self._emit("error", {"message": "An internal error occurred — check server logs for details."})
+            self._emit("error", {"message": "An internal error occurred 鈥?check server logs for details."})
         finally:
             self._new_event.set()
 
 
 # ---------------------------------------------------------------------------
-# Build Manager — creates / starts the Lima VM
+# Build Manager 鈥?creates / starts the Lima VM
 # ---------------------------------------------------------------------------
 
 
@@ -1098,7 +1296,7 @@ class _BuildManager(_ProcessManager):
 
     async def _run_lima(self) -> None:
         # Ensure limactl has the virtualization entitlement before any VM
-        # operation — otherwise VZ will fail with a cryptic entitlement error.
+        # operation 鈥?otherwise VZ will fail with a cryptic entitlement error.
         await _ensure_limactl_entitlement()
 
         instance_status = await _lima_instance_status()
@@ -1122,13 +1320,13 @@ class _BuildManager(_ProcessManager):
                 self._emit("done", {"message": "VM started successfully"})
                 self._status = "done"
             else:
-                detail = f" — {last_line}" if last_line else ""
+                detail = f" 鈥?{last_line}" if last_line else ""
                 self._emit("error", {"message": f"VM start failed (exit {proc.returncode}){detail}"})
                 self._status = "error"
                 self._error = f"exit {proc.returncode}"
             return
 
-        # Instance doesn't exist — full build
+        # Instance doesn't exist 鈥?full build
         yaml_path = vm_lima_dir() / "hexagent.yaml"
         if not yaml_path.is_file():
             self._emit("error", {"message": f"VM config not found: {yaml_path}"})
@@ -1149,7 +1347,7 @@ class _BuildManager(_ProcessManager):
             self._emit("done", {"message": "VM created successfully"})
             self._status = "done"
         else:
-            detail = f" — {last_line}" if last_line else ""
+            detail = f" 鈥?{last_line}" if last_line else ""
             self._emit("error", {"message": f"VM creation failed (exit {proc.returncode}){detail}"})
             self._status = "error"
             self._error = f"exit {proc.returncode}"
@@ -1171,10 +1369,27 @@ class _BuildManager(_ProcessManager):
 
         status = await _wsl_instance_status()
         if _wsl_state_equals(status, _WSL_RUNNING_STATES):
+            self._emit("progress", {"step": "starting", "message": "Applying WSL mount policy..."})
+            policy_ok, policy_err = await _wsl_apply_post_start_policy(wsl_exe)
+            if not policy_ok:
+                self._emit("error", {"message": policy_err})
+                self._status = "error"
+                self._error = policy_err
+                return
+            ok2, err2 = await self._start_wsl_instance(
+                wsl_exe,
+                step="starting",
+                message="Restarting WSL distro to apply mount policy...",
+                retries_on_missing_disk=1,
+            )
+            if not ok2:
+                self._emit("error", {"message": err2})
+                self._status = "error"
+                self._error = err2
+                return
             self._emit("done", {"message": "WSL distro is already running"})
             self._status = "done"
             return
-
         if _wsl_state_equals(status, _WSL_STOPPED_STATES):
             self._emit("progress", {"step": "starting", "message": "Starting existing WSL distro..."})
             ok, err = await self._start_wsl_instance(
@@ -1184,6 +1399,24 @@ class _BuildManager(_ProcessManager):
                 retries_on_missing_disk=1,
             )
             if ok:
+                self._emit("progress", {"step": "starting", "message": "Applying WSL mount policy..."})
+                policy_ok, policy_err = await _wsl_apply_post_start_policy(wsl_exe)
+                if not policy_ok:
+                    self._emit("error", {"message": policy_err})
+                    self._status = "error"
+                    self._error = policy_err
+                    return
+                ok2, err2 = await self._start_wsl_instance(
+                    wsl_exe,
+                    step="starting",
+                    message="Restarting WSL distro to apply mount policy...",
+                    retries_on_missing_disk=1,
+                )
+                if not ok2:
+                    self._emit("error", {"message": err2})
+                    self._status = "error"
+                    self._error = err2
+                    return
                 self._emit("done", {"message": "WSL distro started successfully"})
                 self._status = "done"
                 return
@@ -1215,6 +1448,8 @@ class _BuildManager(_ProcessManager):
                     return
 
         prebuilt_tar = _wsl_prebuilt_tar_path()
+        if prebuilt_tar is None:
+            prebuilt_tar = _wsl_offline_rootfs_path()
         import_dir = data_dir() / "wsl" / _WSL_INSTANCE / "disk"
 
         # Distro does not exist: prefer external prebuilt rootfs if available.
@@ -1253,6 +1488,24 @@ class _BuildManager(_ProcessManager):
                 retries_on_missing_disk=6,
             )
             if ok:
+                self._emit("progress", {"step": "starting", "message": "Applying WSL mount policy..."})
+                policy_ok, policy_err = await _wsl_apply_post_start_policy(wsl_exe)
+                if not policy_ok:
+                    self._emit("error", {"message": policy_err})
+                    self._status = "error"
+                    self._error = policy_err
+                    return
+                ok2, err2 = await self._start_wsl_instance(
+                    wsl_exe,
+                    step="starting",
+                    message="Restarting WSL distro to apply mount policy...",
+                    retries_on_missing_disk=1,
+                )
+                if not ok2:
+                    self._emit("error", {"message": err2})
+                    self._status = "error"
+                    self._error = err2
+                    return
                 self._emit("done", {"message": "WSL distro imported from local prebuilt image and started successfully"})
                 self._status = "done"
             else:
@@ -1352,6 +1605,24 @@ class _BuildManager(_ProcessManager):
             retries_on_missing_disk=6,
         )
         if ok:
+            self._emit("progress", {"step": "starting", "message": "Applying WSL mount policy..."})
+            policy_ok, policy_err = await _wsl_apply_post_start_policy(wsl_exe)
+            if not policy_ok:
+                self._emit("error", {"message": policy_err})
+                self._status = "error"
+                self._error = policy_err
+                return
+            ok2, err2 = await self._start_wsl_instance(
+                wsl_exe,
+                step="starting",
+                message="Restarting WSL distro to apply mount policy...",
+                retries_on_missing_disk=1,
+            )
+            if not ok2:
+                self._emit("error", {"message": err2})
+                self._status = "error"
+                self._error = err2
+                return
             self._emit("done", {"message": "WSL distro created and started successfully"})
             self._status = "done"
         else:
@@ -1387,7 +1658,7 @@ class _BuildManager(_ProcessManager):
 
 
 # ---------------------------------------------------------------------------
-# Provision Manager — runs setup.sh inside the VM
+# Provision Manager 鈥?runs setup.sh inside the VM
 # ---------------------------------------------------------------------------
 
 _SETUP_MARKER_DIRS = ("/var/lib/hexagent/setup", "/var/lib/openagent/setup")
@@ -1488,7 +1759,7 @@ class _ProvisionManager(_ProcessManager):
         )
         self._process = proc
 
-        # Read stdout line by line — setup.sh writes only @@SETUP: lines here
+        # Read stdout line by line 鈥?setup.sh writes only @@SETUP: lines here
         assert proc.stdout is not None
         while True:
             line = await proc.stdout.readline()
@@ -1603,7 +1874,7 @@ class _ProvisionManager(_ProcessManager):
 
         wsl_exe = _wsl_cmd()
         if not wsl_exe:
-            self._emit("error", {"message": "wsl.exe not found — cannot provision"})
+            self._emit("error", {"message": "wsl.exe not found 鈥?cannot provision"})
             self._status = "error"
             self._error = "WSL missing"
             return
@@ -1814,5 +2085,13 @@ async def get_provision_log() -> Response:
     try:
         text = await mgr.get_log()
     except Exception:
-        text = "(Could not read log — VM may not be running)"
+        text = "(Could not read log 鈥?VM may not be running)"
     return Response(content=text, media_type="text/plain")
+
+
+
+
+
+
+
+

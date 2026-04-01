@@ -198,6 +198,28 @@ class TestMount:
         assert vm.shell.await_count == 3
         assert "mount --bind" in vm.shell.call_args_list[1].args[0]
 
+    async def test_mount_self_heal_ensures_drvfs_before_bind(self, tmp_path: Any) -> None:
+        vm = _mock_vm()
+        mgr = _make_manager(vm)
+        d = tmp_path / "code"
+        d.mkdir()
+
+        vm.read_mounts = lambda: [ResolvedMount(host_path=str(d), guest_path="/mnt/code", writable=False)]
+        vm.shell = AsyncMock(
+            side_effect=[
+                _fail(),  # findmnt -n /mnt/code -> missing
+                _ok(),  # mount --bind
+                _ok(stdout="/mnt/code /mnt/c/code"),  # verify findmnt
+            ]
+        )
+        vm._ensure_drvfs_mount_for_wsl_path = AsyncMock()  # type: ignore[attr-defined]
+
+        with patch("hexagent.computer.local._wsl._win_path_to_wsl", return_value="/mnt/c/code"):
+            await mgr.mount(Mount(source=str(d), target="code"))
+
+        vm._ensure_drvfs_mount_for_wsl_path.assert_awaited_once_with("/mnt/c/code")
+        vm.apply_mounts.assert_not_awaited()
+
     async def test_mount_empty_list_is_noop(self) -> None:
         vm = _mock_vm()
         mgr = _make_manager(vm)
