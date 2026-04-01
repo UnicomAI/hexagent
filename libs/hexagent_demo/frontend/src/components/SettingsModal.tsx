@@ -397,6 +397,13 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
     custom_url: false,
   },
   {
+    id: "yuanjing",
+    label: "YuanJing",
+    base_url: "https://maas-api.ai-yuanjing.com/openapi/compatible-mode",
+    provider: "yuanjing",
+    custom_url: false,
+  },
+  {
     id: "openai-compatible",
     label: "OpenAI-Compatible",
     base_url: "",
@@ -424,6 +431,11 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
   const [dropTarget, setDropTarget] = useState<{ idx: number; half: "top" | "bottom" } | null>(null);
   const rowRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const dragFromHandle = useRef(false);
+
+  // YuanJing unified API key state - derived from first YuanJing model's api_key
+  const yuanjingModels = config.models.filter((m) => m.provider === "yuanjing");
+  const [showYuanjingKey, setShowYuanjingKey] = useState(false);
+  const [yuanjingApiKey, setYuanjingApiKey] = useState(() => yuanjingModels[0]?.api_key ?? "");
 
   const updateModel = (id: string, updates: Partial<ModelConfig>) => {
     onConfigChange((prev) => ({
@@ -711,6 +723,53 @@ function ModelTab({ config, onConfigChange }: ConfigTabProps) {
           <button className="model-add-btn" onClick={() => setShowAddPicker(true)}>
             <Plus size={16} /> {t("model.addModel")}
           </button>
+        </div>
+      )}
+
+      {/* ── YuanJing Unified Key ── */}
+      {config.models.some((m) => m.provider === "yuanjing") && (
+        <div className="tools-group" style={{ marginTop: 16 }}>
+          <div className="tools-group-header">
+            <Zap size={14} className="tools-group-icon" />
+            <span className="tools-group-title">{t("model.yuanjingKey")}</span>
+            <span className="tools-group-desc">{t("model.yuanjingKeyDesc")}</span>
+          </div>
+          <div className="tools-group-body">
+            <div className="mc-field">
+              <label className="mc-label">{t("model.apiKey")}</label>
+              <div className="mc-key-wrap">
+                <input
+                  className="mc-input mc-input--key"
+                  type={showYuanjingKey ? "text" : "password"}
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-form-type="other"
+                  value={yuanjingApiKey}
+                  onChange={(e) => {
+                    const newKey = e.target.value;
+                    setYuanjingApiKey(newKey);
+                    // Update all YuanJing models' api_key
+                    onConfigChange((prev) => ({
+                      ...prev,
+                      models: prev.models.map((m) =>
+                        m.provider === "yuanjing" ? { ...m, api_key: newKey } : m
+                      ),
+                    }));
+                  }}
+                  placeholder="sk-..."
+                />
+                <button
+                  className="mc-key-toggle"
+                  onClick={() => setShowYuanjingKey(!showYuanjingKey)}
+                  title={showYuanjingKey ? t("common:hide") : t("common:show")}
+                  type="button"
+                >
+                  {showYuanjingKey ? <Eye size={14} /> : <EyeOff size={14} />}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

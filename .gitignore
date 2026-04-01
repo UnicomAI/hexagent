@@ -231,6 +231,9 @@ libs/hexagent_demo/electron/dist.zip
 **/wsl/prebuilt/*.tar
 libs/hexagent_demo/electron/prebuilt/*.tar
 
+# Lima prebuilt VM image (local build artifact, too large for GitHub)
+**/lima/prebuilt/*.tar.gz
+
 # One-off investigation/diagnostic reports
 reports/
 

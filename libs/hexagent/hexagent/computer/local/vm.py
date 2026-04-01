@@ -12,6 +12,8 @@ to an isolated Linux user on the VM.
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import shlex
 import sys
 import uuid
@@ -35,6 +37,13 @@ from hexagent.exceptions import CLIError, UnsupportedPlatformError, VMError, VMM
 if TYPE_CHECKING:
     from hexagent.computer.local._lima import LimaVM
     from hexagent.types import CLIResult
+
+_logger = logging.getLogger(__name__)
+
+# Guest path where the host user home directory is pre-mounted via virtiofs.
+# Session mounts are served as bind mounts from this subtree, so the VM
+# never needs to restart when the user picks a working directory.
+_HOST_HOME_GUEST_PATH = "/mnt/host_home"
 
 
 # ------------------------------------------------------------------
@@ -95,14 +104,12 @@ class _VMSessionComputer(AsyncComputerMixin):
         command: str,
         *,
         timeout: float | None = None,  # noqa: ASYNC109
-        input: str | None = None,
     ) -> CLIResult:
         """Execute a command as the session user.
 
         Args:
             command: Shell command to run.
             timeout: Timeout in milliseconds (Computer protocol).
-            input: Optional stdin to pass to the command.
 
         Returns:
             CLIResult with stdout, stderr, exit_code, and metadata.
@@ -114,7 +121,6 @@ class _VMSessionComputer(AsyncComputerMixin):
                 command,
                 user=self._session_name,
                 timeout=timeout_ms / 1000,
-                input=input,
             )
         except VMError as e:
             raise CLIError(str(e)) from e
@@ -264,20 +270,28 @@ class LocalVM:
     ) -> None:
         """Add one or more mounts to the VM.
 
-        Idempotent: mounts already present in lima.yaml (same host path,
-        guest path, and writable flag) are silently skipped.
+        **Session scope** (``session`` given): uses ``mount --bind`` inside
+        the guest to map ``_HOST_HOME_GUEST_PATH/{rel}`` →
+        ``/sessions/{name}/mnt/{target}``.  Instantaneous — no VM restart.
+        The ``defer`` parameter is ignored for session mounts.
+        Mount sources must be under the current user's home directory.
+
+        **System scope** (``session=None``): updates lima.yaml and restarts
+        the VM (unless ``defer=True``).  Behaviour is unchanged from the
+        original implementation.
 
         Args:
             mounts: A single mount or list of mounts to add.
             session: Target session name. ``None`` = system scope (``/mnt/``).
-            defer: If ``True``, update lima.yaml but skip the VM restart.
-                Call :meth:`apply` later to apply all deferred changes in
-                a single restart.
+            defer: If ``True``, update lima.yaml but skip the VM restart
+                (system scope only; ignored for session scope).
 
         Raises:
             ValueError: Invalid mount source.
-            VMMountConflictError: Guest path conflict with different config.
-            VMError: Session does not exist on the VM.
+            VMMountConflictError: Guest path conflict within a batch
+                (system scope only).
+            VMError: Session does not exist, source not under home (session
+                scope), or bind-mount command failed.
         """
         mount_list = [mounts] if isinstance(mounts, Mount) else list(mounts)
         if not mount_list:
@@ -285,37 +299,55 @@ class LocalVM:
 
         self._validate_mounts(mount_list)
 
-        # Validate session user exists on the VM
         if session is not None:
+            # ── Session scope: bind mounts inside the guest (no VM restart) ──
+            for m in mount_list:
+                self._validate_session_source(m)
+
             result = await self._vm.shell(f"id -u {shlex.quote(session)}")
             if result.exit_code != 0:
                 msg = f"Session '{session}' does not exist on the VM"
                 raise VMError(msg)
 
-        scope = "session" if session is not None else "system"
-        resolved_new = [self._resolve_mount(m, scope=scope, session_name=session) for m in mount_list]
+            # One-time setup: ensure /mnt/host_home virtiofs is configured.
+            await self._ensure_host_home_mounted()
 
-        # Within-batch conflict check
-        self._check_conflicts(resolved_new, scope_label=session or "system")
+            home = Path.home()
+            for m in mount_list:
+                rel = Path(m.source).relative_to(home).as_posix()
+                guest_src = f"{_HOST_HOME_GUEST_PATH}/{rel}"
+                guest_dst = self._target_to_guest(m.target, scope="session", session_name=session)
+                result = await self._vm.shell(
+                    f"sudo mkdir -p {shlex.quote(guest_dst)} "
+                    f"&& sudo mount --bind {shlex.quote(guest_src)} {shlex.quote(guest_dst)}"
+                )
+                if result.exit_code != 0:
+                    msg = (
+                        f"Bind mount failed '{guest_src}' → '{guest_dst}' "
+                        f"for session '{session}': {result.stderr}"
+                    )
+                    raise VMError(msg)
+                _logger.debug("bind-mounted %s → %s (session=%s)", guest_src, guest_dst, session)
+            return
+
+        # ── System scope: virtiofs via lima.yaml (original behaviour) ──
+        resolved_new = [self._resolve_mount(m, scope="system", session_name=None) for m in mount_list]
+        self._check_conflicts(resolved_new, scope_label="system")
 
         async with self._lock:
-            # Read existing mounts from lima.yaml (authoritative)
             existing = self._vm.read_mounts()
             existing_set = _mount_set(existing)
 
-            # Filter out already-present mounts (idempotent)
             truly_new = [r for r in resolved_new if (r.host_path, r.guest_path, r.writable) not in existing_set]
             if not truly_new:
                 return
 
-            # Collision check: same guest path but different config
             existing_guests = {r.guest_path for r in existing}
             for r in truly_new:
                 if r.guest_path in existing_guests:
                     msg = f"Mount conflict: guest path '{r.guest_path}' is already in use"
                     raise VMMountConflictError(msg)
 
-            # Merge existing + new
             merged = existing + truly_new
             if defer:
                 self._vm.write_mounts(merged)
@@ -331,26 +363,41 @@ class LocalVM:
     ) -> None:
         """Remove one or more mounts by target path.
 
-        Idempotent: targets not found in lima.yaml are silently skipped.
+        **Session scope**: runs ``sudo umount`` inside the guest.
+        No lima.yaml change, no VM restart.  ``defer`` is ignored.
+        Idempotent: inactive targets are silently skipped.
+
+        **System scope**: removes from lima.yaml and restarts the VM
+        (unless ``defer=True``).  Behaviour is unchanged.
 
         Args:
             targets: A single target or list of targets to remove.
             session: Scope. ``None`` = system.
-            defer: If ``True``, update lima.yaml but skip the VM restart.
-                The mount disappears from the config immediately (so
-                conflict checks stay correct) but remains active in the
-                running VM until the next restart.
+            defer: If ``True``, update lima.yaml but skip the VM restart
+                (system scope only; ignored for session scope).
         """
         target_list = [targets] if isinstance(targets, str) else list(targets)
         if not target_list:
             return
 
-        # Resolve targets to guest paths
-        scope = "session" if session is not None else "system"
-        guest_paths_to_remove = {self._target_to_guest(t, scope=scope, session_name=session) for t in target_list}
+        if session is not None:
+            # ── Session scope: umount inside the guest ──
+            for t in target_list:
+                guest_dst = self._target_to_guest(t, scope="session", session_name=session)
+                quoted = shlex.quote(guest_dst)
+                check = await self._vm.shell(f"findmnt --target {quoted} > /dev/null 2>&1")
+                if check.exit_code != 0:
+                    _logger.debug("session mount %s not active — skipping umount", guest_dst)
+                    continue
+                result = await self._vm.shell(f"sudo umount {quoted}")
+                if result.exit_code != 0:
+                    _logger.warning("umount %s failed: %s", guest_dst, result.stderr)
+            return
+
+        # ── System scope: lima.yaml update (original behaviour) ──
+        guest_paths_to_remove = {self._target_to_guest(t, scope="system", session_name=None) for t in target_list}
 
         async with self._lock:
-            # Read existing from lima.yaml
             existing = self._vm.read_mounts()
             remaining = [m for m in existing if m.guest_path not in guest_paths_to_remove]
 
@@ -449,7 +496,14 @@ class LocalVM:
         return _VMSessionComputer(vm=self._vm, session_name=name)
 
     async def destroy(self, name: str) -> None:
-        """Delete a session user and its mounts.
+        """Delete a session user and all its bind mounts.
+
+        Sequence:
+        1. Enumerate and umount all active bind mounts under
+           ``/sessions/{name}/mnt/`` (via ``findmnt``).
+        2. Delete the session user with ``userdel -r``.
+        3. Remove any stale lima.yaml entries for this session
+           (``write_mounts`` only — no VM restart).
 
         Args:
             name: Session name to destroy.
@@ -457,16 +511,41 @@ class LocalVM:
         if await self._vm.status() != "Running":
             await self.start()
 
-        await self._vm.shell(f"sudo userdel -r {shlex.quote(name)}")
+        # Step 1: unmount all active bind mounts for this session.
+        mnt_prefix = f"/sessions/{name}/mnt"
+        findmnt_result = await self._vm.shell(
+            f"findmnt --json --submounts --target {shlex.quote(mnt_prefix)} 2>/dev/null || true"
+        )
+        if findmnt_result.stdout.strip():
+            try:
+                data = json.loads(findmnt_result.stdout)
+                for entry in data.get("filesystems", []):
+                    target = entry.get("target", "")
+                    if target and target.startswith(mnt_prefix):
+                        r = await self._vm.shell(f"sudo umount {shlex.quote(target)}")
+                        if r.exit_code != 0:
+                            _logger.warning(
+                                "umount %s failed during destroy of '%s': %s",
+                                target, name, r.stderr,
+                            )
+            except (json.JSONDecodeError, AttributeError):
+                # Fallback: recursive umount
+                await self._vm.shell(
+                    f"sudo umount --recursive {shlex.quote(mnt_prefix)} 2>/dev/null || true"
+                )
 
-        # Remove all session mounts from lima.yaml
+        # Step 2: delete the session user and home directory.
+        result = await self._vm.shell(f"sudo userdel -r {shlex.quote(name)}")
+        if result.exit_code != 0:
+            _logger.warning("userdel failed for '%s': %s", name, result.stderr)
+
+        # Step 3: clean up any stale lima.yaml entries (write only, no restart).
         async with self._lock:
             existing = self._vm.read_mounts()
             prefix = f"/sessions/{name}/"
             remaining = [m for m in existing if not m.guest_path.startswith(prefix)]
-
             if len(remaining) != len(existing):
-                await self._vm.apply_mounts(remaining)
+                self._vm.write_mounts(remaining)
 
     async def list_sessions(self) -> list[str]:
         """List active sessions on the VM."""
@@ -536,6 +615,90 @@ class LocalVM:
             seen[m.guest_path] = m.host_path
 
     # ------------------------------------------------------------------
+    # Host-home pre-mount (bind mount support)
+    # ------------------------------------------------------------------
+
+    async def _ensure_host_home_mounted(self) -> None:
+        """Ensure ``Path.home()`` is pre-mounted at ``_HOST_HOME_GUEST_PATH``.
+
+        Adds the host home directory to lima.yaml as a read-only virtiofs
+        mount and restarts the VM exactly once.  Subsequent calls are
+        no-ops (idempotent check inside the lock).
+
+        After the mount is active, locks down the guest path to root-only
+        (``chmod 700``) so session users cannot traverse the full tree —
+        they only access their own bind-mounted subdirectory.
+
+        Raises:
+            VMError: If the VM restart fails.
+        """
+        host_home = str(Path.home())
+
+        async with self._lock:
+            existing = self._vm.read_mounts()
+            if any(
+                m.host_path == host_home and m.guest_path == _HOST_HOME_GUEST_PATH
+                for m in existing
+            ):
+                return  # Already configured — no restart needed
+
+            _logger.info(
+                "Pre-mounting host home '%s' → '%s' (one-time VM restart)",
+                host_home,
+                _HOST_HOME_GUEST_PATH,
+            )
+            # Remove stale per-session virtiofs entries; they are now served
+            # as bind mounts and no longer belong in lima.yaml.
+            clean = [m for m in existing if not m.guest_path.startswith("/sessions/")]
+            merged = [
+                *clean,
+                ResolvedMount(
+                    host_path=host_home,
+                    guest_path=_HOST_HOME_GUEST_PATH,
+                    writable=True,
+                ),
+            ]
+            await self._vm.apply_mounts(merged)
+
+        # Restrict access: only root can enter /mnt/host_home.
+        # Session users reach their data exclusively via their bind mounts.
+        lock_result = await self._vm.shell(
+            f"sudo chown root:root {_HOST_HOME_GUEST_PATH} "
+            f"&& sudo chmod 700 {_HOST_HOME_GUEST_PATH}"
+        )
+        if lock_result.exit_code != 0:
+            _logger.warning(
+                "Failed to restrict permissions on %s: %s",
+                _HOST_HOME_GUEST_PATH,
+                lock_result.stderr,
+            )
+
+    @staticmethod
+    def _validate_session_source(mount: Mount) -> None:
+        """Raise ``VMError`` if a session mount source is not under ``Path.home()``.
+
+        Session mounts are served as bind mounts from
+        ``_HOST_HOME_GUEST_PATH``, which exposes only the host home subtree.
+        Paths outside home cannot be reached this way.
+
+        Args:
+            mount: The mount to validate.
+
+        Raises:
+            VMError: If the source is not under the current user's home.
+        """
+        home = Path.home()
+        try:
+            Path(mount.source).relative_to(home)
+        except ValueError:
+            msg = (
+                f"Session mount source '{mount.source}' must be under "
+                f"the host home directory '{home}'. "
+                "Only paths within the home directory are supported."
+            )
+            raise VMError(msg) from None
+
+    # ------------------------------------------------------------------
     # Session management
     # ------------------------------------------------------------------
 
@@ -554,7 +717,21 @@ class LocalVM:
         qname = shlex.quote(name)
         home = f"/sessions/{name}"
         qhome = shlex.quote(home)
-        result = await self._vm.shell(f"sudo useradd -m -d {qhome} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {qname}")
+
+        # Use the same UID as the owner of the virtiofs-mounted host home so the
+        # session user can write to bind-mounted host directories without
+        # changing host file ownership.  -o allows the non-unique uid.
+        uid_result = await self._vm.shell(f"stat -c %u {shlex.quote(_HOST_HOME_GUEST_PATH)}")
+        uid_flag = (
+            f"-u {uid_result.stdout.strip()} -o"
+            if uid_result.exit_code == 0 and uid_result.stdout.strip().isdigit()
+            else ""
+        )
+
+        result = await self._vm.shell(
+            f"sudo useradd -m -d {qhome} -s /bin/bash --no-log-init "
+            f"-K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {uid_flag} {qname}"
+        )
         if result.exit_code != 0:
             msg = f"Failed to create session user '{name}': {result.stderr}"
             raise VMError(msg)

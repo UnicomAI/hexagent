@@ -96,6 +96,7 @@ run_pyinstaller_arch() {
     # Uses a dedicated build venv per arch (never touches the dev .venv).
     local target_arch="$1"
     local arch_flag="$target_arch"
+    local uv_cmd="uv"
 
     if [ "$target_arch" = "x64" ] || [ "$target_arch" = "x86_64" ]; then
         arch_flag="x86_64"
@@ -104,6 +105,18 @@ run_pyinstaller_arch() {
             echo "ERROR: Rosetta 2 not installed. Install with: softwareupdate --install-rosetta"
             exit 1
         fi
+
+        # The system uv may be arm64-only and cannot run under Rosetta.
+        # Download an x86_64 uv binary for cross-compilation.
+        local uv_x64_dir="$BACKEND_DIR/.uv-x86_64"
+        local uv_x64_bin="$uv_x64_dir/uv"
+        if [ ! -f "$uv_x64_bin" ] || ! arch -x86_64 "$uv_x64_bin" --version &>/dev/null; then
+            echo "==> Downloading x86_64 uv for cross-compilation..."
+            mkdir -p "$uv_x64_dir"
+            curl -fsSL "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-apple-darwin.tar.gz" \
+                | tar -xz -C "$uv_x64_dir" --strip-components=1
+        fi
+        uv_cmd="$uv_x64_bin"
     else
         echo "==> Building $target_arch backend..."
     fi
@@ -115,15 +128,27 @@ run_pyinstaller_arch() {
     local arch_venv="$BACKEND_DIR/.venv-build-${arch_flag}"
     export UV_PROJECT_ENVIRONMENT="$arch_venv"
 
-    # Create fresh venv if it doesn't exist
+    # Ensure a managed Python of the correct architecture is available.
+    # The x86_64 uv will install x86_64 Python; arm64 uv will install arm64.
+    echo "==> Ensuring $arch_flag Python is available..."
+    arch -"$arch_flag" "$uv_cmd" python install 3.12
+
+    # Create fresh venv if it doesn't exist (or recreate if wrong arch)
+    if [ -d "$arch_venv" ]; then
+        local venv_python="$arch_venv/bin/python"
+        if ! arch -"$arch_flag" "$venv_python" -c "pass" 2>/dev/null; then
+            echo "==> Existing venv has wrong architecture, recreating..."
+            rm -rf "$arch_venv"
+        fi
+    fi
     if [ ! -d "$arch_venv" ]; then
         echo "==> Creating $arch_flag build venv..."
-        arch -"$arch_flag" uv venv "$arch_venv"
+        arch -"$arch_flag" "$uv_cmd" venv "$arch_venv" --python 3.12
     fi
 
     echo "==> Installing dependencies for $arch_flag..."
-    arch -"$arch_flag" uv sync
-    uv pip install --python "$arch_venv/bin/python" pyinstaller
+    arch -"$arch_flag" "$uv_cmd" sync
+    "$uv_cmd" pip install --python "$arch_venv/bin/python" pyinstaller
 
     echo "==> Running PyInstaller for $arch_flag..."
     arch -"$arch_flag" "$arch_venv/bin/python" -m PyInstaller "${PYINSTALLER_ARGS[@]}" --target-architecture "$arch_flag"

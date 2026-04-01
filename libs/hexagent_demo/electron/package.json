@@ -47,11 +47,11 @@
         "to": "lima"
       }
     ],
-    "artifactName": "${productName}.${ext}",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "mac": {
       "target": [
         {
-          "target": "dmg",
+          "target": "dir",
           "arch": [
             "arm64",
             "x64"

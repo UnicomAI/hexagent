@@ -526,35 +526,56 @@ class AgentManager:
         Public skills live in the bundled skills directory (ships with the
         application).  Private skills live in user data.
 
-        This may restart the VM if new mounts are needed (idempotent — skips
-        mounts already present in lima.yaml).  The cost is paid once, during
-        warm session creation which runs in the background while the user is
-        on the welcome screen.
+        This may restart the VM if new or replacement mounts are needed.
+        Stale mounts (host path no longer valid, e.g. after a PyInstaller
+        _MEIPASS path change between launches) are removed and re-added in
+        a single VM restart.  The cost is paid once, during warm session
+        creation which runs in the background while the user is on the
+        welcome screen.
         """
         assert self._vm_manager is not None
+
+        from pathlib import Path
 
         from hexagent.computer import Mount
 
         from hexagent_api.paths import bundled_skills_dir, skills_dir
 
-        existing_guests = {m.guest_path for m in self._vm_manager.list_mounts()}
+        existing_by_guest = {m.guest_path: m for m in self._vm_manager.list_mounts()}
 
         # (subdir_name, host_root)
         mount_sources = {
             "public": bundled_skills_dir() / "public",
             "private": skills_dir() / "private",
         }
+        stale_targets: list[str] = []
         skill_mounts: list[Mount] = []
         for subdir, host_path in mount_sources.items():
+            guest = f"/mnt/skills/{subdir}"
+            existing = existing_by_guest.get(guest)
+            if existing is not None:
+                if existing.host_path == str(host_path) and host_path.is_dir():
+                    continue  # already correctly mounted
+                # Stale: host path changed (e.g. new _MEIPASS) or no longer exists
+                logger.info(
+                    "Stale skill mount detected for %s: %s (dir_exists=%s) → will replace with %s",
+                    guest, existing.host_path, Path(existing.host_path).is_dir(), host_path,
+                )
+                stale_targets.append(f"skills/{subdir}")
             if host_path.is_dir():
-                guest = f"/mnt/skills/{subdir}"
-                if guest not in existing_guests:
-                    skill_mounts.append(
-                        Mount(source=str(host_path), target=f"skills/{subdir}")
-                    )
+                skill_mounts.append(Mount(source=str(host_path), target=f"skills/{subdir}"))
+
+        # Deferred removal keeps lima.yaml consistent before the mount call.
+        if stale_targets:
+            logger.info("Removing %d stale skill mount(s): %s", len(stale_targets), stale_targets)
+            await self._vm_manager.unmount(stale_targets, defer=True)
+
         if skill_mounts:
             logger.info("Mounting %d skill dir(s): %s", len(skill_mounts), [m.target for m in skill_mounts])
             await self._vm_manager.mount(skill_mounts)
+        elif stale_targets:
+            # Only removals with no replacements — apply the deferred changes now.
+            await self._vm_manager.apply()
 
     async def start(self) -> None:
         """Initialize the agent manager.

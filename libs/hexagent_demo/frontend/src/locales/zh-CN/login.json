@@ -1,0 +1,17 @@
+{
+  "appName": "UniClaw-工作虾",
+  "title": "验证码登录",
+  "subtitle": "你所在的区域仅支持手机号登录",
+  "phonePlaceholder": "请输入手机号",
+  "captchaPlaceholder": "请输入图形验证码",
+  "refreshCaptcha": "点击刷新",
+  "loadingCaptcha": "加载中",
+  "smsPlaceholder": "请输入短信验证码",
+  "sendCode": "发送验证码",
+  "resendAfter": "后重新获取",
+  "captchaError": "图形验证码错误",
+  "sendCodeFailed": "发送验证码失败",
+  "login": "登录",
+  "loggingIn": "登录中...",
+  "loginFailed": "登录失败"
+}
