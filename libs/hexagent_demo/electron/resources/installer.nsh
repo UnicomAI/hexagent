@@ -102,6 +102,7 @@
   Delete "$INSTDIR\ubuntu-base-24.04-amd64.tar.gz"
   ; Unregister the WSL distribution to clean up registry and metadata
   nsExec::Exec "wsl.exe --unregister hexagent"
-  ; Remove the persistent data directory in the user profile
+  ; Remove persistent data directories
+  RMDir /r "$APPDATA\hexagent"
   RMDir /r "$PROFILE\.hexagent"
 !macroend
