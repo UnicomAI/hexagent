@@ -1,0 +1,17 @@
+{
+  "appName": "UniClaw-Work",
+  "title": "SMS Login",
+  "subtitle": "Your region only supports phone number login",
+  "phonePlaceholder": "Enter phone number",
+  "captchaPlaceholder": "Enter captcha",
+  "refreshCaptcha": "Click to refresh",
+  "loadingCaptcha": "Loading",
+  "smsPlaceholder": "Enter SMS code",
+  "sendCode": "Send Code",
+  "resendAfter": " to resend",
+  "captchaError": "Incorrect captcha",
+  "sendCodeFailed": "Failed to send code",
+  "login": "Log In",
+  "loggingIn": "Logging in...",
+  "loginFailed": "Login failed"
+}

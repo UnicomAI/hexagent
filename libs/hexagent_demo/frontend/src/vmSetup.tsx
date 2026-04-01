@@ -518,40 +518,42 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
 
   // ── Context value ──
 
-  // Windows-only auto setup:
-  // automatically trigger VM Engine + VM Instance on startup so users
-  // don't need to click "Install" manually after app installation.
+  // Auto setup: automatically trigger VM Engine + VM Instance on startup so
+  // users don't need to click "Install" manually after app installation.
+  // Windows-specific paths (WSL install / repair) are guarded by IS_WINDOWS.
+  // The final "phase1 done → start build" path runs on all platforms.
   useEffect(() => {
-    if (!IS_WINDOWS) return;
     if (autoBootstrapTriggeredRef.current) return;
     if (!vmStatus?.supported) return;
     if (phase1 === "checking") return;
     if (phase1 === "running" || phase2 === "running") return;
 
-    const inferredBackend = navigator.platform.toUpperCase().includes("WIN") ? "wsl" : "lima";
-    const currentBackend = vmStatus?.backend ?? inferredBackend;
-    const canAssistWslInstall =
-      currentBackend === "wsl" &&
-      typeof window !== "undefined" &&
-      typeof window.electronAPI?.installWslRuntime === "function";
+    if (IS_WINDOWS) {
+      const inferredBackend = navigator.platform.toUpperCase().includes("WIN") ? "wsl" : "lima";
+      const currentBackend = vmStatus?.backend ?? inferredBackend;
+      const canAssistWslInstall =
+        currentBackend === "wsl" &&
+        typeof window !== "undefined" &&
+        typeof window.electronAPI?.installWslRuntime === "function";
 
-    if (phase1 === "pending") {
-      autoBootstrapTriggeredRef.current = true;
-      setAutoBootstrapping(true);
-      notify("Detected first-time Windows setup. Starting VM runtime install automatically...", "info");
-      void doInstallLima();
-      return;
-    }
+      if (phase1 === "pending") {
+        autoBootstrapTriggeredRef.current = true;
+        setAutoBootstrapping(true);
+        notify("Detected first-time Windows setup. Starting VM runtime install automatically...", "info");
+        void doInstallLima();
+        return;
+      }
 
-    // On some first-run Windows hosts, VM status exposes a reason
-    // (e.g. wsl.exe missing / feature disabled) and phase1 is "error".
-    // If desktop app can assist runtime install, auto-bootstrap anyway.
-    if (phase1 === "error" && phase2 === "pending" && canAssistWslInstall) {
-      autoBootstrapTriggeredRef.current = true;
-      setAutoBootstrapping(true);
-      notify("Detected actionable WSL runtime issue. Starting automatic repair...", "info");
-      void doInstallLima();
-      return;
+      // On some first-run Windows hosts, VM status exposes a reason
+      // (e.g. wsl.exe missing / feature disabled) and phase1 is "error".
+      // If desktop app can assist runtime install, auto-bootstrap anyway.
+      if (phase1 === "error" && phase2 === "pending" && canAssistWslInstall) {
+        autoBootstrapTriggeredRef.current = true;
+        setAutoBootstrapping(true);
+        notify("Detected actionable WSL runtime issue. Starting automatic repair...", "info");
+        void doInstallLima();
+        return;
+      }
     }
 
     if (phase1 === "done" && phase2 === "pending") {
@@ -569,10 +571,10 @@ export function VMSetupProvider({ children }: { children: ReactNode }) {
     }
   }, [autoBootstrapping, phase1, phase2]);
 
-  // Windows-first run: once VM instance is ready, auto start dependency provision
-  // in background so users don't need to click "Install in background" manually.
+  // Once VM instance is ready, auto start dependency provision in background
+  // so users don't need to click "Install in background" manually.
+  // On macOS with prebuilt image the backend will skip all steps immediately.
   useEffect(() => {
-    if (!IS_WINDOWS) return;
     if (autoProvisionTriggeredRef.current) return;
     if (phase1 !== "done" || phase2 !== "done") return;
     if (phase3 !== "pending") return;
