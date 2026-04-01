@@ -452,11 +452,8 @@ function App() {
     return <LoginPage onLoginSuccess={authLogin} />;
   }
 
-  // Derive display name from auth user info (phone or name), mask middle 4 digits
-  const rawPhone = user?.phone as string | undefined;
-  const authUserName = rawPhone
-    ? rawPhone.replace(/^(\d{3})\d{4}(\d+)$/, "$1****$2")
-    : settings.fullName;
+  // Derive display name from auth user info (phone or name)
+  const authUserName = (user?.phone as string) || settings.fullName;
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>

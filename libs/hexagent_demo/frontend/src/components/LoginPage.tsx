@@ -85,7 +85,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
       const res = await smsLogin(phone, smsCode);
       if (res.code === 0) {
         const { token, expires_in, scope, ...rest } = res.data;
-        onLoginSuccess(token, { token, expires_in, scope, phone, ...rest }, expires_in, scope);
+        onLoginSuccess(token, { token, expires_in, scope, ...rest }, expires_in, scope);
       } else {
         if (res.msg === "验证码失效，请重新发送短信") {
           await fetchCaptcha();
