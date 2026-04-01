@@ -21,6 +21,7 @@ from hexagent.computer.local._wsl import (
     WslVM,
     _decode_wsl_output,
     _parse_status_output,
+    _safe_wsl_subprocess_env,
     _session_user_from_guest_mount_path,
     _win_path_to_wsl,
 )
@@ -435,6 +436,71 @@ class TestWslVMStart:
 
 
 # ===========================================================================
+# WslVM copy fallback
+# ===========================================================================
+
+
+class TestWslVMCopy:
+    """Tests for WslVM.copy() UNC retry/fallback behavior."""
+
+    def _make_vm(self) -> WslVM:
+        with (
+            patch("hexagent.computer.local._wsl._PLATFORM", "win32"),
+            patch("shutil.which", return_value="C:\\Windows\\System32\\wsl.exe"),
+        ):
+            return WslVM(instance="test")
+
+    async def test_copy_retries_with_alternate_unc_prefix_on_winerror_67(self) -> None:
+        vm = self._make_vm()
+        err = FileNotFoundError(67, "network name not found", r"\\wsl.localhost\\test\\")
+
+        with (
+            patch.object(vm, "_resolve_unc_prefix", new_callable=AsyncMock, return_value=r"\\wsl.localhost"),
+            patch.object(vm, "_copy_via_unc", new_callable=AsyncMock) as mock_unc,
+            patch.object(vm, "_copy_host_to_guest_via_drvfs", new_callable=AsyncMock) as mock_drvfs,
+            patch.object(vm, "shell", new_callable=AsyncMock, return_value=_ok()),
+        ):
+            mock_unc.side_effect = [err, None]
+
+            await vm.copy(r"D:\tmp\a.pdf", "/tmp/a.pdf", host_to_guest=True)
+
+        assert mock_unc.await_count == 2
+        first_prefix = mock_unc.await_args_list[0].kwargs["unc_prefix"]
+        second_prefix = mock_unc.await_args_list[1].kwargs["unc_prefix"]
+        assert first_prefix == r"\\wsl.localhost"
+        assert second_prefix == r"\\wsl$"
+        mock_drvfs.assert_not_awaited()
+
+    async def test_copy_falls_back_to_drvfs_after_unc_failures(self) -> None:
+        vm = self._make_vm()
+        err1 = FileNotFoundError(67, "network name not found", r"\\wsl.localhost\\test\\")
+        err2 = FileNotFoundError(67, "network name not found", r"\\wsl$\\test\\")
+
+        with (
+            patch.object(vm, "_resolve_unc_prefix", new_callable=AsyncMock, return_value=r"\\wsl.localhost"),
+            patch.object(vm, "_copy_via_unc", new_callable=AsyncMock, side_effect=[err1, err2]),
+            patch.object(vm, "_copy_host_to_guest_via_drvfs", new_callable=AsyncMock) as mock_drvfs,
+            patch.object(vm, "shell", new_callable=AsyncMock, return_value=_ok()),
+        ):
+            await vm.copy(r"D:\tmp\a.pdf", "/tmp/a.pdf", host_to_guest=True)
+
+        mock_drvfs.assert_awaited_once_with(r"D:\tmp\a.pdf", "/tmp/a.pdf")
+
+    async def test_copy_host_to_guest_via_drvfs_uses_shell_cp(self) -> None:
+        vm = self._make_vm()
+
+        with (
+            patch.object(vm, "_ensure_drvfs_mount_for_wsl_path", new_callable=AsyncMock) as mock_ensure,
+            patch.object(vm, "shell", new_callable=AsyncMock, return_value=_ok()) as mock_shell,
+        ):
+            await vm._copy_host_to_guest_via_drvfs(r"D:\upload\doc.pdf", "/tmp/doc.pdf")
+
+        mock_ensure.assert_awaited_once_with("/mnt/d/upload/doc.pdf")
+        command = mock_shell.await_args.args[0]
+        assert "cp -f /mnt/d/upload/doc.pdf /tmp/doc.pdf" in command
+
+
+# ===========================================================================
 # WSL output decoding
 # ===========================================================================
 
@@ -706,6 +772,50 @@ class TestShellCommandBuilding:
         ):
             await vm.shell("sleep 999", timeout=0.1)
 
+    async def test_shell_uses_sanitized_env_for_wsl_subprocess(self) -> None:
+        with (
+            patch("hexagent.computer.local._wsl._PLATFORM", "win32"),
+            patch("shutil.which", return_value="C:\\Windows\\System32\\wsl.exe"),
+        ):
+            vm = WslVM(instance="test")
+
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"ok\n", b""))
+        mock_proc.returncode = 0
+
+        fake_env = {
+            "SYSTEMROOT": r"C:\Windows",
+            "PATH": r"D:\software\UniClaw-Work\resources\backend\_internal\pywin32_system32;C:\weird\path",
+            "WSLENV": "PATH/p",
+        }
+        with (
+            patch.dict("os.environ", fake_env, clear=True),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec,
+        ):
+            await vm.shell("echo hello")
+
+        call_kwargs = mock_exec.call_args.kwargs
+        env = call_kwargs["env"]
+        assert call_kwargs["cwd"] == r"C:\Windows\System32"
+        assert r"D:\software\UniClaw-Work\resources\backend\_internal\pywin32_system32" not in env["PATH"]
+        assert env["WSLENV"] == ""
+
+
+class TestWslSubprocessEnv:
+    def test_safe_wsl_subprocess_env_normalizes_path_and_wslenv(self) -> None:
+        fake_env = {
+            "SYSTEMROOT": r"C:\Windows",
+            "PATH": r"D:\app\private;C:\other",
+            "WSLENV": "PATH/p",
+            "FOO": "BAR",
+        }
+        with patch.dict("os.environ", fake_env, clear=True):
+            env = _safe_wsl_subprocess_env()
+
+        assert env["PATH"] == r"C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0"
+        assert env["WSLENV"] == ""
+        assert env["FOO"] == "BAR"
+
 
 # ===========================================================================
 # Apply mounts
@@ -883,3 +993,40 @@ class TestApplyBindMounts:
         ):
             await vm._apply_bind_mounts()
             mock_shell.assert_not_awaited()
+
+    async def test_drive_host_path_ignores_wslpath_session_alias(self) -> None:
+        with (
+            patch("hexagent.computer.local._wsl._PLATFORM", "win32"),
+            patch("shutil.which", return_value="C:\\Windows\\System32\\wsl.exe"),
+        ):
+            vm = WslVM(instance="test")
+
+        mounts = [
+            ResolvedMount(host_path=r"D:\Agent\OpenAgent", guest_path="/sessions/alice/mnt/OpenAgent", writable=True),
+        ]
+
+        with (
+            patch.object(vm, "read_mounts", return_value=mounts),
+            patch.object(vm, "shell", new_callable=AsyncMock) as mock_shell,
+        ):
+
+            async def _shell_side_effect(command: str, *_: Any, **__: Any) -> CLIResult:
+                if command.startswith("wslpath -u"):
+                    # Even if wslpath could return an alias under /sessions/...,
+                    # drive-letter host paths should still mount from /mnt/<drive>/...
+                    return _ok(stdout="/sessions/legacy/mnt/OpenAgent")
+                if command == "mountpoint -q /sessions/alice/mnt/OpenAgent":
+                    return _fail()
+                if command.startswith("findmnt -n "):
+                    return _ok(stdout="/dev/mock")
+                if command.startswith("ls -A /sessions/alice/mnt/OpenAgent | head -n 5"):
+                    return _ok(stdout="ok")
+                return _ok()
+
+            mock_shell.side_effect = _shell_side_effect
+
+            await vm._apply_bind_mounts()
+
+            mount_call = next(c.args[0] for c in mock_shell.call_args_list if "mount --bind" in c.args[0])
+            assert "/mnt/d/Agent/OpenAgent" in mount_call
+            assert "/sessions/legacy/mnt/OpenAgent" not in mount_call

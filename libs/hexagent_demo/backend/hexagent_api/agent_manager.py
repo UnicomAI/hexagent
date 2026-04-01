@@ -20,8 +20,10 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shlex
 import sys
+import time
 from typing import Any
 
 from collections.abc import AsyncIterator
@@ -50,6 +52,10 @@ class AgentManager:
         self._agent_locks: dict[tuple[str, str], asyncio.Lock] = {}
         # session_name -> (working_dir_source, mount_target)
         self._session_working_dirs: dict[str, tuple[str, str]] = {}
+        # session_name -> monotonic timestamp of last confirmed healthy mount
+        self._session_mount_verified_at: dict[str, float] = {}
+        # session_name -> keepalive task to reduce WSL idle teardown/remount churn
+        self._session_keepalive_tasks: dict[str, asyncio.Task[None]] = {}
         # Background warm-up task: auto-start VM manager after app startup.
         self._vm_warm_task: asyncio.Task[None] | None = None
 
@@ -65,6 +71,93 @@ class AgentManager:
         setter = getattr(computer, "set_default_cwd", None)
         if callable(setter):
             setter(cwd)
+
+    def _ensure_session_keepalive(self, session_name: str) -> None:
+        """Start a lightweight keepalive loop for a mounted cowork session."""
+        existing = self._session_keepalive_tasks.get(session_name)
+        if existing is not None and not existing.done():
+            return
+        self._session_keepalive_tasks[session_name] = asyncio.create_task(
+            self._session_keepalive_loop(session_name),
+            name=f"session-keepalive-{session_name}",
+        )
+
+    async def _session_keepalive_loop(self, session_name: str) -> None:
+        """Prevent idle WSL shutdown from dropping /mnt/* and bind mounts."""
+        try:
+            while True:
+                await asyncio.sleep(20)
+                if self._vm_manager is None or session_name not in self._computers:
+                    return
+                if session_name not in self._session_working_dirs:
+                    continue
+                try:
+                    await self._vm_manager._vm.shell("true", user="root")
+                except Exception:
+                    logger.debug("WSL keepalive ping failed for session=%s", session_name, exc_info=True)
+        except asyncio.CancelledError:
+            return
+
+    async def _resolve_wsl_source_path(self, host_path: str) -> str:
+        """Resolve a host path to canonical WSL path for mount health checks."""
+        if host_path.startswith("/"):
+            return host_path
+
+        from hexagent.computer.local._wsl import _win_path_to_wsl
+
+        if re.match(r"^[A-Za-z]:(?:[\\/].*|)$", host_path):
+            return _win_path_to_wsl(host_path)
+
+        result = await self._vm_manager._vm.shell(f"wslpath -u {shlex.quote(host_path)}", user="root")
+        if result.exit_code == 0 and result.stdout.strip():
+            return result.stdout.strip()
+        return host_path
+
+    async def _is_session_mount_active(
+        self,
+        session_name: str,
+        target_name: str,
+        *,
+        source_path: str | None = None,
+    ) -> bool:
+        """Check if a session mount is active; resilient to transient findmnt quirks."""
+        if self._vm_manager is None:
+            return False
+
+        guest_path = f"/sessions/{session_name}/mnt/{target_name}"
+        qguest = shlex.quote(guest_path)
+
+        result = await self._vm_manager._vm.shell(f"findmnt -n {qguest}", user="root")
+        if result.exit_code == 0 and bool((result.stdout or "").strip()):
+            return True
+
+        if not source_path:
+            return False
+
+        source_wsl = await self._resolve_wsl_source_path(source_path)
+        qsrc = shlex.quote(source_wsl)
+
+        # Fallback: compare filesystem type between guest mountpoint and source path.
+        # If they match and both directories exist, treat as active to avoid noisy
+        # false negatives from findmnt under flaky WSL host integration.
+        fs_check_cmd = (
+            f"test -d {qguest} && test -d {qsrc} && "
+            f"g=$(stat -f -c %T {qguest} 2>/dev/null || true) && "
+            f"s=$(stat -f -c %T {qsrc} 2>/dev/null || true) && "
+            f'[ -n "$g" ] && [ "$g" = "$s" ]'
+        )
+        fs_check = await self._vm_manager._vm.shell(fs_check_cmd, user="root")
+        if fs_check.exit_code == 0:
+            logger.warning(
+                "findmnt did not confirm mount, but statfs matched source. Treating as active. "
+                "session=%s target=%s source=%s",
+                session_name,
+                target_name,
+                source_path,
+            )
+            return True
+
+        return False
 
     async def _verify_session_dir_writable(self, session_name: str, guest_dir: str) -> None:
         """Ensure the cowork session user can write to the selected working dir."""
@@ -169,6 +262,7 @@ class AgentManager:
             if session_name and session_name in self._computers:
                 return self._computers[session_name], session_name
 
+            initial_mount_target: str | None = None
             try:
                 if session_name:
                     logger.info("Resuming session: %s", session_name)
@@ -182,6 +276,7 @@ class AgentManager:
                     default_cwd: str | None = None
                     if working_dir:
                         mount_target = Path(working_dir).name
+                        initial_mount_target = mount_target
                         session_mounts = [Mount(source=working_dir, target=mount_target, writable=True)]
                         default_cwd = f"/sessions/{{session}}/mnt/{mount_target}"
                     logger.info("Creating new session (mounts=%s)...", session_mounts)
@@ -214,6 +309,13 @@ class AgentManager:
 
             actual_name = computer.session_name
             self._computers[actual_name] = computer
+            if working_dir and initial_mount_target is not None:
+                self._session_working_dirs[actual_name] = (working_dir, initial_mount_target)
+                self._session_mount_verified_at[actual_name] = time.monotonic()
+                self._ensure_session_keepalive(actual_name)
+            elif actual_name in self._session_working_dirs:
+                _, remembered_target = self._session_working_dirs[actual_name]
+                self._set_computer_default_cwd(computer, f"/sessions/{actual_name}/mnt/{remembered_target}")
             logger.info("Session ready: %s", actual_name)
             return computer, actual_name
 
@@ -546,6 +648,9 @@ class AgentManager:
 
     async def stop(self) -> None:
         """Shut down all agents and computers."""
+        for task in self._session_keepalive_tasks.values():
+            task.cancel()
+        self._session_keepalive_tasks.clear()
         if self._vm_warm_task is not None and not self._vm_warm_task.done():
             self._vm_warm_task.cancel()
             self._vm_warm_task = None
@@ -594,13 +699,6 @@ class AgentManager:
 
         new_target = Path(working_dir).name
 
-        import shlex
-
-        async def _is_mount_active(target_name: str) -> bool:
-            guest_path = f"/sessions/{session_name}/mnt/{target_name}"
-            result = await self._vm_manager._vm.shell(f"findmnt -n {shlex.quote(guest_path)}")
-            return result.exit_code == 0 and bool((result.stdout or "").strip())
-
         # Unmount previous working dir if switching to a different one
         prev = self._session_working_dirs.get(session_name)
         prev_guest_path: str | None = None
@@ -609,9 +707,11 @@ class AgentManager:
             if prev_source == working_dir:
                 resolved_cwd = f"/sessions/{session_name}/mnt/{prev_target}"
                 self._set_computer_default_cwd(self._computers.get(session_name), resolved_cwd)
-                if await _is_mount_active(prev_target):
+                if await self._is_session_mount_active(session_name, prev_target, source_path=prev_source):
                     # Happy path: mount is still active and writable.
                     await self._verify_session_dir_writable(session_name, resolved_cwd)
+                    self._session_mount_verified_at[session_name] = time.monotonic()
+                    self._ensure_session_keepalive(session_name)
                     return
                 logger.warning(
                     "Session mount missing, forcing remount. session=%s target=%s source=%s",
@@ -632,6 +732,8 @@ class AgentManager:
                     )
                     await self._vm_manager.apply()
                     await self._verify_session_dir_writable(session_name, resolved_cwd)
+                self._session_mount_verified_at[session_name] = time.monotonic()
+                self._ensure_session_keepalive(session_name)
                 logger.info("Remounted working dir in place %s for session %s", working_dir, session_name)
                 return
             prev_guest_path = f"/sessions/{session_name}/mnt/{prev_target}"
@@ -655,6 +757,7 @@ class AgentManager:
         mount = Mount(source=working_dir, target=new_target, writable=True)
         await self._vm_manager.mount([mount], session=session_name)
         self._session_working_dirs[session_name] = (working_dir, new_target)
+        self._session_mount_verified_at[session_name] = time.monotonic()
         computer = self._computers.get(session_name)
         resolved_cwd = f"/sessions/{session_name}/mnt/{new_target}"
         self._set_computer_default_cwd(computer, resolved_cwd)
@@ -666,6 +769,7 @@ class AgentManager:
             logger.warning("Writable check failed after mount; forcing VM apply() and retry. session=%s", session_name)
             await self._vm_manager.apply()
             await self._verify_session_dir_writable(session_name, resolved_cwd)
+        self._ensure_session_keepalive(session_name)
         logger.info("Mounted working dir %s for session %s", working_dir, session_name)
 
         # Remove the stale mount-point directory left behind after unmount.
@@ -689,6 +793,11 @@ class AgentManager:
             return  # Don't tear down the shared chat computer
         if not session_name or session_name not in self._computers:
             return
+        keepalive = self._session_keepalive_tasks.pop(session_name, None)
+        if keepalive is not None:
+            keepalive.cancel()
+        self._session_working_dirs.pop(session_name, None)
+        self._session_mount_verified_at.pop(session_name, None)
         computer = self._computers.pop(session_name)
         # Remove any agents and their creation locks cached for this session
         keys_to_remove = [k for k in self._agents if k[1] == session_name]
