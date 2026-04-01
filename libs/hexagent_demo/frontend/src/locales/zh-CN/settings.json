@@ -32,6 +32,8 @@
     "inputModalities": "输入模态",
     "summarizerModel": "摘要模型",
     "summarizerDesc": "用于网页摘要的快速模型",
+    "yuanjingKey": "YuanJing API 密钥",
+    "yuanjingKeyDesc": "统一管理所有 YuanJing 模型的密钥",
     "deleteModelTitle": "删除 \"{{name}}\"？",
     "deleteModelBody": "此操作将永久删除该模型配置，且无法撤销。"
   },

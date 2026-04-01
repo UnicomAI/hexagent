@@ -50,6 +50,14 @@ const PROVIDERS: ProviderOption[] = [
     placeholder_key: "sk-ant-...",
   },
   {
+    id: "yuanjing",
+    label: "YuanJing",
+    base_url: "https://maas-api.ai-yuanjing.com/openapi/compatible-mode",
+    provider: "yuanjing",
+    placeholder_model: "claude-sonnet-4-20250514",
+    placeholder_key: "sk-...",
+  },
+  {
     id: "custom",
     label: "OpenAI-Compatible",
     base_url: "",
