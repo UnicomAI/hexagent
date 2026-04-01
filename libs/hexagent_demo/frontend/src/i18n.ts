@@ -19,6 +19,7 @@ import enChat from "./locales/en/chat.json";
 import enSearch from "./locales/en/search.json";
 import enMisc from "./locales/en/misc.json";
 import enOnboarding from "./locales/en/onboarding.json";
+import enLogin from "./locales/en/login.json";
 
 // Simplified Chinese
 import zhCNCommon from "./locales/zh-CN/common.json";
@@ -29,6 +30,7 @@ import zhCNChat from "./locales/zh-CN/chat.json";
 import zhCNSearch from "./locales/zh-CN/search.json";
 import zhCNMisc from "./locales/zh-CN/misc.json";
 import zhCNOnboarding from "./locales/zh-CN/onboarding.json";
+import zhCNLogin from "./locales/zh-CN/login.json";
 
 // Read initial language from localStorage to avoid flash of wrong language
 function getInitialLanguage(): string {
@@ -55,6 +57,7 @@ i18n.use(initReactI18next).init({
       search: enSearch,
       misc: enMisc,
       onboarding: enOnboarding,
+      login: enLogin,
     },
     "zh-CN": {
       common: zhCNCommon,
@@ -65,11 +68,12 @@ i18n.use(initReactI18next).init({
       search: zhCNSearch,
       misc: zhCNMisc,
       onboarding: zhCNOnboarding,
+      login: zhCNLogin,
     },
   },
   lng: getInitialLanguage(),
   fallbackLng: "en",
-  ns: ["common", "settings", "sidebar", "welcome", "chat", "search", "misc", "onboarding"],
+  ns: ["common", "settings", "sidebar", "welcome", "chat", "search", "misc", "onboarding", "login"],
   defaultNS: "common",
   interpolation: {
     escapeValue: false, // React already escapes

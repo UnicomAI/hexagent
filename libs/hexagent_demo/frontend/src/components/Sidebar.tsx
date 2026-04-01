@@ -1,7 +1,7 @@
 ﻿import { useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import brandLogo from "../assets/brand-logo.png";
-import { Plus, Search, MoreHorizontal, Trash2, Pencil, Settings, PanelLeft } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Trash2, Pencil, Settings, PanelLeft, LogOut } from "lucide-react";
 import { useAppContext } from "../store";
 import { deleteConversation } from "../api";
 import ScrollableText from "./ScrollableText";
@@ -13,6 +13,7 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onOpenSearch: () => void;
   userName: string;
+  onLogout: () => void;
 }
 
 interface ContextMenuState {
@@ -34,7 +35,7 @@ function getInitial(name: string): string {
   return trimmed.charAt(0);
 }
 
-export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearch, userName }: SidebarProps) {
+export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearch, userName, onLogout }: SidebarProps) {
   const { t } = useTranslation("sidebar");
   const { state, dispatch } = useAppContext();
   const conversationsRef = useRef<HTMLDivElement>(null);
@@ -47,6 +48,8 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
   });
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
   const toggleSidebar = useCallback(() => {
     dispatch({ type: "TOGGLE_SIDEBAR" });
@@ -130,6 +133,18 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onNewConversation, state.sidebarCollapsed, toggleSidebar]);
+
+  // Close user menu on click outside
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [userMenuOpen]);
 
   useEffect(() => {
     if (prevCollapsed.current !== state.sidebarCollapsed) {
@@ -267,11 +282,27 @@ export default function Sidebar({ onNewConversation, onOpenSettings, onOpenSearc
             <span className="sidebar-action-label sidebar-fadeable">{t("settings")}</span>
             <kbd className="sidebar-shortcut">{isMac ? "Cmd+Shift+," : "Ctrl+Shift+,"}</kbd>
           </button>
-          <div className="sidebar-action-btn sidebar-user-row">
-            <span className="sidebar-icon-wrap">
-              <span className="sidebar-avatar">{getInitial(userName)}</span>
-            </span>
-            <span className="sidebar-action-label sidebar-fadeable">{userName || t("user")}</span>
+          <div className="sidebar-user-row-wrap" ref={userMenuRef}>
+            <div
+              className="sidebar-action-btn sidebar-user-row"
+              onClick={() => setUserMenuOpen((v) => !v)}
+            >
+              <span className="sidebar-icon-wrap">
+                <span className="sidebar-avatar">{getInitial(userName)}</span>
+              </span>
+              <span className="sidebar-action-label sidebar-fadeable">{userName || t("user")}</span>
+            </div>
+            {userMenuOpen && (
+              <div className="sidebar-user-menu">
+                <button
+                  className="sidebar-user-menu-item"
+                  onClick={() => { setUserMenuOpen(false); onLogout(); }}
+                >
+                  <LogOut size={16} />
+                  <span>{t("logout")}</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </aside>
