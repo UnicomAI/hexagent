@@ -5,6 +5,43 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>UniClaw-Work</title>
+
+    <!-- 友盟 U-App H5 SDK -->
+    <script>
+      (function(w,d,s,q,i){w[q]=w[q]||[];var f=d.getElementsByTagName(s)[0],j=d.createElement(s);j.async=true;j.id='beacon-aplus';j.src='https://d.alicdn.com/alilog/mlog/aplus/'+i+'.js';f.parentNode.insertBefore(j,f);})(window,document,'script','aplus_queue','203467608');
+
+      // AppKey
+      aplus_queue.push({action:'aplus.setMetaInfo',arguments:['appKey','69cce29a9a7f376488af3a53']});
+
+      // 关闭自动PV（Electron 单页应用必须关）
+      aplus_queue.push({action:'aplus.setMetaInfo',arguments:['aplus-waiting','MAN']});
+
+      // 渠道：自动区分 mac / windows
+      var channel = /mac/i.test(navigator.platform) ? 'mac' : 'windows';
+      aplus_queue.push({action:'aplus.setMetaInfo',arguments:['appChannel',channel]});
+
+      // 生成本地唯一设备ID（localStorage 持久化，保证日活/新增准确）
+      function getDeviceId(){
+        var id = localStorage.getItem('um_device_id');
+        if (id) return id;
+        function rand(){return Math.floor(Math.random()*16777216).toString(16);}
+        id = rand()+rand()+rand()+rand();
+        localStorage.setItem('um_device_id', id);
+        return id;
+      }
+      var deviceId = getDeviceId();
+
+      // 绑定设备ID
+      aplus_queue.push({action:'aplus.setMetaInfo',arguments:['aplus-idtype','uuid']});
+      aplus_queue.push({action:'aplus.setMetaInfo',arguments:['umid',deviceId]});
+
+      // 关闭调试
+      aplus_queue.push({action:'aplus.setMetaInfo',arguments:['DEBUG',false]});
+
+      // 初始化并上报启动PV（日活、启动次数依赖这条）
+      aplus_queue.push({action:'aplus.init'});
+      aplus_queue.push({action:'aplus.sendPV',arguments:[{is_auto:false}]});
+    </script>
   </head>
   <body>
     <div id="root"></div>
