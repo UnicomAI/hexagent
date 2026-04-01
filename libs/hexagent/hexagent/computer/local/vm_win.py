@@ -366,11 +366,6 @@ class LocalVM:
                         from hexagent.computer.local._wsl import _session_user_from_guest_mount_path, _win_path_to_wsl
 
                         wsl_host = _win_path_to_wsl(r.host_path)
-                        # When automount is disabled, /mnt/<drive> may be absent.
-                        # Ensure drvfs is mounted before bind-mount self-heal.
-                        ensure_drvfs = getattr(self._vm, "_ensure_drvfs_mount_for_wsl_path", None)
-                        if callable(ensure_drvfs):
-                            await ensure_drvfs(wsl_host)
                         qguest = shlex.quote(r.guest_path)
                         qhost = shlex.quote(wsl_host)
                         wsl_log("LocalVM.mount SELF-HEAL: Restoring lost bind mount %s -> %s", r.host_path, r.guest_path)

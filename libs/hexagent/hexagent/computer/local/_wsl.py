@@ -681,12 +681,6 @@ class WslVM:
                 wsl_host = _win_path_to_wsl(m.host_path)
                 wsl_log("WSL wslpath failed for %s, falling back to %s", m.host_path, wsl_host, level=logging.WARNING)
 
-            # When distro automount is disabled (e.g. via /etc/wsl.conf),
-            # /mnt/<drive> may not exist. Mount the specific drive on-demand
-            # so path-based bind/sync still works without enabling global
-            # default automount for all drives.
-            await self._ensure_drvfs_mount_for_wsl_path(wsl_host)
-
             qguest = shlex.quote(m.guest_path)
             qhost = shlex.quote(wsl_host)
 
@@ -788,35 +782,6 @@ class WslVM:
                     (verify.stderr or "").strip() or "(empty)",
                     level=logging.WARNING,
                 )
-
-    async def _ensure_drvfs_mount_for_wsl_path(self, wsl_path: str) -> None:
-        """Best-effort mount of /mnt/<drive> when automount is disabled."""
-        match = re.match(r"^/mnt/([a-zA-Z])(?:/|$)", wsl_path)
-        if not match:
-            return
-
-        drive = match.group(1).lower()
-        mount_root = f"/mnt/{drive}"
-        qmount = shlex.quote(mount_root)
-
-        check = await self.shell(f"mountpoint -q {qmount}", user="root")
-        if check.exit_code == 0:
-            return
-
-        await self.shell(f"mkdir -p {qmount}", user="root")
-        mount_cmd = f"mount -t drvfs {drive.upper()}: {qmount}"
-        result = await self.shell(mount_cmd, user="root")
-        if result.exit_code == 0:
-            wsl_log("WSL on-demand drvfs mount succeeded: %s -> %s", f"{drive.upper()}:", mount_root)
-            return
-
-        wsl_log(
-            "WSL on-demand drvfs mount failed: drive=%s mount=%s stderr=%s",
-            f"{drive.upper()}:",
-            mount_root,
-            (result.stderr or result.stdout or "").strip() or "(empty)",
-            level=logging.WARNING,
-        )
 
     async def _resolve_unc_prefix(self) -> str:
         r"""Resolve and cache the working UNC prefix for this system.

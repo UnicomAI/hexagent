@@ -1,4 +1,4 @@
-﻿// main.js 鈥?Electron main process
+// main.js — Electron main process
 const { app, BrowserWindow, Menu, dialog, ipcMain } = require("electron");
 const path = require("path");
 const net = require("net");
@@ -28,7 +28,7 @@ let backendPort = null;
 let mainWindow = null;
 let backendStderr = ""; // capture stderr for error reporting
 
-// 鈹€鈹€ User data directory 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── User data directory ─────────────────────────────────────────────────────
 // Store config.json, .env, etc. in a persistent location:
 //   macOS:   ~/Library/Application Support/HexAgent/
 //   Windows: %APPDATA%/HexAgent/
@@ -86,7 +86,7 @@ function ensureUserData() {
   }
 }
 
-// 鈹€鈹€ Helpers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function findFreePort() {
   return new Promise((resolve, reject) => {
@@ -153,7 +153,7 @@ function killPort(port) {
   }
 }
 
-// 鈹€鈹€ Backend lifecycle 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── Backend lifecycle ────────────────────────────────────────────────────────
 
 async function spawnBackend() {
   if (IS_DEV) {
@@ -203,7 +203,7 @@ async function spawnBackend() {
         try {
           execFileSync("xattr", ["-dr", "com.apple.quarantine", dir]);
         } catch (_) {
-          // Ignore 鈥?attribute may not be present or dir may not exist
+          // Ignore — attribute may not be present or dir may not exist
         }
       }
     }
@@ -384,7 +384,7 @@ if ((-not $hypervisorPresent) -and (($vmMonitorKnown -and -not $vmMonitor) -or (
   };
 }
 
-// 鈹€鈹€ IPC 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── IPC ──────────────────────────────────────────────────────────────────────
 
 ipcMain.on("get-backend-port", (event) => {
   event.returnValue = backendPort;
@@ -412,19 +412,10 @@ ipcMain.handle("install-wsl-runtime", async () => {
     };
   }
 
-  const exeDir = IS_DEV ? __dirname : path.dirname(process.execPath);
-  const offlineMsiCandidates = [
-    path.join(exeDir, "wsl.2.6.3.0.x64.msi"),
-    path.join(exeDir, "wsl.x64.msi"),
-    path.join(process.resourcesPath, "wsl", "wsl.2.6.3.0.x64.msi"),
-    path.join(process.resourcesPath, "wsl", "wsl.x64.msi"),
-  ];
-  const offlineMsiPath = offlineMsiCandidates.find((x) => fs.existsSync(x)) || "";
-  wslLog(offlineMsiPath ? `Offline WSL MSI found: ${offlineMsiPath}` : "Offline WSL MSI not found, use online install");
-
+  // Launch WSL installation with UAC elevation so non-technical users can
+  // complete prerequisites in-app with one click.
   const psScript = `
 $ErrorActionPreference = 'Stop'
-$offlineMsi = "${offlineMsiPath}"
 $wslPath = Join-Path $env:SystemRoot "System32\\wsl.exe"
 if (-not (Test-Path $wslPath)) {
   $wslPath = Join-Path $env:SystemRoot "Sysnative\\wsl.exe"
@@ -433,22 +424,9 @@ if (-not (Test-Path $wslPath)) {
   throw "wsl.exe not found under %SystemRoot%."
 }
 try {
-  $code = 0
-  if (-not [string]::IsNullOrWhiteSpace($offlineMsi) -and (Test-Path $offlineMsi)) {
-    $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList @("/i",$offlineMsi,"/qn","/norestart") -Verb RunAs -Wait -PassThru
-    if ($null -eq $proc) { throw "Start-Process returned null process." }
-    $code = $proc.ExitCode
-    if ($code -ne 0 -and $code -ne 3010) {
-      $proc = Start-Process -FilePath $wslPath -ArgumentList @("--install","--no-distribution") -Verb RunAs -Wait -PassThru
-      if ($null -eq $proc) { throw "Start-Process returned null process." }
-      $code = $proc.ExitCode
-    }
-  } else {
-    $proc = Start-Process -FilePath $wslPath -ArgumentList @("--install","--no-distribution") -Verb RunAs -Wait -PassThru
-    if ($null -eq $proc) { throw "Start-Process returned null process." }
-    $code = $proc.ExitCode
-  }
-  exit $code
+  $proc = Start-Process -FilePath $wslPath -ArgumentList @("--install","--no-distribution") -Verb RunAs -Wait -PassThru
+  if ($null -eq $proc) { throw "Start-Process returned null process." }
+  exit $proc.ExitCode
 } catch {
   $msg = $_.Exception.Message
   if ([string]::IsNullOrWhiteSpace($msg)) { $msg = "Unknown Start-Process failure." }
@@ -467,26 +445,17 @@ try {
 
   wslLog(`WSL runtime installation finished with exit code ${res.code}`);
 
+  // WSL optional features often need a reboot before WSL2 import/start works.
+  // We gate follow-up VM instance setup on reboot to avoid first-run import failures.
   const success = res.code === 0 || res.code === 3010;
-  let rebootRequired = res.code === 3010;
+  const rebootRequired = success;
   if (success) {
-    const rebootProbe = await runCommand("powershell.exe", [
-      "-NoProfile",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-Command",
-      "if ((Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending') -or (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired')) { Write-Output '1' } else { Write-Output '0' }",
-    ]);
-    rebootRequired = rebootRequired || (rebootProbe.stdout || "").trim() === "1";
-
-    wslLog(`WSL runtime installation SUCCESS (rebootRequired=${rebootRequired})`);
+    wslLog("WSL runtime installation SUCCESS (reboot required)");
     return {
       ok: true,
       rebootRequired,
       exitCode: res.code,
-      message: rebootRequired
-        ? "Runtime installation completed. Please restart Windows before continuing VM setup."
-        : "Runtime installation completed.",
+      message: "Runtime installation completed. Please restart Windows before continuing VM setup.",
       stdout: res.stdout,
       stderr: res.stderr,
     };
@@ -559,7 +528,7 @@ try {
 
   const combined = `${res.stderr || ""}\n${res.stdout || ""}`.trim();
   const restartErr = (combined.match(/RESTART_ERR:(.*)/) || [null, ""])[1]?.trim();
-  const cancelled = /canceled|cancelled|鎷掔粷|宸插彇娑坾denied/i.test(combined);
+  const cancelled = /canceled|cancelled|拒绝|已取消|denied/i.test(combined);
   if (cancelled) {
     return { ok: false, message: "Restart was cancelled." };
   }
@@ -569,7 +538,7 @@ try {
   };
 });
 
-// 鈹€鈹€ Window 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── Window ───────────────────────────────────────────────────────────────────
 
 function createWindow() {
   const winIconPath = IS_DEV
@@ -610,7 +579,7 @@ function createWindow() {
   });
 }
 
-// 鈹€鈹€ App lifecycle 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── App lifecycle ────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
   ensureUserData();
@@ -658,7 +627,3 @@ process.on("SIGTERM", () => {
   killBackend();
   app.quit();
 });
-
-
-
-

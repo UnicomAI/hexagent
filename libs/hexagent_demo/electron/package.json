@@ -1,6 +1,6 @@
 {
   "name": "hexagent",
-  "version": "1.0.0-unicom",
+  "version": "0.0.6-20260329-1156",
   "description": "UniClaw-Work Desktop App",
   "main": "main.js",
   "scripts": {
@@ -89,9 +89,7 @@
       "installerIcon": "icon.ico",
       "uninstallerIcon": "icon.ico",
       "installerHeaderIcon": "icon.ico",
-      "include": "resources/installer.nsh",
-      "allowElevation": true,
-      "perMachine": true
+      "include": "resources/installer.nsh"
     }
   }
 }
