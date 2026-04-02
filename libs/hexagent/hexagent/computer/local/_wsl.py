@@ -564,41 +564,57 @@ class WslVM:
         start_time = time.monotonic()
         wsl_log("WSL Shell Execution (Instance: %s, User: %s, CWD: %s): %s", self._instance, user or "default", cwd or "default", command)
 
-        process = await asyncio.create_subprocess_exec(
-            *exec_args,
-            stdin=asyncio.subprocess.PIPE if input is not None else asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=_stable_host_cwd(),
-        )
-
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(input=input.encode() if input is not None else None),
-                timeout=timeout,
+        # Retry loop for transient WSL errors (e.g. Exit 4294967295 / CreateInstance failure)
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            process = await asyncio.create_subprocess_exec(
+                *exec_args,
+                stdin=asyncio.subprocess.PIPE if input is not None else asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=_stable_host_cwd(),
             )
-        except TimeoutError:
-            with contextlib.suppress(ProcessLookupError):
-                process.kill()
-            await process.wait()
-            msg = f"timed out after {timeout}s"
-            wsl_log("WSL Shell TIMEOUT (Instance: %s): %s", self._instance, msg, level=logging.ERROR)
-            raise WslError(msg) from None
 
-        stdout = _decode_wsl_output(stdout_bytes).removesuffix("\n")
-        stderr = _decode_wsl_output(stderr_bytes).removesuffix("\n")
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    process.communicate(input=input.encode() if input is not None else None),
+                    timeout=timeout,
+                )
+            except TimeoutError:
+                with contextlib.suppress(ProcessLookupError):
+                    process.kill()
+                await process.wait()
+                msg = f"timed out after {timeout}s"
+                wsl_log("WSL Shell TIMEOUT (Instance: %s): %s", self._instance, msg, level=logging.ERROR)
+                raise WslError(msg) from None
 
-        rc: int = process.returncode if process.returncode is not None else -1
-        duration_ms = int((time.monotonic() - start_time) * 1000)
+            stdout = _decode_wsl_output(stdout_bytes).removesuffix("\n")
+            stderr = _decode_wsl_output(stderr_bytes).removesuffix("\n")
 
-        wsl_log("WSL Shell Result (Exit: %d, Duration: %dms):\nSTDOUT: %s\nSTDERR: %s", rc, duration_ms, stdout or "(empty)", stderr or "(empty)")
+            rc: int = process.returncode if process.returncode is not None else -1
+            duration_ms = int((time.monotonic() - start_time) * 1000)
 
-        return CLIResult(
-            stdout=stdout,
-            stderr=stderr,
-            exit_code=rc,
-            metadata=ExecutionMetadata(duration_ms=duration_ms),
-        )
+            # Check for transient error 4294967295 (0xffffffff / -1)
+            # This often means "Wsl/Service/CreateInstance" failed.
+            if rc == 4294967295 or rc == -1:
+                if attempt < max_attempts - 1:
+                    wait_time = 0.5 * (attempt + 1)
+                    wsl_log("WSL transient error %d detected, retrying in %.1fs... (Attempt %d/%d)", rc, wait_time, attempt + 1, max_attempts)
+                    await asyncio.sleep(wait_time)
+                    continue
+            
+            wsl_log("WSL Shell Result (Exit: %d, Duration: %dms):\nSTDOUT: %s\nSTDERR: %s", rc, duration_ms, stdout or "(empty)", stderr or "(empty)")
+
+            return CLIResult(
+                stdout=stdout,
+                stderr=stderr,
+                exit_code=rc,
+                metadata=ExecutionMetadata(duration_ms=duration_ms),
+            )
+
+        # If we get here, all attempts failed with transient errors.
+        msg = f"WSL command failed after {max_attempts} attempts with transient error (Exit: {rc})"
+        raise WslError(msg)
 
     # ------------------------------------------------------------------
     # File transfer
@@ -637,6 +653,8 @@ class WslVM:
 
     async def _run_wsl(self, *cmd: str, timeout: float = 300) -> str:  # noqa: ASYNC109
         """Run a wsl.exe command to completion.
+        
+        Includes retries for transient WSL errors (e.g. Exit 4294967295).
 
         Args:
             *cmd: Command and arguments.
@@ -649,43 +667,57 @@ class WslVM:
             WslError: On non-zero exit code or timeout.
         """
         wsl_log("WSL.exe Command (Instance: %s): %s", self._instance, " ".join(cmd))
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=_stable_host_cwd(),
-        )
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout,
+        
+        max_attempts = 3
+        last_error = None
+        for attempt in range(max_attempts):
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=_stable_host_cwd(),
             )
-        except TimeoutError:
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
-            await proc.wait()
-            msg = f"wsl.exe timed out after {timeout}s: {' '.join(cmd[:3])}"
-            wsl_log("WSL.exe TIMEOUT (Instance: %s): %s", self._instance, msg, level=logging.ERROR)
-            raise WslError(msg) from None
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(),
+                    timeout=timeout,
+                )
+            except TimeoutError:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                await proc.wait()
+                msg = f"wsl.exe timed out after {timeout}s: {' '.join(cmd[:3])}"
+                wsl_log("WSL.exe TIMEOUT (Instance: %s): %s", self._instance, msg, level=logging.ERROR)
+                raise WslError(msg) from None
 
-        stdout = _decode_wsl_output(stdout_bytes)
-        stderr = _decode_wsl_output(stderr_bytes)
+            stdout = _decode_wsl_output(stdout_bytes)
+            stderr = _decode_wsl_output(stderr_bytes)
 
-        if proc.returncode != 0:
-            stderr_strip = stderr.strip()
-            msg = f"wsl.exe failed (exit {proc.returncode}): {stderr_strip}"
-            wsl_log(
-                "WSL.exe ERROR (Instance: %s, Exit: %d):\nSTDOUT: %s\nSTDERR: %s",
-                self._instance,
-                proc.returncode,
-                stdout.strip() or "(empty)",
-                stderr_strip or "(empty)",
-                level=logging.ERROR,
-            )
-            raise WslError(msg)
+            if proc.returncode != 0:
+                # Check for transient error 4294967295 (0xffffffff / -1)
+                if (proc.returncode == 4294967295 or proc.returncode == -1) and attempt < max_attempts - 1:
+                    wait_time = 0.5 * (attempt + 1)
+                    wsl_log("WSL.exe transient error detected, retrying in %.1fs... (Attempt %d/%d)", wait_time, attempt + 1, max_attempts)
+                    await asyncio.sleep(wait_time)
+                    continue
 
-        wsl_log("WSL.exe Success (Instance: %s):\nSTDOUT: %s", self._instance, stdout.strip() or "(empty)")
-        return stdout
+                stderr_strip = stderr.strip()
+                msg = f"wsl.exe failed (exit {proc.returncode}): {stderr_strip}"
+                wsl_log(
+                    "WSL.exe ERROR (Instance: %s, Exit: %d):\nSTDOUT: %s\nSTDERR: %s",
+                    self._instance,
+                    proc.returncode,
+                    stdout.strip() or "(empty)",
+                    stderr_strip or "(empty)",
+                    level=logging.ERROR,
+                )
+                raise WslError(msg)
+
+            wsl_log("WSL.exe Success (Instance: %s):\nSTDOUT: %s", self._instance, stdout.strip() or "(empty)")
+            return stdout
+
+        # Should be unreachable due to the raise in the loop if last attempt fails
+        raise WslError("WSL.exe command failed after max retries")
 
     async def _apply_bind_mounts(self) -> None:  # noqa: PLR0912, PLR0915
         """Apply all bind mounts from ``mounts.json`` inside the distro.
@@ -735,13 +767,8 @@ class WslVM:
                 quser = shlex.quote(sess)
                 chown_part = f" && chown -R {quser}:{quser} {qguest}"
 
-            # 4. Final Verification
-            # findmnt -n {qguest} returns 0 if mounted. 
-            # ls -A {qguest} shows content.
-            verify_part = f" && findmnt -n {qguest} && ls -A {qguest} | head -n 5"
-
             # Assemble full script
-            full_cmd = f"{script} && ({mount_cmd}){chown_part}{verify_part}"
+            full_cmd = f"{script} && ({mount_cmd}){chown_part}"
             
             wsl_log("WSL applying optimized mount for path: %s -> %s", m.host_path, m.guest_path)
             result = await self.shell(full_cmd, user="root")
@@ -753,10 +780,9 @@ class WslVM:
                 await self.shell(ln_cmd, user="root")
             else:
                 wsl_log(
-                    "WSL bind-mount applied+verified: guest=%s host_win=%s Content: %s",
+                    "WSL bind-mount applied: guest=%s host_win=%s",
                     m.guest_path,
                     m.host_path,
-                    result.stdout.strip().replace("\n", " | "),
                 )
 
     async def _resolve_unc_prefix(self) -> str:

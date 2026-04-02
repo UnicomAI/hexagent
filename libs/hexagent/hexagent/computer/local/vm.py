@@ -482,8 +482,8 @@ class LocalVM:
             name = resume
         else:
             # Create new session
-            name = await self._generate_unique_name()
-            await self._create_user(name)
+            name = await self.generate_unique_name()
+            await self.create_user(name)
 
             if mounts:
                 try:
@@ -702,8 +702,8 @@ class LocalVM:
     # Session management
     # ------------------------------------------------------------------
 
-    async def _generate_unique_name(self, max_attempts: int = 5) -> str:
-        """Generate a unique petname not colliding with existing VM users."""
+    async def generate_unique_name(self, max_attempts: int = 5) -> str:
+        """Generate a unique petname not colliding with existing distro users."""
         for _ in range(max_attempts):
             name: str = petname.generate(words=3, letters=10)
             result = await self._vm.shell(f"id -u {shlex.quote(name)}")
@@ -712,7 +712,7 @@ class LocalVM:
         msg = f"Failed to generate a unique session name after {max_attempts} attempts"
         raise VMError(msg)
 
-    async def _create_user(self, name: str) -> None:
+    async def create_user(self, name: str) -> None:
         """Create a Linux user with standard session directories."""
         qname = shlex.quote(name)
         home = f"/sessions/{name}"

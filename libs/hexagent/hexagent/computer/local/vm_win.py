@@ -148,7 +148,10 @@ class _VMSessionComputer(AsyncComputerMixin):
             raise CLIError(str(e)) from e
 
     async def upload(self, src: str, dst: str) -> None:
-        """Transfer a file from the host to the WSL session."""
+        """Transfer a file from the host to the WSL session.
+
+        Uses root to ensure directories are created and permissions are set.
+        """
         self._check_active()
         src_path = Path(src)
         if not src_path.exists():
@@ -159,48 +162,51 @@ class _VMSessionComputer(AsyncComputerMixin):
             raise CLIError(msg)
 
         # Destination path is always a Linux path; keep POSIX semantics on Windows.
+        dst_path = PurePosixPath(dst)
+        if not dst_path.is_absolute():
+            dst = f"{self._default_cwd}/{dst}"
+
         dst_parent = str(PurePosixPath(dst).parent)
         tmp = f"/tmp/.upload-{uuid.uuid4().hex}"  # noqa: S108
-        sudo_prefix = ""
         try:
-            sudo_probe = await self._vm.shell("command -v sudo >/dev/null 2>&1")
-            sudo_prefix = "sudo " if sudo_probe.exit_code == 0 else ""
-            mk_result = await self._vm.shell(f"{sudo_prefix}mkdir -p {shlex.quote(dst_parent)}")
-            if mk_result.exit_code != 0:
-                msg = mk_result.stderr or mk_result.stdout or f"Failed to create upload directory: {dst_parent}"
-                raise CLIError(msg)
-            # Copy to /tmp first (always writable), then sudo mv into place.
-            # This works regardless of destination directory ownership.
+            # 1. Ensure parent exists and copy to tmp
+            await self._vm.shell(f"mkdir -p {shlex.quote(dst_parent)}", user="root")
             await self._vm.copy(src, tmp, host_to_guest=True)
-            stage_result = await self._vm.shell(
-                f"{sudo_prefix}mv {tmp} {shlex.quote(dst)} && "
-                f"{sudo_prefix}chown {self._session_name}:{self._session_name} {shlex.quote(dst)} && "
-                f"{sudo_prefix}chmod 644 {shlex.quote(dst)}"
+
+            # 2. Move to final destination and fix ownership
+            qname = shlex.quote(self._session_name)
+            qdst = shlex.quote(dst)
+            cmd = (
+                f"mv {tmp} {qdst} && "
+                f"chown {qname}:{qname} {qdst} && "
+                f"chmod 644 {qdst}"
             )
-            if stage_result.exit_code != 0:
-                msg = stage_result.stderr or stage_result.stdout or f"Failed to stage uploaded file: {dst}"
+            result = await self._vm.shell(cmd, user="root")
+            if result.exit_code != 0:
+                msg = result.stderr or result.stdout or f"Failed to move file to {dst}"
                 raise CLIError(msg)
         except VMError as e:
             raise CLIError(str(e)) from e
         finally:
-            # Best-effort cleanup when stage command failed before move.
-            await self._vm.shell(f"{sudo_prefix}rm -f {tmp}")
+            # Best-effort cleanup of the temp file inside the guest.
+            await self._vm.shell(f"rm -f {tmp}", user="root")
 
     async def download(self, src: str, dst: str) -> None:
         """Transfer a file from the WSL session to the host.
 
-        Files owned by the session user may not be readable via UNC
-        paths.  Work around this by sudo-copying to a world-readable
-        temp location first, mirroring the strategy used by :meth:`upload`.
+        WSL UNC paths might have permission issues for non-root users.
+        Work around this by copying to a world-readable temp location as root.
         """
         self._check_active()
+        src_path = PurePosixPath(src)
+        if not src_path.is_absolute():
+            src = f"{self._default_cwd}/{src}"
+
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
         tmp = f"/tmp/.download-{uuid.uuid4().hex}"  # noqa: S108
-        sudo_prefix = ""
         try:
-            sudo_probe = await self._vm.shell("command -v sudo >/dev/null 2>&1")
-            sudo_prefix = "sudo " if sudo_probe.exit_code == 0 else ""
-            result = await self._vm.shell(f"{sudo_prefix}cp {shlex.quote(src)} {tmp} && {sudo_prefix}chmod 644 {tmp}")
+            # Stage file as root
+            result = await self._vm.shell(f"cp {shlex.quote(src)} {tmp} && chmod 644 {tmp}", user="root")
             if result.exit_code != 0:
                 msg = result.stderr or result.stdout or f"Failed to stage {src} for download"
                 raise CLIError(msg)
@@ -209,7 +215,7 @@ class _VMSessionComputer(AsyncComputerMixin):
             raise CLIError(str(e)) from e
         finally:
             # Best-effort cleanup of the temp file inside the guest.
-            await self._vm.shell(f"{sudo_prefix}rm -f {tmp}")
+            await self._vm.shell(f"rm -f {tmp}", user="root")
 
     def _check_active(self) -> None:
         """Raise if handle is inactive."""
@@ -511,8 +517,8 @@ class LocalVM:
                 raise VMError(msg)
             name = resume
         else:
-            name = await self._generate_unique_name()
-            await self._create_user(name)
+            name = await self.generate_unique_name()
+            await self.create_user(name)
 
             if mounts:
                 try:
@@ -536,7 +542,7 @@ class LocalVM:
         if await self._vm.status() != "Running":
             await self.start()
 
-        await self._vm.shell(f"sudo userdel -r {shlex.quote(name)}")
+        await self._vm.shell(f"userdel -r {shlex.quote(name)}", user="root")
 
         async with self._lock:
             existing = self._vm.read_mounts()
@@ -622,52 +628,50 @@ class LocalVM:
     # Session management
     # ------------------------------------------------------------------
 
-    async def _generate_unique_name(self, max_attempts: int = 5) -> str:
-        """Generate a unique petname not colliding with existing distro users."""
-        for _ in range(max_attempts):
-            name: str = petname.generate(words=3, letters=10)
-            result = await self._vm.shell(f"id -u {shlex.quote(name)}")
-            if result.exit_code != 0:
-                return name
-        msg = f"Failed to generate a unique session name after {max_attempts} attempts"
-        raise VMError(msg)
+    async def generate_unique_name(self, max_attempts: int = 5) -> str:
+        """Generate a unique timestamp-based session name.
+        
+        Format: YYYYMMDD-HHMM-SSSSS (e.g. 20260402-1727-30331)
+        Probability of collision is extremely low, so we skip 'id -u' probes.
+        """
+        from datetime import datetime
+        now = datetime.now()
+        ts = now.strftime("%Y%m%d-%H%M")
+        ss_ms = now.strftime("%S%f")[:5]  # 2 digits seconds + 3 digits ms
+        return f"{ts}-{ss_ms}"
 
-    async def _create_user(self, name: str) -> None:
+    async def create_user(self, name: str) -> None:
         """Create a Linux user with standard session directories."""
         qname = shlex.quote(name)
         home = f"/sessions/{name}"
         qhome = shlex.quote(home)
 
         # --- Optimization: Combined Shell Script ---
-        # 1. Probe for sudo (if not already known)
-        # 2. Try create user
-        # 3. Create session directories and set permissions
+        # 1. Try create user
+        # 2. Create session directories and set permissions
         # All in one WSL process call to reduce 5-10s overhead.
-
-        probe_cmd = "command -v sudo >/dev/null 2>&1 && echo 1 || echo 0"
-        probe_res = await self._vm.shell(probe_cmd)
-        sudo_prefix = "sudo " if probe_res.stdout.strip() == "1" else ""
+        # Run as root directly via 'wsl -u root' to avoid sudo issues.
 
         all_dirs = " ".join(shlex.quote(f"{home}/{d}") for d in SESSION_DIRS)
         writable = f"{shlex.quote(f'{home}/{SESSION_TMP_DIR}')} {shlex.quote(f'{home}/{SESSION_OUTPUTS_DIR}')}"
 
         # Primary command (modern useradd)
-        main_create = f"{sudo_prefix}useradd -m -d {qhome} -s /bin/bash --no-log-init {qname}"
-        setup_dirs = f"{sudo_prefix}mkdir -p {all_dirs} && {sudo_prefix}chown {qname} {writable}"
+        main_create = f"useradd -m -d {qhome} -s /bin/bash --no-log-init {qname}"
+        setup_dirs = f"mkdir -p {all_dirs} && chown {qname} {writable}"
 
         full_script = f"({main_create}) && {setup_dirs}"
 
-        result = await self._vm.shell(full_script)
+        result = await self._vm.shell(full_script, user="root")
 
         if result.exit_code != 0:
             # Fallback for older images
-            fallback_create = f"{sudo_prefix}useradd -m -d {qhome} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {qname}"
+            fallback_create = f"useradd -m -d {qhome} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {qname}"
             fallback_script = f"({fallback_create}) && {setup_dirs}"
 
             from hexagent.computer.local._wsl import wsl_log
 
             wsl_log("WSL useradd failed, trying fallback: %s", result.stderr, level=logging.WARNING)
-            result = await self._vm.shell(fallback_script)
+            result = await self._vm.shell(fallback_script, user="root")
 
         if result.exit_code != 0:
             msg = f"Failed to create session user and directories for '{name}': {result.stderr}"

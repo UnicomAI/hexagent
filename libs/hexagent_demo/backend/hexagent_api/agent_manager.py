@@ -103,121 +103,45 @@ class AgentManager:
         session_name: str | None = None,
         working_dir: str | None = None,
     ) -> tuple[Any, str]:
-        """Start or resume a computer for the given mode/session.
-
-        Returns:
-            (computer, session_key) where session_key is ``"chat"`` or the
-            VM session name.
-        """
+        """Ensure a Computer instance exists for the given session."""
         if mode == "chat":
-            if "chat" in self._computers:
-                return self._computers["chat"], "chat"
+            key = "chat"
+            if key not in self._computers:
+                from hexagent.computer.local import LocalNativeComputer
 
-            async with self._setup_lock:
-                if "chat" in self._computers:
-                    return self._computers["chat"], "chat"
+                self._computers[key] = LocalNativeComputer()
+            return self._computers[key], key
 
-                from hexagent_api.config import load_config
+        # Cowork mode uses the shared LocalVM
+        await self._ensure_vm_manager()
+        assert self._vm_manager is not None
 
-                cfg = load_config()
-                e2b_key = cfg.sandbox.e2b_api_key or os.environ.get("E2B_API_KEY", "")
-                if not e2b_key:
-                    raise RuntimeError(
-                        "E2B API key not configured. "
-                        "Please set it in Settings > Sandbox."
-                    )
-                os.environ["E2B_API_KEY"] = e2b_key
+        if session_name is None:
+            # Generate timestamp-based ID: YYYYMMDD-HHMM-SSSSS (e.g. 20260402-1727-30331)
+            from datetime import datetime
+            now = datetime.now()
+            ts = now.strftime("%Y%m%d-%H%M")
+            ss_ms = now.strftime("%S%f")[:5]  # 2 digits seconds + 3 digits ms
+            session_name = f"{ts}-{ss_ms}"
+            logger.info("Generated new session name: %s", session_name)
 
-                from hexagent.computer.remote.e2b import RemoteE2BComputer
+        key = session_name
+        if key not in self._computers:
+            from hexagent.computer.local.vm_win import _VMSessionComputer
 
-                logger.info("Starting RemoteE2BComputer for chat mode...")
-                computer = RemoteE2BComputer(template="an7tang/hexagent")
-                try:
-                    await asyncio.wait_for(computer.start(), timeout=30)
-                except asyncio.TimeoutError:
-                    raise RuntimeError(
-                        "E2B sandbox creation timed out after 30s. "
-                        "Check your network connection and E2B API key."
-                    )
-                self._computers["chat"] = computer
-                return computer, "chat"
+            # Optimization: Skip redundant 'id -u' probe for our generated timestamp IDs.
+            # We know they don't exist yet.
+            computer = _VMSessionComputer(vm=self._vm_manager._vm, session_name=session_name)
+            
+            # Use a combined shell script to create user and base dirs in one WSL call.
+            await self._vm_manager.create_user(session_name)
+            
+            self._computers[key] = computer
 
-        # Cowork mode — per-conversation session
-        if session_name and session_name in self._computers:
-            return self._computers[session_name], session_name
+        if working_dir:
+            await self.mount_working_dir(session_name, working_dir)
 
-        # Ensure VM manager is ready BEFORE acquiring the setup lock.
-        # _ensure_vm_manager() uses the same _setup_lock internally;
-        # calling it while already holding the lock would deadlock
-        # (asyncio.Lock is not reentrant).
-        if self._vm_manager is None:
-            import shutil
-
-            if sys.platform == "win32":
-                from hexagent.computer.local._wsl import _resolve_wsl_exe
-
-                vm_backend_ready = _resolve_wsl_exe() is not None
-            else:
-                vm_backend_ready = bool(shutil.which("limactl"))
-            if not vm_backend_ready:
-                raise RuntimeError(
-                    "Cowork mode requires VM setup. "
-                    "Please install and configure it in Settings \u2192 Sandbox."
-                )
-            await self._ensure_vm_manager()
-
-        async with self._setup_lock:
-            # Re-check after acquiring lock (another coroutine may have created it)
-            if session_name and session_name in self._computers:
-                return self._computers[session_name], session_name
-
-            try:
-                if session_name:
-                    logger.info("Resuming session: %s", session_name)
-                    computer = await self._vm_manager.computer(resume=session_name)
-                else:
-                    from pathlib import Path
-
-                    from hexagent.computer import Mount
-
-                    session_mounts: list[Mount] | None = None
-                    default_cwd: str | None = None
-                    if working_dir:
-                        mount_target = Path(working_dir).name
-                        session_mounts = [Mount(source=working_dir, target=mount_target, writable=True)]
-                        default_cwd = f"/sessions/{{session}}/mnt/{mount_target}"
-                    logger.info("Creating new session (mounts=%s)...", session_mounts)
-                    computer = await self._vm_manager.computer(mounts=session_mounts)
-                    if default_cwd is not None:
-                        resolved_cwd = default_cwd.format(session=computer.session_name)
-                        self._set_computer_default_cwd(computer, resolved_cwd)
-                        await self._verify_session_dir_writable(computer.session_name, resolved_cwd)
-            except FileNotFoundError:
-                raise RuntimeError(
-                    "Cowork mode requires VM setup. "
-                    "Please install and configure it in Settings \u2192 Sandbox."
-                ) from None
-            except Exception as exc:
-                # Preserve actionable details instead of collapsing all errors
-                # into "VM is not running", which can hide the real cause.
-                detail = str(exc).strip() or exc.__class__.__name__
-                low = detail.lower()
-                if "does not exist" in low and "wsl distro" in low:
-                    raise RuntimeError(
-                        "Cowork mode requires VM setup. "
-                        "Please install and configure it in Settings \u2192 Sandbox."
-                    ) from None
-                if "not running" in low and "session" not in low:
-                    raise RuntimeError(
-                        "VM is not running. "
-                        "Please set it up in Settings \u2192 Sandbox."
-                    ) from None
-                raise RuntimeError(f"Cowork session setup failed: {detail}") from exc
-
-            actual_name = computer.session_name
-            self._computers[actual_name] = computer
-            logger.info("Session ready: %s", actual_name)
-            return computer, actual_name
+        return self._computers[key], key
 
     # ── MCP servers ──
 
@@ -433,12 +357,20 @@ class AgentManager:
             from hexagent.computer.local.vm_win import _VMSessionComputer
             from hexagent.harness import SkillResolver
             from hexagent_api.routes.skills import INACTIVE_DIR, _list_skills
+            from hexagent_api.paths import bundled_skills_dir, skills_dir
 
             # Use a system-level computer handle for global skill discovery.
             # We point it to the root user to ensure access to /mnt/skills.
             computer = _VMSessionComputer(vm=self._vm_manager._vm, session_name="root")
+            
+            # Use host paths for fast scanning (Python side)
+            public_host = bundled_skills_dir() / "public"
+            private_host = skills_dir() / "private"
+            
             self._skill_resolver = SkillResolver(
-                computer, ["/mnt/skills/public", "/mnt/skills/private"]
+                computer, 
+                ["/mnt/skills/public", "/mnt/skills/private"],
+                host_search_paths=[str(public_host), str(private_host)]
             )
             
             # Use the actual filesystem state (skills-inactive dir) as the source of truth
@@ -482,17 +414,23 @@ class AgentManager:
         for subdir, host_path in mount_sources.items():
             guest = f"/mnt/skills/{subdir}"
             existing = existing_by_guest.get(guest)
+            
+            # Ensure the host directory exists (even if empty) to avoid mount failures
+            if not host_path.is_dir():
+                logger.info("Creating missing skill directory: %s", host_path)
+                host_path.mkdir(parents=True, exist_ok=True)
+
             if existing is not None:
-                if existing.host_path == str(host_path) and host_path.is_dir():
+                if existing.host_path == str(host_path):
                     continue  # already correctly mounted
-                # Stale: host path changed (e.g. new _MEIPASS) or no longer exists
+                # Stale: host path changed (e.g. new _MEIPASS)
                 logger.info(
-                    "Stale skill mount detected for %s: %s (dir_exists=%s) → will replace with %s",
-                    guest, existing.host_path, Path(existing.host_path).is_dir(), host_path,
+                    "Stale skill mount detected for %s: %s → will replace with %s",
+                    guest, existing.host_path, host_path,
                 )
                 stale_targets.append(f"skills/{subdir}")
-            if host_path.is_dir():
-                skill_mounts.append(Mount(source=str(host_path), target=f"skills/{subdir}"))
+            
+            skill_mounts.append(Mount(source=str(host_path), target=f"skills/{subdir}"))
 
         # Deferred removal keeps lima.yaml consistent before the mount call.
         if stale_targets:
@@ -691,8 +629,10 @@ class AgentManager:
             # Force-unmount inside the guest BEFORE the VM restart to flush
             # FUSE/SSHFS state.  Without this, Lima's mount driver can leave
             # stale data on the old mount point after a single restart cycle.
+            # Use root directly to avoid sudo dependency
             result = await self._vm_manager._vm.shell(
-                f"sudo umount {shlex.quote(prev_guest_path)} 2>/dev/null; true"
+                f"umount {shlex.quote(prev_guest_path)} 2>/dev/null; true",
+                user="root"
             )
             if result.exit_code != 0:
                 logger.warning(
@@ -726,8 +666,10 @@ class AgentManager:
         # newly restored live mount.
         if prev_guest_path is not None and prev_guest_path != resolved_cwd:
             quoted = shlex.quote(prev_guest_path)
+            # Use root directly to avoid sudo dependency
             result = await self._vm_manager._vm.shell(
-                f"sudo umount {quoted} 2>/dev/null; sudo rmdir {quoted}"
+                f"umount {quoted} 2>/dev/null; rmdir {quoted}",
+                user="root"
             )
             if result.exit_code != 0:
                 logger.warning(
