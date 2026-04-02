@@ -1,6 +1,6 @@
 {
   "name": "hexagent",
-  "version": "0.0.6-20260329-1156",
+  "version": "0.0.6-20260401-2212",
   "description": "UniClaw-Work Desktop App",
   "main": "main.js",
   "scripts": {

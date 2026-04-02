@@ -36,7 +36,7 @@
       aplus_queue.push({action:'aplus.setMetaInfo',arguments:['umid',deviceId]});
 
       // 关闭调试
-      aplus_queue.push({action:'aplus.setMetaInfo',arguments:['DEBUG',false]});
+      aplus_queue.push({action:'aplus.setMetaInfo',arguments:['DEBUG',true]});
 
       // 初始化并上报启动PV（日活、启动次数依赖这条）
       aplus_queue.push({action:'aplus.init'});
