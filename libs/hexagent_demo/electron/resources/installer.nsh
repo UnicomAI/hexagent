@@ -37,6 +37,13 @@
     Return
   ${EndIf}
 
+  ; If Windows features requested a reboot in this run, installing WSL MSI in
+  ; the same session can fail with 1603 on some systems. Defer to post-reboot.
+  ${If} $9 == "1"
+    DetailPrint "System reboot is pending after feature enablement. Deferring offline WSL MSI install."
+    Return
+  ${EndIf}
+
   ${IfNot} ${FileExists} "$INSTDIR\wsl.2.6.3.0.x64.msi"
     MessageBox MB_ICONSTOP|MB_OK "Offline WSL installer was not found: $INSTDIR\wsl.2.6.3.0.x64.msi"
     Abort
@@ -48,6 +55,19 @@
 
   ${If} $0 == "3010"
     StrCpy $9 "1"
+  ${ElseIf} $0 == "1603"
+    ; MSI 1603 is generic. Some hosts still have WSL available afterwards
+    ; (already installed / repaired / reboot gate). Re-check before failing.
+    DetailPrint "Offline WSL MSI returned 1603, verifying current WSL runtime state..."
+    nsExec::ExecToLog '"$SYSDIR\wsl.exe" --version'
+    Pop $1
+    ${If} $1 == "0"
+      DetailPrint "WSL runtime is available after MSI 1603, continuing installation."
+      Return
+    ${EndIf}
+
+    MessageBox MB_ICONSTOP|MB_OK "Offline WSL runtime installation returned exit code 1603.$\r$\n$\r$\nThis is usually caused by pending reboot, existing WSL runtime state, or MSI policy restrictions.$\r$\nPlease restart Windows and run the installer again."
+    Abort
   ${ElseIf} $0 != "0"
     MessageBox MB_ICONSTOP|MB_OK "Offline WSL runtime installation failed. Exit code: $0.$\r$\n$\r$\nPlease check the Windows logs, or run the MSI manually and try again."
     Abort
@@ -102,6 +122,7 @@
   Delete "$INSTDIR\ubuntu-base-24.04-amd64.tar.gz"
   ; Unregister the WSL distribution to clean up registry and metadata
   nsExec::Exec "wsl.exe --unregister hexagent"
-  ; Remove the persistent data directory in the user profile
+  ; Remove persistent data directories
+  RMDir /r "$APPDATA\hexagent"
   RMDir /r "$PROFILE\.hexagent"
 !macroend
