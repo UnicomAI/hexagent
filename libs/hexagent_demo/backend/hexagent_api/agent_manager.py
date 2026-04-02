@@ -136,6 +136,10 @@ class AgentManager:
             # Use a combined shell script to create user and base dirs in one WSL call.
             await self._vm_manager.create_user(session_name)
             
+            # Ensure the computer always has a valid CWD (session home)
+            # instead of inheriting the backend's CWD (like C:\Windows\System32)
+            computer._default_cwd = f"/sessions/{session_name}"
+            
             self._computers[key] = computer
 
         if working_dir:
@@ -351,6 +355,16 @@ class AgentManager:
             vm = LocalVM()
             await vm.start()
             self._vm_manager = vm
+
+            # --- One-time Startup Cleanup ---
+            # Remove any stale session-specific mounts from mounts.json.
+            # Only system-level mounts (like skills) should persist across backend restarts.
+            existing = self._vm_manager.list_mounts()
+            stale_sessions = [m.target for m in existing if m.target.startswith("sessions/")]
+            if stale_sessions:
+                logger.info("Cleaning up %d stale session mount(s) from config", len(stale_sessions))
+                await self._vm_manager.unmount(stale_sessions, defer=False)
+
             await self._mount_skills()
 
             # Initialize global skill resolver for the VM
@@ -386,20 +400,11 @@ class AgentManager:
 
         Public skills live in the bundled skills directory (ships with the
         application).  Private skills live in user data.
-
-        This may restart the VM if new or replacement mounts are needed.
-        Stale mounts (host path no longer valid, e.g. after a PyInstaller
-        _MEIPASS path change between launches) are removed and re-added in
-        a single VM restart.  The cost is paid once, during warm session
-        creation which runs in the background while the user is on the
-        welcome screen.
         """
         assert self._vm_manager is not None
 
         from pathlib import Path
-
         from hexagent.computer import Mount
-
         from hexagent_api.paths import bundled_skills_dir, skills_dir
 
         existing_by_guest = {m.guest_path: m for m in self._vm_manager.list_mounts()}
@@ -438,11 +443,14 @@ class AgentManager:
             await self._vm_manager.unmount(stale_targets, defer=True)
 
         if skill_mounts:
-            logger.info("Mounting %d skill dir(s): %s", len(skill_mounts), [m.target for m in skill_mounts])
+            for m in skill_mounts:
+                logger.info("[SkillMount] Host: %s -> Guest: %s", m.source, m.target)
             await self._vm_manager.mount(skill_mounts)
         elif stale_targets:
             # Only removals with no replacements — apply the deferred changes now.
             await self._vm_manager.apply()
+        else:
+            logger.info("No new skill directories to mount.")
 
     async def start(self) -> None:
         """Initialize the agent manager.

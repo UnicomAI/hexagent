@@ -224,6 +224,7 @@ class WslVM:
         self._wsl_exe = _check_wsl_prerequisites()
         self._instance = instance
         self._unc_prefix: str | None = None  # cached after first successful probe
+        self._exec_lock = asyncio.Lock()  # Serializes wsl.exe process creation to avoid CreateInstance race.
 
     @property
     def instance(self) -> str:
@@ -256,13 +257,14 @@ class WslVM:
             WslError: If the distribution exists but is WSL version 1.
         """
         try:
-            proc = await asyncio.create_subprocess_exec(
-                self._wsl_exe,
-                "--list",
-                "--verbose",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+            async with self._exec_lock:
+                proc = await asyncio.create_subprocess_exec(
+                    self._wsl_exe,
+                    "--list",
+                    "--verbose",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
             stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=30.0)
         except (TimeoutError, asyncio.TimeoutError):
             if proc:
@@ -567,13 +569,15 @@ class WslVM:
         # Retry loop for transient WSL errors (e.g. Exit 4294967295 / CreateInstance failure)
         max_attempts = 3
         for attempt in range(max_attempts):
-            process = await asyncio.create_subprocess_exec(
-                *exec_args,
-                stdin=asyncio.subprocess.PIPE if input is not None else asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=_stable_host_cwd(),
-            )
+            # Serialized execution to prevent CreateInstance race condition
+            async with self._exec_lock:
+                process = await asyncio.create_subprocess_exec(
+                    *exec_args,
+                    stdin=asyncio.subprocess.PIPE if input is not None else asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=_stable_host_cwd(),
+                )
 
             try:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
@@ -590,6 +594,12 @@ class WslVM:
 
             stdout = _decode_wsl_output(stdout_bytes).removesuffix("\n")
             stderr = _decode_wsl_output(stderr_bytes).removesuffix("\n")
+
+            # Prevent massive output from blowing up the LLM context window.
+            # 100k characters is usually enough for any real command, but safe for LLMs.
+            MAX_OUTPUT = 100_000
+            if len(stdout) > MAX_OUTPUT:
+                stdout = stdout[:MAX_OUTPUT] + f"\n... (truncated {len(stdout) - MAX_OUTPUT} characters)"
 
             rc: int = process.returncode if process.returncode is not None else -1
             duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -671,12 +681,13 @@ class WslVM:
         max_attempts = 3
         last_error = None
         for attempt in range(max_attempts):
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=_stable_host_cwd(),
-            )
+            async with self._exec_lock:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=_stable_host_cwd(),
+                )
             try:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
                     proc.communicate(),
@@ -722,68 +733,68 @@ class WslVM:
     async def _apply_bind_mounts(self) -> None:  # noqa: PLR0912, PLR0915
         """Apply all bind mounts from ``mounts.json`` inside the distro.
 
-        Idempotent: skips mounts that are already active (detected via
-        ``mountpoint -q``).
+        Optimized to use a single WSL shell script for all mounts, and only
+        remounts if the source path has changed or is not yet mounted.
         """
         mounts = self.read_mounts()
         if not mounts:
             wsl_log("WSL applying bind mounts: No mounts found in mounts.json")
             return
 
-        wsl_log("WSL applying %d bind mount(s) from mounts.json", len(mounts))
+        wsl_log("WSL applying %d bind mount(s) via optimized composite script", len(mounts))
+
+        # Helper to detect session user from guest path
+        skip_chown = os.environ.get("HEXAGENT_WSL_SKIP_SESSION_MOUNT_CHOWN", "").strip().lower() in ("1", "true", "yes")
+
+        # Build a single bash script with a helper function to reduce wsl.exe overhead
+        script_lines = [
+            "apply_mount() {",
+            "  local host_win=\"$1\"",
+            "  local guest=\"$2\"",
+            "  local writable=\"$3\"",
+            "  local sess_user=\"$4\"",
+            "  local host",
+            "  host=$(wslpath -u \"$host_win\") || return 1",
+            "  ",
+            "  # Check if already mounted to the correct source",
+            "  if mountpoint -q \"$guest\"; then",
+            "    local current_src",
+            "    current_src=$(findmnt -n -o SOURCE \"$guest\")",
+            "    if [ \"$current_src\" = \"$host\" ]; then",
+            "      return 0",
+            "    fi",
+            "    umount -l \"$guest\"",
+            "  fi",
+            "  ",
+            "  mkdir -p \"$(dirname \"$guest\")\" && chmod 777 \"$(dirname \"$guest\")\"",
+            "  mkdir -p \"$guest\" && chmod 777 \"$guest\"",
+            "  mount --bind \"$host\" \"$guest\" || return 1",
+            "  if [ \"$writable\" = \"false\" ]; then",
+            "    mount -o remount,ro,bind \"$guest\"",
+            "  fi",
+            "  if [ -n \"$sess_user\" ]; then",
+            "    chown -R \"$sess_user:$sess_user\" \"$guest\"",
+            "  fi",
+            "}",
+        ]
 
         for m in mounts:
-            # Use wslpath to get the accurate Linux path for the Windows host path.
-            # This handles drive letters, mount points, and case-sensitivity correctly.
-            wsl_host_res = await self.shell(f"wslpath -u {shlex.quote(m.host_path)}", user="root")
-            if wsl_host_res.exit_code == 0 and wsl_host_res.stdout.strip():
-                wsl_host = wsl_host_res.stdout.strip()
-            else:
-                wsl_host = _win_path_to_wsl(m.host_path)
-                wsl_log("WSL wslpath failed for %s, falling back to %s", m.host_path, wsl_host, level=logging.WARNING)
-
-            qguest = shlex.quote(m.guest_path)
-            qhost = shlex.quote(wsl_host)
-            guest_parent = shlex.quote(str(Path(m.guest_path).parent).replace("\\", "/"))
-
-            # --- Optimization: Combined Shell Script ---
-            # We combine mkdir, mount, chown, and verification into a single WSL process call
-            # to reduce the significant overhead of starting wsl.exe (5-10s per call).
-            
-            # 1. Setup directories
-            script = f"mkdir -p {guest_parent} && chmod 777 {guest_parent} && mkdir -p {qguest} && chmod 777 {qguest}"
-            
-            # 2. Mount command
-            mount_cmd = f"mount --bind {qhost} {qguest}"
-            if not m.writable:
-                mount_cmd += f" && mount -o remount,ro,bind {qguest}"
-            
-            # 3. Chown logic (if applicable)
-            chown_part = ""
             sess = _session_user_from_guest_mount_path(m.guest_path)
-            skip_chown = os.environ.get("HEXAGENT_WSL_SKIP_SESSION_MOUNT_CHOWN", "").strip().lower() in ("1", "true", "yes")
+            quser = shlex.quote(sess) if (sess and m.writable and not skip_chown) else ""
             
-            if m.writable and sess is not None and not skip_chown:
-                quser = shlex.quote(sess)
-                chown_part = f" && chown -R {quser}:{quser} {qguest}"
+            script_lines.append(
+                f"apply_mount {shlex.quote(m.host_path)} {shlex.quote(m.guest_path)} {str(m.writable).lower()} {quser}"
+            )
 
-            # Assemble full script
-            full_cmd = f"{script} && ({mount_cmd}){chown_part}"
-            
-            wsl_log("WSL applying optimized mount for path: %s -> %s", m.host_path, m.guest_path)
-            result = await self.shell(full_cmd, user="root")
+        full_script = "\n".join(script_lines)
+        result = await self.shell(full_script, user="root")
 
-            if result.exit_code != 0:
-                # Fallback to symlink if mount failed
-                wsl_log("WSL optimized mount failed, falling back to symlink: %s", result.stderr, level=logging.WARNING)
-                ln_cmd = f"rm -rf {qguest} && ln -s {qhost} {qguest}"
-                await self.shell(ln_cmd, user="root")
-            else:
-                wsl_log(
-                    "WSL bind-mount applied: guest=%s host_win=%s",
-                    m.guest_path,
-                    m.host_path,
-                )
+        if result.exit_code != 0:
+            wsl_log("WSL optimized composite mount failed: %s", result.stderr, level=logging.ERROR)
+            # We don't fall back to symlinks here as the composite script is the primary mechanism now.
+            # Individual failures within apply_mount don't stop the whole script unless we return 1.
+        else:
+            wsl_log("WSL optimized composite mount completed successfully")
 
     async def _resolve_unc_prefix(self) -> str:
         r"""Resolve and cache the working UNC prefix for this system.

@@ -47,6 +47,7 @@ from hexagent.computer.base import (
 )
 from hexagent.computer.local._types import ResolvedMount
 from hexagent.exceptions import CLIError, VMError, VMMountConflictError
+from hexagent.computer.local._wsl import wsl_log
 
 if TYPE_CHECKING:
     from hexagent.computer.local._wsl import WslVM
@@ -282,7 +283,6 @@ class LocalVM:
         # Platform check is delegated to WslVM.__init__(), which raises
         # UnsupportedPlatformError on non-Windows platforms.
         from hexagent.computer.local._wsl import WslVM as _WslVM
-        from hexagent.computer.local._wsl import wsl_log
 
         self._vm: WslVM = _WslVM(instance=instance)
         self._instance = instance
@@ -542,9 +542,9 @@ class LocalVM:
         if await self._vm.status() != "Running":
             await self.start()
 
-        await self._vm.shell(f"userdel -r {shlex.quote(name)}", user="root")
-
         async with self._lock:
+            await self._vm.shell(f"userdel -r {shlex.quote(name)}", user="root")
+
             existing = self._vm.read_mounts()
             prefix = f"/sessions/{name}/"
             remaining = [m for m in existing if not m.guest_path.startswith(prefix)]
@@ -651,28 +651,27 @@ class LocalVM:
         # 2. Create session directories and set permissions
         # All in one WSL process call to reduce 5-10s overhead.
         # Run as root directly via 'wsl -u root' to avoid sudo issues.
+        
+        async with self._lock:
+            all_dirs = " ".join(shlex.quote(f"{home}/{d}") for d in SESSION_DIRS)
+            writable = f"{shlex.quote(f'{home}/{SESSION_TMP_DIR}')} {shlex.quote(f'{home}/{SESSION_OUTPUTS_DIR}')}"
 
-        all_dirs = " ".join(shlex.quote(f"{home}/{d}") for d in SESSION_DIRS)
-        writable = f"{shlex.quote(f'{home}/{SESSION_TMP_DIR}')} {shlex.quote(f'{home}/{SESSION_OUTPUTS_DIR}')}"
+            # Primary command (modern useradd)
+            main_create = f"useradd -m -d {qhome} -s /bin/bash --no-log-init {qname}"
+            setup_dirs = f"mkdir -p {all_dirs} && chown {qname} {writable}"
 
-        # Primary command (modern useradd)
-        main_create = f"useradd -m -d {qhome} -s /bin/bash --no-log-init {qname}"
-        setup_dirs = f"mkdir -p {all_dirs} && chown {qname} {writable}"
+            full_script = f"({main_create}) && {setup_dirs}"
 
-        full_script = f"({main_create}) && {setup_dirs}"
+            result = await self._vm.shell(full_script, user="root")
 
-        result = await self._vm.shell(full_script, user="root")
+            if result.exit_code != 0:
+                # Fallback for older images
+                fallback_create = f"useradd -m -d {qhome} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {qname}"
+                fallback_script = f"({fallback_create}) && {setup_dirs}"
 
-        if result.exit_code != 0:
-            # Fallback for older images
-            fallback_create = f"useradd -m -d {qhome} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {qname}"
-            fallback_script = f"({fallback_create}) && {setup_dirs}"
+                wsl_log("WSL useradd failed, trying fallback: %s", result.stderr, level=logging.WARNING)
+                result = await self._vm.shell(fallback_script, user="root")
 
-            from hexagent.computer.local._wsl import wsl_log
-
-            wsl_log("WSL useradd failed, trying fallback: %s", result.stderr, level=logging.WARNING)
-            result = await self._vm.shell(fallback_script, user="root")
-
-        if result.exit_code != 0:
-            msg = f"Failed to create session user and directories for '{name}': {result.stderr}"
-            raise VMError(msg)
+            if result.exit_code != 0:
+                msg = f"Failed to create session user and directories for '{name}': {result.stderr}"
+                raise VMError(msg)

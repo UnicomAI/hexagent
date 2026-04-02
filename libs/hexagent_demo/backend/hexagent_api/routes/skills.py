@@ -66,7 +66,8 @@ async def _update_resolver(skill_name: str, action: str, enabled: bool = True):
             if path.is_dir():
                 # Convert to guest path
                 guest_path = f"/mnt/skills/{subdir}/{skill_name}"
-                await resolver.add_skill_by_path(guest_path)
+                # Pass host path for fast metadata reading
+                await resolver.add_skill_by_path(guest_path, host_path=str(path))
                 break
     elif action == "delete":
         await resolver.remove_skill(skill_name)
