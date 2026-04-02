@@ -728,10 +728,23 @@ class LocalVM:
             else ""
         )
 
-        result = await self._vm.shell(
+        # Use the most compatible useradd command. Some older images
+        # fail if SUB_UID_COUNT=0 is specified, while others might fail if it's
+        # NOT specified (due to missing /etc/subuid). We prioritize the simple
+        # version.
+        create_cmd = (
             f"sudo useradd -m -d {qhome} -s /bin/bash --no-log-init "
-            f"-K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {uid_flag} {qname}"
+            f"{uid_flag} {qname}"
         )
+        result = await self._vm.shell(create_cmd)
+        if result.exit_code != 0:
+            # Fallback to the version with SUB_UID/GID_COUNT overrides.
+            fallback_cmd = (
+                f"sudo useradd -m -d {qhome} -s /bin/bash --no-log-init "
+                f"-K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {uid_flag} {qname}"
+            )
+            result = await self._vm.shell(fallback_cmd)
+
         if result.exit_code != 0:
             msg = f"Failed to create session user '{name}': {result.stderr}"
             raise VMError(msg)

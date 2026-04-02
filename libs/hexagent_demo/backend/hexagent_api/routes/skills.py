@@ -50,6 +50,28 @@ _ACTIVE_DIRS: dict[str, Path] = {
 ACCEPTED_EXTENSIONS = (".zip", ".skill")
 
 
+async def _update_resolver(skill_name: str, action: str, enabled: bool = True):
+    """Update the global SkillResolver in AgentManager."""
+    from hexagent_api.agent_manager import agent_manager
+    resolver = agent_manager._skill_resolver
+    if resolver is None:
+        return
+
+    if action == "toggle":
+        await resolver.set_enabled(skill_name, enabled)
+    elif action == "add":
+        # Determine which active directory it's in
+        for subdir, active_dir in _ACTIVE_DIRS.items():
+            path = active_dir / skill_name
+            if path.is_dir():
+                # Convert to guest path
+                guest_path = f"/mnt/skills/{subdir}/{skill_name}"
+                await resolver.add_skill_by_path(guest_path)
+                break
+    elif action == "delete":
+        await resolver.remove_skill(skill_name)
+
+
 def _list_skills(directory: Path) -> list[str]:
     """Return sorted list of skill folder names in a directory."""
     if not directory.is_dir():
@@ -166,6 +188,7 @@ async def upload_skill(file: UploadFile = File(...)) -> dict[str, str]:
             )
         shutil.copytree(source, dest)
 
+    await _update_resolver(skill_name, "add")
     logger.info("Skill uploaded: %s", skill_name)
     return {"name": skill_name}
 
@@ -195,6 +218,7 @@ async def delete_skill(skill_name: str) -> dict[str, str]:
     if not removed:
         raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
 
+    await _update_resolver(skill_name, "delete")
     logger.info("Skill deleted: %s", skill_name)
     return {"deleted": skill_name}
 
@@ -215,92 +239,13 @@ async def install_skill(skill_name: str) -> dict[str, str]:
 
     PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
     shutil.copytree(str(source), str(dest))
+    await _update_resolver(skill_name, "add")
     logger.info("Skill installed from examples: %s", skill_name)
     return {"installed": skill_name}
 
 
 class ToggleRequest(BaseModel):
     enabled: bool
-
-
-async def _sync_skill_to_vm(skill_name: str, subdir: str, enabled: bool) -> None:
-    """Sync a single skill's presence in the WSL VM after toggle (Windows only).
-
-    WSL uses cp -r (not bind mount) for skills, so changes on Windows
-    filesystem are not reflected automatically. This function directly
-    adds/removes the skill in the WSL guest filesystem.
-
-    On macOS, Lima uses real bind mounts, so changes are automatically
-    reflected and this function is a no-op.
-
-    Args:
-        skill_name: Name of the skill directory.
-        subdir: Either "public" or "private".
-        enabled: True if skill was enabled, False if disabled.
-    """
-    import sys
-
-    # Only Windows/WSL needs manual sync; macOS Lima uses bind mounts
-    if sys.platform != "win32":
-        logger.debug("Skipping skill sync on non-Windows platform (bind mounts auto-sync)")
-        return
-
-    from hexagent_api.agent_manager import agent_manager
-
-    vm = getattr(agent_manager, "_vm_manager", None)
-    if vm is None:
-        logger.debug("VM manager not initialized, skipping skill sync")
-        return
-
-    vm_backend = getattr(vm, "_vm", None)
-    if vm_backend is None:
-        logger.debug("VM backend not initialized, skipping skill sync")
-        return
-
-    guest_path = f"/mnt/skills/{subdir}/{skill_name}"
-    import shlex
-
-    if enabled:
-        # Skill was enabled: copy from Windows to WSL
-        src_path = _ACTIVE_DIRS[subdir] / skill_name
-        if not src_path.is_dir():
-            logger.debug("Source skill dir not found: %s", src_path)
-            return
-
-        # Convert Windows path to WSL path
-        import re
-        win_path = str(src_path).replace("\\", "/")
-        match = re.match(r"^([A-Za-z]):(.*)$", win_path)
-        if match:
-            wsl_path = f"/mnt/{match.group(1).lower()}{match.group(2)}"
-        else:
-            logger.warning("Cannot convert Windows path to WSL: %s", src_path)
-            return
-
-        qsrc = shlex.quote(wsl_path)
-        qdst = shlex.quote(guest_path)
-
-        logger.info("Copying enabled skill to VM: %s -> %s", skill_name, guest_path)
-        result = await vm_backend.shell(
-            f"mkdir -p {shlex.quote('/mnt/skills/' + subdir)} && "
-            f"rm -rf {qdst} && "
-            f"cp -r {qsrc} {qdst} && "
-            f"chmod -R 777 {qdst}",
-            user="root",
-        )
-        if result.exit_code != 0:
-            logger.warning("Failed to copy skill to VM: %s", result.stderr or result.stdout)
-        else:
-            logger.info("Skill copied to VM successfully: %s", skill_name)
-    else:
-        # Skill was disabled: remove from WSL
-        qdst = shlex.quote(guest_path)
-        logger.info("Removing disabled skill from VM: %s", guest_path)
-        result = await vm_backend.shell(f"rm -rf {qdst}", user="root")
-        if result.exit_code != 0:
-            logger.warning("Failed to remove skill from VM: %s", result.stderr or result.stdout)
-        else:
-            logger.info("Skill removed from VM successfully: %s", skill_name)
 
 
 @router.put("/{skill_name}/toggle")
@@ -325,7 +270,7 @@ async def toggle_skill(skill_name: str, body: ToggleRequest) -> dict[str, bool]:
                 shutil.move(str(inactive_path), str(dest))
 
             logger.info("Skill enabled: %s", skill_name)
-            await _sync_skill_to_vm(skill_name, subdir, enabled=True)
+            await _update_resolver(skill_name, "add")
             return {"enabled": True}
         raise HTTPException(status_code=404, detail=f"Inactive skill not found: {skill_name}")
     else:
@@ -348,6 +293,6 @@ async def toggle_skill(skill_name: str, body: ToggleRequest) -> dict[str, bool]:
                     shutil.move(str(active_path), str(dest))
 
                 logger.info("Skill disabled: %s", skill_name)
-                await _sync_skill_to_vm(skill_name, subdir, enabled=False)
+                await _update_resolver(skill_name, "delete")
                 return {"enabled": False}
         raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")

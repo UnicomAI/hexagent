@@ -761,11 +761,13 @@ class Skill:
         name: Unique identifier for the skill.
         description: Human-readable description for prompt assembly.
         path: Filesystem path to the skill directory on the computer.
+        enabled: Whether the skill is currently active and injected into prompts.
     """
 
     name: str
     description: str
     path: str
+    enabled: bool = True
 
 
 @runtime_checkable

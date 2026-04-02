@@ -637,24 +637,38 @@ class LocalVM:
         qname = shlex.quote(name)
         home = f"/sessions/{name}"
         qhome = shlex.quote(home)
-        sudo_probe = await self._vm.shell("command -v sudo >/dev/null 2>&1")
-        sudo_prefix = "sudo " if sudo_probe.exit_code == 0 else ""
 
-        create_cmd = f"{sudo_prefix}useradd -m -d {qhome} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {qname}"
-        result = await self._vm.shell(create_cmd)
-        if result.exit_code != 0:
-            # Some Ubuntu/WSL images reject useradd with SUB_UID/GID_COUNT=0.
-            # Retry without those overrides for compatibility. We retry
-            # regardless of locale-specific stderr text.
-            fallback_cmd = f"{sudo_prefix}useradd -m -d {qhome} -s /bin/bash --no-log-init {qname}"
-            result = await self._vm.shell(fallback_cmd)
-        if result.exit_code != 0:
-            msg = f"Failed to create session user '{name}': {result.stderr}"
-            raise VMError(msg)
+        # --- Optimization: Combined Shell Script ---
+        # 1. Probe for sudo (if not already known)
+        # 2. Try create user
+        # 3. Create session directories and set permissions
+        # All in one WSL process call to reduce 5-10s overhead.
+
+        probe_cmd = "command -v sudo >/dev/null 2>&1 && echo 1 || echo 0"
+        probe_res = await self._vm.shell(probe_cmd)
+        sudo_prefix = "sudo " if probe_res.stdout.strip() == "1" else ""
 
         all_dirs = " ".join(shlex.quote(f"{home}/{d}") for d in SESSION_DIRS)
         writable = f"{shlex.quote(f'{home}/{SESSION_TMP_DIR}')} {shlex.quote(f'{home}/{SESSION_OUTPUTS_DIR}')}"
-        result = await self._vm.shell(f"{sudo_prefix}mkdir -p {all_dirs} && {sudo_prefix}chown {qname} {writable}")
+
+        # Primary command (modern useradd)
+        main_create = f"{sudo_prefix}useradd -m -d {qhome} -s /bin/bash --no-log-init {qname}"
+        setup_dirs = f"{sudo_prefix}mkdir -p {all_dirs} && {sudo_prefix}chown {qname} {writable}"
+
+        full_script = f"({main_create}) && {setup_dirs}"
+
+        result = await self._vm.shell(full_script)
+
         if result.exit_code != 0:
-            msg = f"Failed to create session directories for '{name}': {result.stderr}"
+            # Fallback for older images
+            fallback_create = f"{sudo_prefix}useradd -m -d {qhome} -s /bin/bash --no-log-init -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 {qname}"
+            fallback_script = f"({fallback_create}) && {setup_dirs}"
+
+            from hexagent.computer.local._wsl import wsl_log
+
+            wsl_log("WSL useradd failed, trying fallback: %s", result.stderr, level=logging.WARNING)
+            result = await self._vm.shell(fallback_script)
+
+        if result.exit_code != 0:
+            msg = f"Failed to create session user and directories for '{name}': {result.stderr}"
             raise VMError(msg)
