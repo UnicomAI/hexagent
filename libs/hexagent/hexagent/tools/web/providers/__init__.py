@@ -3,6 +3,7 @@
 Fetch providers:
 - JinaFetchProvider: Free, no API key required
 - FirecrawlFetchProvider: Advanced JS rendering, requires API key
+- UnicrawlFetchProvider: Unicrawl API (Firecrawl-compatible), requires API key
 
 Search providers:
 - BochaSearchProvider: AI-optimized search, requires API key
@@ -17,6 +18,7 @@ from hexagent.tools.web.providers.fetch import (
     FetchResult,
     FirecrawlFetchProvider,
     JinaFetchProvider,
+    UnicrawlFetchProvider,
 )
 from hexagent.tools.web.providers.search import (
     BochaSearchProvider,
@@ -36,4 +38,5 @@ __all__ = [
     "SearchProvider",
     "SearchResultItem",
     "TavilySearchProvider",
+    "UnicrawlFetchProvider",
 ]
