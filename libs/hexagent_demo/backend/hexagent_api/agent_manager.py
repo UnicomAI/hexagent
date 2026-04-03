@@ -414,7 +414,7 @@ class AgentManager:
     # ── Public API ──
 
     async def _ensure_vm_manager(self) -> None:
-        """Create LocalVM and mount skills if not already running."""
+        """Create LocalVM and sync skills if not already running."""
         if self._vm_manager is not None:
             return
 
@@ -427,7 +427,11 @@ class AgentManager:
             vm = LocalVM()
             await vm.start()
             self._vm_manager = vm
-            await self._mount_skills()
+            
+            # --- Switch from bind to cp for skills stability ---
+            # Instead of mounting, we copy the skills into the VM's disk once at startup.
+            # This avoids "mount loss" issues and simplifies the setup.
+            await self._sync_skills_via_cp()
 
             # Initialize global skill resolver for the VM
             from hexagent.computer.local.vm_win import _VMSessionComputer
@@ -449,34 +453,74 @@ class AgentManager:
             
             await self._skill_resolver.discover(disabled_names=disabled_set)
 
-    async def _mount_skills(self) -> None:
-        """Mount skill directories (public + private) into the VM.
-
-        Public skills live in the bundled skills directory (ships with the
-        application).  Private skills live in user data.
-
-        This may restart the VM if new or replacement mounts are needed.
-        Stale mounts (host path no longer valid, e.g. after a PyInstaller
-        _MEIPASS path change between launches) are removed and re-added in
-        a single VM restart.  The cost is paid once, during warm session
-        creation which runs in the background while the user is on the
-        welcome screen.
+    async def _sync_skills_via_cp(self) -> None:
+        """Synchronize skills from host to guest via 'cp' instead of bind mount.
+        
+        This runs once at backend startup to ensure all skills are available
+        on the VM's internal disk.
         """
         assert self._vm_manager is not None
-
-        from pathlib import Path
-
-        from hexagent.computer import Mount
-
         from hexagent_api.paths import bundled_skills_dir, skills_dir
-
-        existing_by_guest = {m.guest_path: m for m in self._vm_manager.list_mounts()}
-
-        # (subdir_name, host_root)
-        mount_sources = {
+        
+        # 1. Prepare host paths and ensure private dir exists
+        sources = {
             "public": bundled_skills_dir() / "public",
             "private": skills_dir() / "private",
         }
+        sources["private"].mkdir(parents=True, exist_ok=True)
+
+        # 2. Cleanup any old bind mounts that might interfere
+        # And ensure /mnt/skills structure exists
+        cleanup_cmd = (
+            "umount -l /mnt/skills/public 2>/dev/null; "
+            "umount -l /mnt/skills/private 2>/dev/null; "
+            "mkdir -p /mnt/skills/public /mnt/skills/private"
+        )
+        await self._vm_manager._vm.shell(cleanup_cmd, user="root")
+
+        # 3. Use 'wsl --import' or direct 'cp'? 
+        # Since we are in Python side, the most reliable way to 'cp' large folders
+        # into WSL without permission issues is to use 'tar' through stdin.
+        
+        for subdir, host_path in sources.items():
+            if not host_path.exists():
+                continue
+                
+            guest_path = f"/mnt/skills/{subdir}"
+            logger.info("[SkillSync] Copying %s skills from %s to %s", subdir, host_path, guest_path)
+            
+            # We clear the guest subdir first to handle conflicts (fresh sync)
+            await self._vm_manager._vm.shell(f"rm -rf {guest_path}/*", user="root")
+            
+            # Use tar to stream the directory into WSL. 
+            # This is much faster than individual 'wsl cp' calls and handles nested dirs.
+            import subprocess
+            import tarfile
+            import io
+
+            # Create tar in memory
+            tar_stream = io.BytesIO()
+            with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+                # Add all contents of host_path to the root of the tar
+                for item in host_path.iterdir():
+                    tar.add(item, arcname=item.name)
+            
+            # Pipe tar to WSL
+            cmd = ["wsl", "-d", self._vm_manager._vm._instance, "-u", "root", "tar", "-x", "-C", guest_path]
+            process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate(input=tar_stream.getvalue())
+            
+            if process.returncode != 0:
+                logger.error("[SkillSync] Failed to sync %s skills: %s", subdir, stderr.decode())
+            else:
+                logger.info("[SkillSync] Successfully synced %s skills", subdir)
+
+    async def _mount_skills(self) -> None:
+        """DEPRECATED: Use _sync_skills_via_cp instead.
+        
+        Kept for reference but not called by current start() logic.
+        """
+        pass
         stale_targets: list[str] = []
         skill_mounts: list[Mount] = []
         for subdir, host_path in mount_sources.items():

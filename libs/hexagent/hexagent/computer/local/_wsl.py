@@ -405,7 +405,7 @@ class WslVM:
         )
 
         # Check current config
-        res = await self.shell("cat /etc/wsl.conf", user="root", timeout=30)
+        res = await self.shell("cat /etc/wsl.conf", user="root", timeout=60)
         if res.exit_code == 0 and res.stdout.strip() == desired_config.strip():
             return False
 
@@ -701,6 +701,10 @@ class WslVM:
         wsl_log("WSL applying %d bind mount(s) from mounts.json", len(mounts))
 
         for m in mounts:
+            # --- Skip Skills (now handled by cp in agent_manager.py) ---
+            if m.guest_path.startswith("/mnt/skills/"):
+                continue
+
             # Use wslpath to get the accurate Linux path for the Windows host path.
             # This handles drive letters, mount points, and case-sensitivity correctly.
             wsl_host_res = await self.shell(f"wslpath -u {shlex.quote(m.host_path)}", user="root")
