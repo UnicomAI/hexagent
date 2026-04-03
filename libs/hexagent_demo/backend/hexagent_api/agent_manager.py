@@ -296,6 +296,7 @@ class AgentManager:
                 JinaFetchProvider,
                 SearchProvider,
                 TavilySearchProvider,
+                UnicrawlFetchProvider,
             )
 
             from hexagent_api.config import load_config
@@ -376,6 +377,8 @@ class AgentManager:
                 fetch = JinaFetchProvider(api_key=tc.fetch_api_key or None)
             elif tc.fetch_provider == "firecrawl":
                 fetch = FirecrawlFetchProvider(api_key=tc.fetch_api_key or None)
+            elif tc.fetch_provider == "unicrawl":
+                fetch = UnicrawlFetchProvider(api_key=tc.fetch_api_key or None)
 
             logger.info(
                 "Creating agent for model=%s (%s) session=%s",
@@ -441,7 +444,7 @@ class AgentManager:
             if sys.platform == "win32":
                 from hexagent.computer.local.vm_win import _VMSessionComputer
             else:
-                from hexagent.computer.local.vm import _VMSessionComputer
+                from hexagent.computer.local.vm_mac import _VMSessionComputer
                 
             from hexagent.harness import SkillResolver
             from hexagent_api.routes.skills import INACTIVE_DIR, _list_skills

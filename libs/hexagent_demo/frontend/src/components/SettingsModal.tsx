@@ -1385,6 +1385,7 @@ const FETCH_PROVIDERS = [
   { id: "", label: "None" },
   { id: "jina", label: "Jina" },
   { id: "firecrawl", label: "Firecrawl" },
+  { id: "unicrawl", label: "Unicrawl" },
 ];
 
 function ToolsTab({ config, onConfigChange }: ConfigTabProps) {
@@ -1538,7 +1539,13 @@ function ToolsTab({ config, onConfigChange }: ConfigTabProps) {
                   data-form-type="other"
                   value={tools.fetch_api_key}
                   onChange={(e) => updateTools({ fetch_api_key: e.target.value })}
-                  placeholder={tools.fetch_provider === "jina" ? "jina_..." : "fc-..."}
+                  placeholder={
+                    tools.fetch_provider === "jina"
+                      ? "jina_..."
+                      : tools.fetch_provider === "unicrawl"
+                      ? "sk-..."
+                      : "fc-..."
+                  }
                 />
                 <button
                   className="mc-key-toggle"

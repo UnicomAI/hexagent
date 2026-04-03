@@ -6,7 +6,7 @@ Tools:
 
 Providers:
 - BochaSearchProvider, TavilySearchProvider, BraveSearchProvider: Search backends
-- JinaFetchProvider, FirecrawlFetchProvider: Fetch backends
+- JinaFetchProvider, FirecrawlFetchProvider, UnicrawlFetchProvider: Fetch backends
 
 Factory functions:
 - create_web_tools: Create web tools when providers are supplied
@@ -30,6 +30,7 @@ from hexagent.tools.web.providers import (
     JinaFetchProvider,
     SearchProvider,
     TavilySearchProvider,
+    UnicrawlFetchProvider,
 )
 from hexagent.tools.web.search import WebSearchTool
 
@@ -72,6 +73,7 @@ __all__ = [
     "JinaFetchProvider",
     "SearchProvider",
     "TavilySearchProvider",
+    "UnicrawlFetchProvider",
     "WebFetchTool",
     "WebSearchTool",
     "clear_caches",
