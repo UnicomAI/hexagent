@@ -20,7 +20,7 @@ import pytest
 from hexagent.computer.base import BASH_MAX_TIMEOUT_MS, Computer
 from hexagent.computer.local._lima import LimaVM
 from hexagent.computer.local._types import ResolvedMount
-from hexagent.computer.local.vm import _VMSessionComputer
+from hexagent.computer.local.vm_mac import _VMSessionComputer
 from hexagent.exceptions import CLIError, LimaError, MissingDependencyError, UnsupportedPlatformError, VMError
 from hexagent.types import CLIResult
 

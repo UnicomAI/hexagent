@@ -61,11 +61,12 @@ class _VMSessionComputer(AsyncComputerMixin):
         session_name: Linux username for this session.
     """
 
-    def __init__(self, *, vm: LimaVM, session_name: str) -> None:
+    def __init__(self, *, vm: LimaVM, session_name: str, default_cwd: str | None = None) -> None:
         """Initialize with a VM backend and session name."""
         self._vm = vm
         self._session_name = session_name
         self._active = True
+        self._default_cwd = default_cwd
 
     @property
     def session_name(self) -> str:
@@ -76,6 +77,10 @@ class _VMSessionComputer(AsyncComputerMixin):
     def is_running(self) -> bool:
         """True if this handle is active."""
         return self._active
+
+    def set_default_cwd(self, cwd: str | None) -> None:
+        """Set the default working directory for future commands."""
+        self._default_cwd = cwd
 
     async def start(self) -> None:
         """Health check — verify the VM is running and session user exists.
@@ -120,6 +125,7 @@ class _VMSessionComputer(AsyncComputerMixin):
             return await self._vm.shell(
                 command,
                 user=self._session_name,
+                cwd=self._default_cwd,
                 timeout=timeout_ms / 1000,
             )
         except VMError as e:
