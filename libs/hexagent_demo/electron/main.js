@@ -1,4 +1,4 @@
-// main.js — Electron main process
+﻿// main.js — Electron main process
 const { app, BrowserWindow, Menu, dialog, ipcMain } = require("electron");
 const path = require("path");
 const net = require("net");
@@ -99,7 +99,7 @@ function findFreePort() {
   });
 }
 
-function waitForHealth(port, retries = 30, interval = 500) {
+function waitForHealth(port, retries = 60, interval = 2000) {
   return new Promise((resolve, reject) => {
     let attempts = 0;
     const check = () => {

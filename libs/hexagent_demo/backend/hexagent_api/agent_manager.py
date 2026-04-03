@@ -48,6 +48,8 @@ class AgentManager:
         self._setup_lock = asyncio.Lock()
         # Per-cache-key locks to prevent duplicate agent creation
         self._agent_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        # Global skill resolver for the VM (initialized in start)
+        self._skill_resolver: Any | None = None
         # session_name -> (working_dir_source, mount_target)
         self._session_working_dirs: dict[str, tuple[str, str]] = {}
         # Background warm-up task: auto-start VM manager after app startup.
@@ -395,6 +397,7 @@ class AgentManager:
                 fast_model=fast_model,
                 mcp_servers=self._get_mcp_servers(),
                 agents=agent_defs or None,
+                skill_resolver=self._skill_resolver,
                 search_provider=search,
                 fetch_provider=fetch,
                 skill_paths=skill_paths,
@@ -425,6 +428,26 @@ class AgentManager:
             await vm.start()
             self._vm_manager = vm
             await self._mount_skills()
+
+            # Initialize global skill resolver for the VM
+            from hexagent.computer.local.vm_win import _VMSessionComputer
+            from hexagent.harness import SkillResolver
+            from hexagent_api.routes.skills import INACTIVE_DIR, _list_skills
+
+            # Use a system-level computer handle for global skill discovery.
+            # We point it to the root user to ensure access to /mnt/skills.
+            computer = _VMSessionComputer(vm=self._vm_manager._vm, session_name="root")
+            self._skill_resolver = SkillResolver(
+                computer, ["/mnt/skills/public", "/mnt/skills/private"]
+            )
+            
+            # Use the actual filesystem state (skills-inactive dir) as the source of truth
+            # for disabled skills, instead of relying on config.json which might be out of sync.
+            inactive_public = _list_skills(INACTIVE_DIR / "public")
+            inactive_private = _list_skills(INACTIVE_DIR / "private")
+            disabled_set = set(inactive_public + inactive_private)
+            
+            await self._skill_resolver.discover(disabled_names=disabled_set)
 
     async def _mount_skills(self) -> None:
         """Mount skill directories (public + private) into the VM.

@@ -94,39 +94,23 @@ def available_skills_reminder(
     messages: Sequence[Message],
     ctx: AgentContext,
 ) -> str | None:
-    """Inject available skills list into the first user message.
+    """Inject available skills list into every user message.
 
-    Fires only at the very beginning of a conversation session
-    (single user message, no prior model responses) when skills
-    are available.
+    Fires on every user message when skills are available and enabled.
     """
-    _max_initial_messages = 2  # At most: [system?, user]
-
-    # Log for debugging skill injection issues
-    logger.info(
-        "[available_skills_reminder] Evaluating: messages_count=%d, last_role=%s, skills_count=%d",
-        len(messages),
-        messages[-1].get("role") if messages else "N/A",
-        len(ctx.skills),
-    )
-
-    if not messages or len(messages) > _max_initial_messages or messages[-1].get("role") != "user":
-        logger.debug(
-            "[available_skills_reminder] Skipped: not initial user message (messages=%d, max=%d, last_role=%s)",
-            len(messages),
-            _max_initial_messages,
-            messages[-1].get("role") if messages else "N/A",
-        )
+    # Fires only when the user is speaking.
+    if not messages or messages[-1].get("role") != "user":
         return None
 
-    if not ctx.skills:
-        logger.info("[available_skills_reminder] Skipped: no skills available in context")
+    enabled_skills = [s for s in ctx.skills if s.enabled]
+    if not enabled_skills:
+        logger.debug("[available_skills_reminder] Skipped: no enabled skills available")
         return None
 
     template = load("system_reminder_initial_available_skills")
-    formatted = "\n".join(f"- {s.name}: {s.description}" for s in ctx.skills)
+    formatted = "\n".join(f"- {s.name}: {s.description}" for s in enabled_skills)
     result = substitute(template, **ctx.tool_name_vars, FORMATTED_SKILLS_LIST=formatted)
-    logger.info("[available_skills_reminder] Injected skills reminder: skills=%s", [s.name for s in ctx.skills])
+    logger.info("[available_skills_reminder] Injected skills reminder: skills=%s", [s.name for s in enabled_skills])
     return result
 
 

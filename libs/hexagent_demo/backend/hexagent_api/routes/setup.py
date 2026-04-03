@@ -281,11 +281,13 @@ def _probe_wsl2_readiness() -> tuple[bool, str | None]:
     if not wsl:
         return False, "wsl.exe not found"
     try:
+        # Increase timeout significantly for slow WSL startup environments.
+        # wsl --status can be very slow during cold boot or high load.
         proc = _sp.run(
             [wsl, "--status"],
             stdout=_sp.PIPE,
             stderr=_sp.PIPE,
-            timeout=8,
+            timeout=60,
         )
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("WSL readiness probe failed", exc_info=exc)

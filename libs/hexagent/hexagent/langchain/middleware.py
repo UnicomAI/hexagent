@@ -445,6 +445,11 @@ class AgentMiddleware(LangChainAgentMiddleware):
 
         # --- GROUP 3: Annotators (system reminders) ---
         if self._reminders:
+            if self._skill_resolver is not None:
+                # Sync latest skills from the memory registry (fast)
+                skills = await self._skill_resolver.discover()
+                self._context = replace(self._context, skills=skills)
+
             logger.debug(
                 "[AgentMiddleware] Evaluating reminders: reminders_count=%d, context_skills_count=%d",
                 len(self._reminders),

@@ -31,13 +31,12 @@ _SKILL_DELIMITER = "===SKILL_FILE==="
 
 
 class SkillResolver:
-    r"""Discovers skills from the filesystem and lazily loads their content.
+    r"""Discovers skills from the filesystem and maintains a memory registry.
 
-    Uses the Computer protocol to run filesystem commands, making it
-    work with both LocalNativeComputer and RemoteE2BComputer.
+    Uses the Computer protocol to run filesystem commands. Once discovered,
+    skills are cached in memory to avoid redundant disk scans.
 
-    Discovery uses a single batched shell command per search path to
-    avoid N+1 round-trip overhead with remote computers.
+    Supports dynamic updates (add/delete/toggle) without full re-discovery.
 
     Examples:
         ```python
@@ -64,6 +63,7 @@ class SkillResolver:
         self._computer = computer
         self._search_paths = tuple(search_paths)
         self._skills: dict[str, Skill] = {}
+        self._initialized = False
 
     @property
     def search_paths(self) -> tuple[str, ...]:
@@ -71,45 +71,89 @@ class SkillResolver:
         return self._search_paths
 
     async def has(self, name: str) -> bool:
-        """Return True if *name* is a known skill, re-discovering on cache miss.
+        """Return True if *name* is a known skill.
 
         Satisfies the :class:`~hexagent.types.SkillCatalog` protocol.
-
-        Args:
-            name: The skill name to check.
-
-        Returns:
-            True if the skill exists (possibly after re-discovery).
         """
-        if name in self._skills:
-            return True
-        await self.discover()
+        if not self._initialized:
+            await self.discover()
         return name in self._skills
 
-    async def discover(self) -> list[Skill]:
-        """Scan search paths for skill directories and parse metadata.
+    async def get(self, name: str) -> Skill | None:
+        """Get a skill by name."""
+        if not self._initialized:
+            await self.discover()
+        return self._skills.get(name)
 
-        Each subdirectory containing a SKILL.md file is treated as a skill.
-        The SKILL.md frontmatter is validated against the Agent Skills spec.
+    async def set_enabled(self, name: str, enabled: bool) -> None:
+        """Enable or disable a skill in memory without scanning disk."""
+        if name in self._skills:
+            old_skill = self._skills[name]
+            from hexagent.types import Skill
+            self._skills[name] = Skill(
+                name=old_skill.name,
+                description=old_skill.description,
+                path=old_skill.path,
+                enabled=enabled
+            )
+            logger.info("[SkillResolver] Skill %s status updated: enabled=%s", name, enabled)
 
-        Uses a single shell command per search path to batch discovery,
-        avoiding N+1 round-trip overhead with remote computers.
+    async def add_skill_by_path(self, skill_path: str) -> Skill | None:
+        """Discover and add a single skill from a specific path.
 
-        Returns:
-            List of discovered Skill objects.
+        Avoids full scan of all search paths.
         """
-        logger.info("[SkillResolver] Starting skill discovery, search_paths=%s", self._search_paths)
+        logger.info("[SkillResolver] Adding single skill from path: %s", skill_path)
+        # Try each accepted filename casing
+        raw_content = None
+        for filename in _SKILL_FILENAMES:
+            skill_file = f"{skill_path}/{filename}"
+            result = await self._computer.run(f'cat "{skill_file}"')
+            if result.exit_code == 0:
+                raw_content = result.stdout
+                break
+
+        if not raw_content:
+            logger.warning("[SkillResolver] No SKILL.md found in %s", skill_path)
+            return None
+
+        try:
+            spec = parse_skill_md(raw_content)
+            dir_basename = skill_path.rstrip("/").rsplit("/", 1)[-1]
+            validate_skill_dir_name(spec.frontmatter.name, dir_basename)
+        except SkillError as exc:
+            logger.warning("[SkillResolver] Failed to parse skill in %s: %s", skill_path, exc)
+            return None
+
+        from hexagent.types import Skill
+        fm = spec.frontmatter
+        skill = Skill(name=fm.name, description=fm.description, path=skill_path, enabled=True)
+        self._skills[fm.name] = skill
+        logger.info("[SkillResolver] Added skill to registry: name=%s", fm.name)
+        return skill
+
+    async def remove_skill(self, name: str) -> None:
+        """Remove a skill from the memory registry."""
+        if name in self._skills:
+            del self._skills[name]
+            logger.info("[SkillResolver] Removed skill from registry: %s", name)
+
+    async def discover(self, force: bool = False, disabled_names: set[str] | None = None) -> list[Skill]:
+        """Scan search paths for skill directories (one-time or forced).
+
+        Args:
+            force: Whether to re-scan disk even if already initialized.
+            disabled_names: Optional set of skill names that should be initialized as disabled.
+        """
+        if self._initialized and not force:
+            logger.debug("[SkillResolver] Discovery skipped (already initialized)")
+            return list(self._skills.values())
+
+        logger.info("[SkillResolver] Starting full skill discovery, search_paths=%s", self._search_paths)
         self._skills.clear()
         discovered: list[Skill] = []
 
         for base_path in self._search_paths:
-            # Single batched command using 'find':
-            # 1. -maxdepth 2 -mindepth 2: Look exactly in search_path/*/file.md
-            # 2. \( -name ... -o -name ... \): Match either SKILL.md or skill.md
-            # 3. -printf: Print delimiter and the directory (%h)
-            # 4. -exec cat: Print the file content
-            #
-            # This avoids shell glob issues and nested shell escaping bugs ($1).
             qbase = shlex.quote(base_path)
             name_filters = " -o ".join(f'-name "{name}"' for name in _SKILL_FILENAMES)
             cmd = (
@@ -118,69 +162,46 @@ class SkillResolver:
                 f'-printf "{_SKILL_DELIMITER}:%h\\n" -exec cat {{}} \\; -printf "\\n"'
             )
 
-            logger.debug("[SkillResolver] Running discovery command for path=%s", base_path)
             result = await self._computer.run(cmd)
-
-            # find returns 0 even if no files match. We only care about output.
-            if result.exit_code != 0:
-                logger.warning("[SkillResolver] Discovery command failed in path=%s (exit_code=%d): %s", base_path, result.exit_code, result.stderr)
+            if result.exit_code != 0 or not result.stdout.strip():
                 continue
-            if not result.stdout.strip():
-                logger.debug("[SkillResolver] No skills found in path=%s", base_path)
-                continue
-            logger.debug("[SkillResolver] Found potential skills in path=%s, stdout_len=%d", base_path, len(result.stdout))
 
-            # Parse batched output into individual skill chunks.
-            # A directory may appear twice (SKILL.md + skill.md); first wins.
-            seen_dirs: set[str] = set()
+            from hexagent.types import Skill
             chunks = self._parse_batch_output(result.stdout)
-            logger.debug("[SkillResolver] Found %d potential skill chunks in path=%s", len(chunks), base_path)
+            seen_dirs: set[str] = set()
 
             for skill_dir, raw_content in chunks:
                 if skill_dir in seen_dirs:
-                    logger.debug("[SkillResolver] Skipping duplicate directory: %s", skill_dir)
                     continue
                 seen_dirs.add(skill_dir)
 
                 try:
                     spec = parse_skill_md(raw_content)
-                    # Spec requires name to match the directory name
                     dir_basename = skill_dir.rsplit("/", 1)[-1]
                     validate_skill_dir_name(spec.frontmatter.name, dir_basename)
                 except SkillError:
-                    logger.warning("[SkillResolver] Skipping %s: invalid SKILL.md", skill_dir)
                     continue
 
                 fm = spec.frontmatter
-                skill = Skill(name=fm.name, description=fm.description, path=skill_dir)
+                is_enabled = disabled_names is None or fm.name not in disabled_names
+                skill = Skill(name=fm.name, description=fm.description, path=skill_dir, enabled=is_enabled)
                 self._skills[fm.name] = skill
                 discovered.append(skill)
-                logger.info("[SkillResolver] Discovered skill: name=%s, description=%s, path=%s", fm.name, fm.description, skill_dir)
 
+        self._initialized = True
         logger.info("[SkillResolver] Skill discovery complete, total_skills=%d", len(discovered))
         return discovered
 
     async def load_content(self, name: str) -> str:
-        r"""Load the skill's markdown body (always fresh from disk).
-
-        Returns the content wrapped with the skill's base directory:
-        ``Base directory for this skill: {path}\n\n{body}``
-
-        Args:
-            name: The skill name (must have been discovered first).
-
-        Returns:
-            The formatted skill content ready for injection as a user message.
-
-        Raises:
-            KeyError: If the skill name was not discovered.
-            RuntimeError: If the SKILL.md content cannot be read or parsed.
-        """
+        r"""Load the skill's markdown body (always fresh from disk)."""
         if name not in self._skills:
             msg = f"Skill not discovered: {name}"
             raise KeyError(msg)
 
         skill = self._skills[name]
+        if not skill.enabled:
+            logger.debug("[SkillResolver] Skipping load_content for disabled skill: %s", name)
+            return ""
 
         # Try each accepted filename casing
         result = None
@@ -191,13 +212,13 @@ class SkillResolver:
                 break
 
         if result is None or result.exit_code != 0:
-            msg = f"Failed to read SKILL.md in {skill.path}: {result.stderr if result else 'no file found'}"
+            msg = f"Failed to read SKILL.md in {skill.path}"
             raise RuntimeError(msg)
 
         try:
             spec = parse_skill_md(result.stdout)
         except SkillError as exc:
-            msg = f"Failed to parse {skill_file}: {exc}"
+            msg = f"Failed to parse {skill.path}: {exc}"
             raise RuntimeError(msg) from exc
 
         return f"Base directory for this skill: {skill.path}\n\n{spec.body}"

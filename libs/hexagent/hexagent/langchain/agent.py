@@ -225,6 +225,7 @@ async def create_agent(
     search_provider: SearchProvider | None = None,
     fetch_provider: FetchProvider | None = None,
     skill_paths: Sequence[str] = DEFAULT_SKILL_PATHS,
+    skill_resolver: SkillResolver | None = None,
     system_prompt: str | None = None,
     reminders: Sequence[Reminder] = BUILTIN_REMINDERS,
     extra_tools: Sequence[BaseAgentTool[Any]] | None = None,
@@ -314,7 +315,9 @@ async def create_agent(
 
         # 5. Concurrent I/O: environment detection, skill discovery, MCP connection
         env_resolver = EnvironmentResolver(computer)
-        skill_resolver = SkillResolver(computer, list(skill_paths))
+        if skill_resolver is None:
+            skill_resolver = SkillResolver(computer, list(skill_paths))
+
         env, skills, mcp_clients = await asyncio.gather(
             env_resolver.resolve(),
             skill_resolver.discover(),
