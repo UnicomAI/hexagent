@@ -1,5 +1,5 @@
 // main.js — Electron main process
-const { app, BrowserWindow, Menu, dialog, ipcMain, protocol } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, session } = require("electron");
 const path = require("path");
 const net = require("net");
 const http = require("http");
@@ -50,6 +50,8 @@ const MIME_TYPES = {
   ".map":  "application/json",
 };
 
+const FRONTEND_PREFERRED_PORT = 17860;
+
 function startFrontendServer(frontendDir) {
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
@@ -82,14 +84,25 @@ function startFrontendServer(frontendDir) {
       });
     });
 
-    server.listen(0, "127.0.0.1", () => {
+    const onListening = () => {
       frontendPort = server.address().port;
       frontendServer = server;
       console.log(`Frontend server listening on http://127.0.0.1:${frontendPort}`);
       resolve(frontendPort);
-    });
+    };
 
-    server.on("error", reject);
+    // Try fixed port first so the origin stays stable for analytics;
+    // fall back to a random port if the preferred one is already in use.
+    server.listen(FRONTEND_PREFERRED_PORT, "127.0.0.1", onListening);
+
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        console.warn(`Port ${FRONTEND_PREFERRED_PORT} in use, falling back to random port`);
+        server.listen(0, "127.0.0.1", onListening);
+      } else {
+        reject(err);
+      }
+    });
   });
 }
 
@@ -610,6 +623,11 @@ function createWindow() {
     ? path.join(__dirname, "resources", "icon.ico")
     : path.join(process.resourcesPath, "app-icon.ico");
 
+  // Use a named persistent session so that localStorage, cookies, and other
+  // web storage survive app restarts — even when the frontend HTTP server
+  // picks a different random port (which changes the origin).
+  const persistentSession = session.fromPartition("persist:hexagent");
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -619,6 +637,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      session: persistentSession,
     },
   });
 
