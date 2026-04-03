@@ -1,7 +1,8 @@
-﻿// main.js — Electron main process
-const { app, BrowserWindow, Menu, dialog, ipcMain } = require("electron");
+// main.js — Electron main process
+const { app, BrowserWindow, Menu, dialog, ipcMain, protocol } = require("electron");
 const path = require("path");
 const net = require("net");
+const http = require("http");
 const fs = require("fs");
 const { spawn, execFileSync, execSync } = require("child_process");
 const treeKill = require("tree-kill");
@@ -26,7 +27,71 @@ const BUILD_FLAGS = readBuildFlags();
 let backendProcess = null;
 let backendPort = null;
 let mainWindow = null;
+let frontendServer = null;
+let frontendPort = null;
 let backendStderr = ""; // capture stderr for error reporting
+
+// ── Frontend static file server (production only) ───────────────────────────
+// Serve frontend via HTTP instead of file:// so that analytics SDKs (UMENG
+// aplus) get a proper http:// origin. Without this the server discards data
+// sent from a file:// origin.
+
+const MIME_TYPES = {
+  ".html": "text/html",
+  ".js":   "application/javascript",
+  ".css":  "text/css",
+  ".json": "application/json",
+  ".svg":  "image/svg+xml",
+  ".png":  "image/png",
+  ".ico":  "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2":"font/woff2",
+  ".ttf":  "font/ttf",
+  ".map":  "application/json",
+};
+
+function startFrontendServer(frontendDir) {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      let urlPath = decodeURIComponent(req.url.split("?")[0]);
+      if (urlPath === "/") urlPath = "/index.html";
+
+      const filePath = path.join(frontendDir, urlPath);
+
+      // Prevent path traversal
+      if (!filePath.startsWith(frontendDir)) {
+        res.writeHead(403);
+        res.end();
+        return;
+      }
+
+      fs.readFile(filePath, (err, data) => {
+        if (err) {
+          // SPA fallback: serve index.html for non-file routes
+          fs.readFile(path.join(frontendDir, "index.html"), (err2, fallback) => {
+            if (err2) { res.writeHead(404); res.end(); return; }
+            res.writeHead(200, { "Content-Type": "text/html" });
+            res.end(fallback);
+          });
+          return;
+        }
+        const ext = path.extname(filePath).toLowerCase();
+        const mime = MIME_TYPES[ext] || "application/octet-stream";
+        res.writeHead(200, { "Content-Type": mime });
+        res.end(data);
+      });
+    });
+
+    server.listen(0, "127.0.0.1", () => {
+      frontendPort = server.address().port;
+      frontendServer = server;
+      console.log(`Frontend server listening on http://127.0.0.1:${frontendPort}`);
+      resolve(frontendPort);
+    });
+
+    server.on("error", reject);
+  });
+}
 
 // ── User data directory ─────────────────────────────────────────────────────
 // Store config.json, .env, etc. in a persistent location:
@@ -99,7 +164,7 @@ function findFreePort() {
   });
 }
 
-function waitForHealth(port, retries = 60, interval = 2000) {
+function waitForHealth(port, retries = 30, interval = 500) {
   return new Promise((resolve, reject) => {
     let attempts = 0;
     const check = () => {
@@ -560,12 +625,7 @@ function createWindow() {
   if (IS_DEV) {
     mainWindow.loadURL("http://localhost:3000");
   } else {
-    const indexPath = path.join(
-      process.resourcesPath,
-      "frontend",
-      "index.html"
-    );
-    mainWindow.loadFile(indexPath);
+    mainWindow.loadURL(`http://127.0.0.1:${frontendPort}`);
   }
 
   // Hide native menu bar in desktop app window.
@@ -600,6 +660,18 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
+
+  // In production, start a local HTTP server for frontend so analytics SDKs
+  // get a proper http:// origin instead of file://.
+  if (!IS_DEV) {
+    try {
+      const frontendDir = path.join(process.resourcesPath, "frontend");
+      await startFrontendServer(frontendDir);
+    } catch (err) {
+      console.error("Failed to start frontend server:", err);
+    }
+  }
+
   createWindow();
 
   app.on("activate", () => {
@@ -613,6 +685,10 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   killBackend();
+  if (frontendServer) {
+    frontendServer.close();
+    frontendServer = null;
+  }
 });
 
 // Explicitly handle Ctrl+C (SIGINT) on terminal
