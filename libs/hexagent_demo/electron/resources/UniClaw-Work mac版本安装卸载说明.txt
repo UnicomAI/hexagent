@@ -1,0 +1,45 @@
+========================================
+  UniClaw-Work mac版本安装卸载说明
+========================================
+
+一、安装说明
+--------
+
+1. 双击打开 DMG 文件
+
+2. 将 UniClaw-Work.app 拖拽到右侧 Applications 文件夹
+
+3. 首次打开时如提示"无法验证开发者"：
+   - 打开「系统设置」→「隐私与安全性」
+   - 在底部找到 UniClaw-Work 相关提示，点击「仍要打开」
+
+二、卸载说明
+--------
+
+本 DMG 中附带了卸载脚本 uninstall.sh，可一键清除以下内容：
+
+  - /Applications/UniClaw-Work.app
+  - 应用数据 (~/Library/Application Support/UniClaw-Work)
+  - 缓存与日志 (~/Library/Caches、~/Library/Logs)
+  - 偏好设置 (~/Library/Preferences/com.hexagent.app.plist)
+  - Lima 虚拟机实例 (~/.lima/hexagent)
+
+使用方法：
+
+1. 打开「终端」应用 (Spotlight 搜索 "终端" 或 "Terminal")
+
+2. 将 DMG 中的 uninstall.sh 拖拽到终端窗口，按回车执行
+   或手动输入：
+
+     bash /Volumes/UniClaw-Work/uninstall.sh
+
+3. 按提示输入 y 确认卸载
+
+如需跳过确认直接卸载：
+
+     bash /Volumes/UniClaw-Work/uninstall.sh --force
+
+注意事项
+--------
+- 卸载后数据无法恢复，请确认不再需要后再执行
+- 如果提示权限不足，请在命令前加 sudo

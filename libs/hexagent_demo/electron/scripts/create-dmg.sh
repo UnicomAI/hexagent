@@ -31,6 +31,8 @@ fi
 APP_PATH="$APP_DIR/${PRODUCT_NAME}.app"
 DMG_PATH="$ELECTRON_DIR/dist/${PRODUCT_NAME}-${VERSION}-mac-${ARCH}.dmg"
 BACKGROUND="$ELECTRON_DIR/resources/background.png"
+UNINSTALL_SCRIPT="$ELECTRON_DIR/scripts/uninstall-mac-hexagent.sh"
+UNINSTALL_README="$ELECTRON_DIR/resources/UniClaw-Work mac版本安装卸载说明.txt"
 
 if [ ! -d "$APP_PATH" ]; then
     echo "ERROR: $APP_PATH not found. Run electron-builder first."
@@ -78,6 +80,15 @@ echo "Mounted at: $MOUNT_POINT"
 ditto "$APP_PATH" "$MOUNT_POINT/${PRODUCT_NAME}.app"
 ln -s /Applications "$MOUNT_POINT/Applications"
 
+# ── 4b. Copy uninstall script and readme ─────────────────────────────────
+if [ -f "$UNINSTALL_SCRIPT" ]; then
+    cp "$UNINSTALL_SCRIPT" "$MOUNT_POINT/uninstall.sh"
+    chmod +x "$MOUNT_POINT/uninstall.sh"
+fi
+if [ -f "$UNINSTALL_README" ]; then
+    cp "$UNINSTALL_README" "$MOUNT_POINT/UniClaw-Work mac版本安装卸载说明.txt"
+fi
+
 # ── 5. Copy background image ─────────────────────────────────────────────────
 if [ -f "$BACKGROUND" ]; then
     mkdir -p "$MOUNT_POINT/.background"
@@ -93,13 +104,15 @@ tell application "Finder"
         set current view of container window to icon view
         set toolbar visible of container window to false
         set statusbar visible of container window to false
-        set bounds of container window to {200, 120, 740, 500}
+        set bounds of container window to {200, 120, 740, 540}
         set theViewOptions to the icon view options of container window
         set arrangement of theViewOptions to not arranged
         set icon size of theViewOptions to 64
         set background picture of theViewOptions to file ".background:background.png"
-        set position of item "${PRODUCT_NAME}.app" of container window to {135, 185}
-        set position of item "Applications" of container window to {415, 185}
+        set position of item "${PRODUCT_NAME}.app" of container window to {135, 165}
+        set position of item "Applications" of container window to {415, 165}
+        set position of item "UniClaw-Work mac版本安装卸载说明.txt" of container window to {200, 330}
+        set position of item "uninstall.sh" of container window to {350, 330}
         close
         open
         update without registering applications
