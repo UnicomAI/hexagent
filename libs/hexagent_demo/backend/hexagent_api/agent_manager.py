@@ -414,7 +414,7 @@ class AgentManager:
     # ── Public API ──
 
     async def _ensure_vm_manager(self) -> None:
-        """Create LocalVM and sync skills if not already running."""
+        """Create LocalVM and sync/mount skills if not already running."""
         if self._vm_manager is not None:
             return
 
@@ -428,13 +428,21 @@ class AgentManager:
             await vm.start()
             self._vm_manager = vm
             
-            # --- Switch from bind to cp for skills stability ---
-            # Instead of mounting, we copy the skills into the VM's disk once at startup.
-            # This avoids "mount loss" issues and simplifies the setup.
-            await self._sync_skills_via_cp()
+            # --- Platform-specific skill syncing ---
+            if sys.platform == "win32":
+                # Windows (WSL): Switch from bind to cp for stability.
+                # Copy skills into VM's disk once at startup.
+                await self._sync_skills_via_cp()
+            else:
+                # macOS (Lima): Continue using mount as it is more stable here.
+                await self._mount_skills()
 
             # Initialize global skill resolver for the VM
-            from hexagent.computer.local.vm_win import _VMSessionComputer
+            if sys.platform == "win32":
+                from hexagent.computer.local.vm_win import _VMSessionComputer
+            else:
+                from hexagent.computer.local.vm import _VMSessionComputer
+                
             from hexagent.harness import SkillResolver
             from hexagent_api.routes.skills import INACTIVE_DIR, _list_skills
 
@@ -454,23 +462,20 @@ class AgentManager:
             await self._skill_resolver.discover(disabled_names=disabled_set)
 
     async def _sync_skills_via_cp(self) -> None:
-        """Synchronize skills from host to guest via 'cp' instead of bind mount.
+        """Synchronize all skills from host to guest via 'cp' instead of bind mount.
         
-        This runs once at backend startup to ensure all skills are available
-        on the VM's internal disk.
+        This runs once at backend startup on Windows/WSL.
         """
         assert self._vm_manager is not None
         from hexagent_api.paths import bundled_skills_dir, skills_dir
         
-        # 1. Prepare host paths and ensure private dir exists
         sources = {
             "public": bundled_skills_dir() / "public",
             "private": skills_dir() / "private",
         }
         sources["private"].mkdir(parents=True, exist_ok=True)
 
-        # 2. Cleanup any old bind mounts that might interfere
-        # And ensure /mnt/skills structure exists
+        # Cleanup old bind mounts and ensure structure
         cleanup_cmd = (
             "umount -l /mnt/skills/public 2>/dev/null; "
             "umount -l /mnt/skills/private 2>/dev/null; "
@@ -478,35 +483,32 @@ class AgentManager:
         )
         await self._vm_manager._vm.shell(cleanup_cmd, user="root")
 
-        # 3. Use 'wsl --import' or direct 'cp'? 
-        # Since we are in Python side, the most reliable way to 'cp' large folders
-        # into WSL without permission issues is to use 'tar' through stdin.
-        
         for subdir, host_path in sources.items():
             if not host_path.exists():
                 continue
-                
-            guest_path = f"/mnt/skills/{subdir}"
-            logger.info("[SkillSync] Copying %s skills from %s to %s", subdir, host_path, guest_path)
+            await self._sync_single_skill_via_cp(subdir, host_path)
+
+    async def _sync_single_skill_via_cp(self, subdir: str, host_path: Path) -> None:
+        """Incremental sync of a single skill directory into WSL."""
+        assert self._vm_manager is not None
+        guest_root = f"/mnt/skills/{subdir}"
+        
+        # If host_path is a directory (full sync case)
+        if host_path.is_dir():
+            logger.info("[SkillSync] Syncing %s skills from %s", subdir, host_path)
+            # Clear guest subdir first for a fresh sync
+            await self._vm_manager._vm.shell(f"rm -rf {guest_root}/*", user="root")
             
-            # We clear the guest subdir first to handle conflicts (fresh sync)
-            await self._vm_manager._vm.shell(f"rm -rf {guest_path}/*", user="root")
-            
-            # Use tar to stream the directory into WSL. 
-            # This is much faster than individual 'wsl cp' calls and handles nested dirs.
             import subprocess
             import tarfile
             import io
 
-            # Create tar in memory
             tar_stream = io.BytesIO()
             with tarfile.open(fileobj=tar_stream, mode='w') as tar:
-                # Add all contents of host_path to the root of the tar
                 for item in host_path.iterdir():
                     tar.add(item, arcname=item.name)
             
-            # Pipe tar to WSL
-            cmd = ["wsl", "-d", self._vm_manager._vm._instance, "-u", "root", "tar", "-x", "-C", guest_path]
+            cmd = ["wsl", "-d", self._vm_manager._vm._instance, "-u", "root", "tar", "-x", "-C", guest_root]
             process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate(input=tar_stream.getvalue())
             
@@ -516,13 +518,23 @@ class AgentManager:
                 logger.info("[SkillSync] Successfully synced %s skills", subdir)
 
     async def _mount_skills(self) -> None:
-        """DEPRECATED: Use _sync_skills_via_cp instead.
+        """Mount skill directories (public + private) into the VM.
         
-        Kept for reference but not called by current start() logic.
+        Used on macOS (Lima) where virtiofs/9p mounts are stable.
         """
-        pass
+        assert self._vm_manager is not None
+        from hexagent.computer import Mount
+        from hexagent_api.paths import bundled_skills_dir, skills_dir
+
+        existing_by_guest = {m.guest_path: m for m in self._vm_manager.list_mounts()}
+        mount_sources = {
+            "public": bundled_skills_dir() / "public",
+            "private": skills_dir() / "private",
+        }
+        
         stale_targets: list[str] = []
         skill_mounts: list[Mount] = []
+        
         for subdir, host_path in mount_sources.items():
             guest = f"/mnt/skills/{subdir}"
             existing = existing_by_guest.get(guest)
@@ -544,7 +556,8 @@ class AgentManager:
             await self._vm_manager.unmount(stale_targets, defer=True)
 
         if skill_mounts:
-            logger.info("Mounting %d skill dir(s): %s", len(skill_mounts), [m.target for m in skill_mounts])
+            for m in skill_mounts:
+                logger.info("[SkillMount] Host: %s -> Guest: %s", m.source, m.target)
             await self._vm_manager.mount(skill_mounts)
         elif stale_targets:
             # Only removals with no replacements — apply the deferred changes now.
