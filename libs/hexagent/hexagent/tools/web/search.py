@@ -137,7 +137,15 @@ class WebSearchTool(BaseAgentTool[WebSearchToolParams]):
 
         # Format output based on summary availability
         if ai_summary:
-            links = [{"title": item.title, "url": item.url} for item in result.items]
+            links = []
+            for item in result.items:
+                link_info = {"title": item.title, "url": item.url}
+                if item.image_url:
+                    link_info["image_url"] = item.image_url
+                if item.image_title:
+                    link_info["image_title"] = item.image_title
+                links.append(link_info)
+                
             output = "\n\n".join(
                 [
                     f'Web search results for query: "{params.query}"',
@@ -149,7 +157,13 @@ class WebSearchTool(BaseAgentTool[WebSearchToolParams]):
             # Detailed format with snippets (no model, no provider summary)
             blocks: list[str] = []
             for item in result.items:
-                block = f"Title: {item.title}\nURL: {item.url}\n\n{item.snippet}"
+                block = f"Title: {item.title}\nURL: {item.url}"
+                if item.image_url:
+                    if item.image_title:
+                        block += f"\nImage: {item.image_title} ({item.image_url})"
+                    else:
+                        block += f"\nImage: {item.image_url}"
+                block += f"\n\n{item.snippet}"
                 blocks.append(block)
             output = "\n\n---\n\n".join(blocks)
 

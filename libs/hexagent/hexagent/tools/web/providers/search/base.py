@@ -37,12 +37,16 @@ class SearchResultItem:
         url: The URL of the search result.
         snippet: A text snippet/excerpt from the result.
         date: Publication or crawl date of the result, if available.
+        image_url: Optional URL for an associated image.
+        image_title: Optional title/description for the associated image.
     """
 
     title: str
     url: str
     snippet: str
     date: date | None = None
+    image_url: str | None = None
+    image_title: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -113,17 +113,32 @@ class BochaSearchProvider:
             web_pages = search_data.get("webPages") or {}
             values = web_pages.get("value") or []
             
-            logger.debug(f"Bocha returned {len(values)} results")
+            # Extract images and create a mapping from hostPageUrl to (contentUrl, name)
+            images_data = search_data.get("images") or {}
+            image_values = images_data.get("value") or []
+            url_to_image = {
+                img.get("hostPageUrl"): (img.get("contentUrl"), img.get("name"))
+                for img in image_values 
+                if img.get("hostPageUrl") and img.get("contentUrl")
+            }
+            
+            logger.debug(f"Bocha returned {len(values)} results and {len(image_values)} images")
 
-            items = [
-                SearchResultItem(
-                    title=item.get("name", ""),
-                    url=item.get("url", ""),
-                    snippet=item.get("summary") or item.get("snippet", ""),
-                    date=parse_date(item.get("datePublished")),
+            items = []
+            for item in values:
+                item_url = item.get("url")
+                img_info = url_to_image.get(item_url)
+                
+                items.append(
+                    SearchResultItem(
+                        title=item.get("name", ""),
+                        url=item_url or "",
+                        snippet=item.get("summary") or item.get("snippet", ""),
+                        date=parse_date(item.get("datePublished")),
+                        image_url=img_info[0] if img_info else None,
+                        image_title=img_info[1] if img_info else None,
+                    )
                 )
-                for item in values
-            ]
             
             return SearchResult(
                 items=items,
