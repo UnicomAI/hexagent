@@ -48,6 +48,7 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [e2bHintFlash, setE2bHintFlash] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
   const e2bHintTimer = useRef<ReturnType<typeof setTimeout>>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputContainerRef = useRef<HTMLDivElement>(null);
@@ -110,12 +111,14 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Ignore Enter during IME composition (e.g., Chinese input method)
+      if (isComposing) return;
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSubmit();
       }
     },
-    [handleSubmit]
+    [handleSubmit, isComposing]
   );
 
   useEffect(() => {
@@ -276,6 +279,8 @@ export default function ChatInput({ conversationId, onSend, scrollContainerRef, 
             onPaste={handlePaste}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
+            onCompositionStart={() => setIsComposing(true)}
+            onCompositionEnd={() => setIsComposing(false)}
             rows={1}
           />
           <div className="input-toolbar">
