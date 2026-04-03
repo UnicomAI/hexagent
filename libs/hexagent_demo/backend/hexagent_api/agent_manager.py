@@ -441,7 +441,7 @@ class AgentManager:
             if sys.platform == "win32":
                 from hexagent.computer.local.vm_win import _VMSessionComputer
             else:
-                from hexagent.computer.local.vm import _VMSessionComputer
+                from hexagent.computer.local.vm_mac import _VMSessionComputer
                 
             from hexagent.harness import SkillResolver
             from hexagent_api.routes.skills import INACTIVE_DIR, _list_skills
