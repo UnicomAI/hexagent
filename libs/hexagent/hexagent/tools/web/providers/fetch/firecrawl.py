@@ -15,8 +15,8 @@ from hexagent.tools.web._markdown import strip_links_and_images
 from hexagent.tools.web.providers._retry import web_retry
 from hexagent.tools.web.providers.fetch.base import FetchResult
 
-# FIRECRAWL_API_URL = "https://api.firecrawl.dev/v1/scrape"
-FIRECRAWL_API_URL = "https://maas.ai-yuanjing.com/app/firecrawl/v2/scrape"
+FIRECRAWL_API_URL = "https://api.firecrawl.dev/v1/scrape"
+# FIRECRAWL_API_URL = "https://maas.ai-yuanjing.com/app/firecrawl/v2/scrape"
 
 class FirecrawlFetchProvider:
     """Fetch provider using Firecrawl API.
