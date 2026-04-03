@@ -14,7 +14,7 @@ import pytest
 
 from hexagent.computer.base import SESSION_DIRS, Mount
 from hexagent.computer.local._types import ResolvedMount
-from hexagent.computer.local.vm import LocalVM, _VMSessionComputer
+from hexagent.computer.local.vm_mac import LocalVM, _VMSessionComputer
 from hexagent.exceptions import VMError, VMMountConflictError
 from hexagent.types import CLIResult
 
@@ -48,9 +48,9 @@ def _mock_vm(*, status: str = "Running") -> AsyncMock:
 
 def _make_manager(vm: AsyncMock) -> Any:
     """Create a LocalVM with a mocked VM backend."""
-    with patch("hexagent.computer.local.vm.sys") as mock_sys:
+    with patch("hexagent.computer.local.vm_mac.sys") as mock_sys:
         mock_sys.platform = "darwin"
-        with patch("hexagent.computer.local.vm.LocalVM.__init__", return_value=None):
+        with patch("hexagent.computer.local.vm_mac.LocalVM.__init__", return_value=None):
             mgr = LocalVM.__new__(LocalVM)
 
     mgr._vm = vm
@@ -673,45 +673,45 @@ class TestMountResolution:
     """Tests for _resolve_mount() and _target_to_guest()."""
 
     def test_relative_target_system(self) -> None:
-        from hexagent.computer.local.vm import LocalVM
+        from hexagent.computer.local.vm_mac import LocalVM
 
         m = Mount(source="/host/skills", target=".skills/coding")
         resolved = LocalVM._resolve_mount(m, scope="system")
         assert resolved.guest_path == "/mnt/.skills/coding"
 
     def test_relative_target_session(self) -> None:
-        from hexagent.computer.local.vm import LocalVM
+        from hexagent.computer.local.vm_mac import LocalVM
 
         m = Mount(source="/host/project", target="project")
         resolved = LocalVM._resolve_mount(m, scope="session", session_name="alice")
         assert resolved.guest_path == "/sessions/alice/mnt/project"
 
     def test_absolute_target(self) -> None:
-        from hexagent.computer.local.vm import LocalVM
+        from hexagent.computer.local.vm_mac import LocalVM
 
         m = Mount(source="/host/tools", target="/opt/tools")
         resolved = LocalVM._resolve_mount(m, scope="system")
         assert resolved.guest_path == "/opt/tools"
 
     def test_writable_preserved(self) -> None:
-        from hexagent.computer.local.vm import LocalVM
+        from hexagent.computer.local.vm_mac import LocalVM
 
         m = Mount(source="/host/x", target="x", writable=True)
         resolved = LocalVM._resolve_mount(m, scope="system")
         assert resolved.writable is True
 
     def test_target_to_guest_system(self) -> None:
-        from hexagent.computer.local.vm import LocalVM
+        from hexagent.computer.local.vm_mac import LocalVM
 
         assert LocalVM._target_to_guest("code", "system") == "/mnt/code"
 
     def test_target_to_guest_session(self) -> None:
-        from hexagent.computer.local.vm import LocalVM
+        from hexagent.computer.local.vm_mac import LocalVM
 
         assert LocalVM._target_to_guest("proj", "session", "alice") == "/sessions/alice/mnt/proj"
 
     def test_target_to_guest_absolute(self) -> None:
-        from hexagent.computer.local.vm import LocalVM
+        from hexagent.computer.local.vm_mac import LocalVM
 
         assert LocalVM._target_to_guest("/opt/tools", "system") == "/opt/tools"
 
