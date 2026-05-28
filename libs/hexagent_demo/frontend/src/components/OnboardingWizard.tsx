@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+﻿import { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import faviconSvg from "../assets/favicon.svg";
 import {
   Eye, EyeOff, ArrowRight, ChevronDown, ChevronRight,
@@ -65,7 +66,7 @@ const PROVIDERS: ProviderOption[] = [
 /** Generate a human-friendly display name from a model ID. */
 function autoDisplayName(modelId: string): string {
   if (!modelId) return "";
-  // Strip provider prefix (e.g. "anthropic/claude-sonnet-4" → "claude-sonnet-4")
+  // Strip provider prefix (e.g. "anthropic/claude-sonnet-4" 鈫?"claude-sonnet-4")
   const base = modelId.includes("/") ? modelId.split("/").pop()! : modelId;
   return base
     .replace(/[-_]/g, " ")
@@ -123,6 +124,7 @@ function clearOnboardingDraft(): void {
 // ---------------------------------------------------------------------------
 
 export default function OnboardingWizard({ open, onComplete, settings, onSettingsChange }: OnboardingWizardProps) {
+  const { t } = useTranslation("onboarding");
   const { dispatch } = useAppContext();
   const draftReadyRef = useRef(false);
   const [step, setStep] = useState<Step>("welcome");
@@ -130,7 +132,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [error, setError] = useState("");
   const [config, setConfig] = useState<ServerConfig | null>(null);
 
-  // ── Step 1: Model ──
+  // 鈹€鈹€ Step 1: Model 鈹€鈹€
   const [selectedProvider, setSelectedProvider] = useState<ProviderOption | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [modelId, setModelId] = useState("");
@@ -139,7 +141,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [showKey, setShowKey] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // ── Step 2: Summarizer ──
+  // 鈹€鈹€ Step 2: Summarizer 鈹€鈹€
   const [sumProvider, setSumProvider] = useState<ProviderOption | null>(null);
   const [sumApiKey, setSumApiKey] = useState("");
   const [sumModelId, setSumModelId] = useState("");
@@ -149,7 +151,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [sumSameAsMain, setSumSameAsMain] = useState(true);
   const [sumShowAdvanced, setSumShowAdvanced] = useState(false);
 
-  // ── Step 3: Web Tools ──
+  // 鈹€鈹€ Step 3: Web Tools 鈹€鈹€
   const [searchProvider, setSearchProvider] = useState("");
   const [searchKey, setSearchKey] = useState("");
   const [fetchProvider, setFetchProvider] = useState("");
@@ -157,9 +159,9 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
   const [showSearchKey, setShowSearchKey] = useState(false);
   const [showFetchKey, setShowFetchKey] = useState(false);
 
-  // ── Step 4: Compute ──
+  // 鈹€鈹€ Step 4: Compute 鈹€鈹€
 
-  // VM setup — shared with Settings via VMSetupProvider (single source of truth)
+  // VM setup 鈥?shared with Settings via VMSetupProvider (single source of truth)
   const vm = useVMSetup();
   const vmAutoBootstrapping = vm.autoBootstrapping;
   const [vmSkipped, setVmSkipped] = useState(false);
@@ -242,7 +244,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
 
   if (!open) return null;
 
-  // ── Navigation ──
+  // 鈹€鈹€ Navigation 鈹€鈹€
   const goNext = () => {
     const idx = stepIndex(step);
     if (idx < STEPS.length - 1) {
@@ -258,11 +260,11 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
     }
   };
 
-  // ── Save all config at the end ──
+  // 鈹€鈹€ Save all config at the end 鈹€鈹€
   const handleFinish = async () => {
     if (!config) return;
     if (!selectedProvider || !apiKey.trim() || !modelId.trim()) {
-      setError("Please go back and configure your AI model first");
+      setError(t("errors.configureModelFirst"));
       return;
     }
     setSaving(true);
@@ -321,13 +323,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
       clearOnboardingDraft();
       onComplete();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to save configuration");
+      setError(e instanceof Error ? e.message : t("errors.failedToSave"));
     } finally {
       setSaving(false);
     }
   };
 
-  // ── Validation for model step ──
+  // 鈹€鈹€ Validation for model step 鈹€鈹€
   const isCustomProvider = selectedProvider?.id === "custom";
   const canProceedFromModel =
     selectedProvider &&
@@ -339,31 +341,31 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
     <div className="setup-overlay">
       <div className="setup-modal">
 
-        {/* ── Step 0: Welcome — Name & Theme ── */}
+        {/* 鈹€鈹€ Step 0: Welcome 鈥?Name & Theme 鈹€鈹€ */}
         {step === "welcome" && (
           <div className="setup-step setup-welcome">
             <div className="setup-welcome-brand">
               <img className="setup-welcome-logo" width="40" height="40" src={faviconSvg} alt="" />
               <h2 className="setup-welcome-title">ClawWork</h2>
             </div>
-            <p className="setup-welcome-tagline">Powered by ClawWork harness</p>
+            <p className="setup-welcome-tagline">{t("welcome.tagline")}</p>
 
             <div className="setup-welcome-form">
               <div className="setup-field">
-                <label className="setup-label">What should ClawWork call you?</label>
+                <label className="setup-label">{t("welcome.nameLabel")}</label>
                 <input
                   className="setup-input setup-welcome-input"
                   type="text"
                   value={settings.fullName}
                   onChange={(e) => onSettingsChange((prev) => ({ ...prev, fullName: e.target.value }))}
-                  placeholder="Your name"
+                  placeholder={t("welcome.namePlaceholder")}
                   autoComplete="off"
                   autoFocus
                 />
               </div>
 
               <div className="setup-field">
-                <label className="setup-label">Theme</label>
+                <label className="setup-label">{t("welcome.themeLabel")}</label>
                 <div className="setup-theme-options">
                   {(["light", "dark", "system"] as const).map((theme) => (
                     <button
@@ -375,7 +377,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                       {theme === "light" && <Sun size={14} />}
                       {theme === "dark" && <Moon size={14} />}
                       {theme === "system" && <Monitor size={14} />}
-                      <span>{theme.charAt(0).toUpperCase() + theme.slice(1)}</span>
+                      <span>{t(`welcome.theme${theme.charAt(0).toUpperCase() + theme.slice(1)}Label`)}</span>
                     </button>
                   ))}
                 </div>
@@ -383,19 +385,19 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             </div>
 
             <button className="setup-btn setup-btn--primary setup-welcome-cta" onClick={goNext}>
-              Get Started <ArrowRight size={14} />
+              {t("welcome.getStarted")} <ArrowRight size={14} />
             </button>
           </div>
         )}
 
-        {/* ── Step 1: Provider selection ── */}
+        {/* 鈹€鈹€ Step 1: Provider selection 鈹€鈹€ */}
         {step === "provider" && (
           <div className="setup-step">
             <div className="setup-step-header">
               <Sparkles size={20} className="setup-step-icon" />
               <div>
-                <h2 className="setup-title">AI Model</h2>
-                <p className="setup-subtitle">Choose your AI provider to get started</p>
+                <h2 className="setup-title">{t("provider.title")}</h2>
+                <p className="setup-subtitle">{t("provider.subtitle")}</p>
               </div>
             </div>
 
@@ -419,23 +421,23 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             </div>
 
             <p className="setup-footer">
-              You can add more models later in Settings.
+              {t("provider.footer")}
             </p>
 
             <div className="setup-actions">
-              <button className="setup-btn setup-btn--ghost" onClick={goBack}>Back</button>
+              <button className="setup-btn setup-btn--ghost" onClick={goBack}>{t("provider.back")}</button>
             </div>
           </div>
         )}
 
-        {/* ── Step 2: Model credentials ── */}
+        {/* 鈹€鈹€ Step 2: Model credentials 鈹€鈹€ */}
         {step === "model" && selectedProvider && (
           <div className="setup-step">
             <div className="setup-step-header">
               <Sparkles size={20} className="setup-step-icon" />
               <div>
-                <h2 className="setup-title">Configure {selectedProvider.label}</h2>
-                <p className="setup-subtitle">Enter your API credentials</p>
+                <h2 className="setup-title">{t("model.title", { provider: selectedProvider.label })}</h2>
+                <p className="setup-subtitle">{t("model.subtitle")}</p>
               </div>
             </div>
 
@@ -443,7 +445,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
 
             <div className="setup-form">
               <div className="setup-field">
-                <label className="setup-label">API Key</label>
+                <label className="setup-label">{t("model.apiKeyLabel")}</label>
                 <div className="setup-key-wrap">
                   <input
                     className="setup-input setup-input--key"
@@ -464,7 +466,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
               </div>
 
               <div className="setup-field">
-                <label className="setup-label">Model ID</label>
+                <label className="setup-label">{t("model.modelIdLabel")}</label>
                 <input
                   className="setup-input"
                   value={modelId}
@@ -482,7 +484,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
               {isCustomProvider && (
                 <>
                   <div className="setup-field">
-                    <label className="setup-label">Base URL</label>
+                    <label className="setup-label">{t("model.baseUrlLabel")}</label>
                     <input
                       className="setup-input"
                       value={baseUrl}
@@ -491,12 +493,12 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                     />
                   </div>
                   <div className="setup-field">
-                    <label className="setup-label">Display Name</label>
+                    <label className="setup-label">{t("model.displayNameLabel")}</label>
                     <input
                       className="setup-input"
                       value={displayName}
                       onChange={(e) => setDisplayName(e.target.value)}
-                      placeholder={autoDisplayName(modelId) || "My Model"}
+                      placeholder={autoDisplayName(modelId) || t("model.displayNamePlaceholder")}
                     />
                   </div>
                 </>
@@ -511,13 +513,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                     type="button"
                   >
                     {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    Advanced
+                    {t("model.advanced")}
                   </button>
 
                   {showAdvanced && (
                     <div className="setup-advanced">
                       <div className="setup-field">
-                        <label className="setup-label">Base URL</label>
+                        <label className="setup-label">{t("model.baseUrlLabel")}</label>
                         <input
                           className="setup-input"
                           value={baseUrl}
@@ -526,12 +528,12 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                         />
                       </div>
                       <div className="setup-field">
-                        <label className="setup-label">Display Name</label>
+                        <label className="setup-label">{t("model.displayNameLabel")}</label>
                         <input
                           className="setup-input"
                           value={displayName}
                           onChange={(e) => setDisplayName(e.target.value)}
-                          placeholder={autoDisplayName(modelId) || "My Model"}
+                          placeholder={autoDisplayName(modelId) || t("model.displayNamePlaceholder")}
                         />
                       </div>
                     </div>
@@ -541,27 +543,27 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             </div>
 
             <div className="setup-actions">
-              <button className="setup-btn setup-btn--ghost" onClick={() => setStep("provider")}>Back</button>
+              <button className="setup-btn setup-btn--ghost" onClick={() => setStep("provider")}>{t("model.back")}</button>
               <button
                 className="setup-btn setup-btn--primary"
                 onClick={goNext}
                 disabled={!canProceedFromModel}
               >
-                Next <ArrowRight size={14} />
+                {t("model.next")} <ArrowRight size={14} />
               </button>
             </div>
           </div>
         )}
 
-        {/* ── Step 2: Summarizer ── */}
+        {/* 鈹€鈹€ Step 2: Summarizer 鈹€鈹€ */}
         {step === "summarizer" && (
           <div className="setup-step">
             <div className="setup-step-header">
               <ScrollText size={20} className="setup-step-icon" />
               <div>
-                <h2 className="setup-title">Summarizer model</h2>
+                <h2 className="setup-title">{t("summarizer.title")}</h2>
                 <p className="setup-subtitle">
-                  A fast model for web page summarization. Can be the same as your main model or a cheaper/faster one.
+                  {t("summarizer.subtitle")}
                 </p>
               </div>
             </div>
@@ -575,14 +577,14 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                   onClick={() => setSumSameAsMain(true)}
                   type="button"
                 >
-                  Same as main model
+                  {t("summarizer.sameAsMain")}
                 </button>
                 <button
                   className={`setup-pill ${!sumSameAsMain ? "setup-pill--active" : ""}`}
                   onClick={() => setSumSameAsMain(false)}
                   type="button"
                 >
-                  Different model
+                  {t("summarizer.differentModel")}
                 </button>
               </div>
             </div>
@@ -590,7 +592,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             {!sumSameAsMain && (
               <div className="setup-form">
                 <div className="setup-field">
-                  <label className="setup-label">Provider</label>
+                  <label className="setup-label">{t("summarizer.providerLabel")}</label>
                   <div className="setup-pill-group">
                     {PROVIDERS.map((p) => (
                       <button
@@ -612,7 +614,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 {sumProvider && (
                   <>
                     <div className="setup-field">
-                      <label className="setup-label">API Key</label>
+                      <label className="setup-label">{t("summarizer.apiKeyLabel")}</label>
                       <div className="setup-key-wrap">
                         <input
                           className="setup-input setup-input--key"
@@ -632,7 +634,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                     </div>
 
                     <div className="setup-field">
-                      <label className="setup-label">Model ID</label>
+                      <label className="setup-label">{t("summarizer.modelIdLabel")}</label>
                       <input
                         className="setup-input"
                         value={sumModelId}
@@ -650,7 +652,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                     {sumProvider.id === "custom" && (
                       <>
                         <div className="setup-field">
-                          <label className="setup-label">Base URL</label>
+                          <label className="setup-label">{t("summarizer.baseUrlLabel")}</label>
                           <input
                             className="setup-input"
                             value={sumBaseUrl}
@@ -659,12 +661,12 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                           />
                         </div>
                         <div className="setup-field">
-                          <label className="setup-label">Display Name</label>
+                          <label className="setup-label">{t("summarizer.displayNameLabel")}</label>
                           <input
                             className="setup-input"
                             value={sumDisplayName}
                             onChange={(e) => setSumDisplayName(e.target.value)}
-                            placeholder={autoDisplayName(sumModelId) || "Fast Model"}
+                            placeholder={autoDisplayName(sumModelId) || t("summarizer.displayNamePlaceholder")}
                           />
                         </div>
                       </>
@@ -679,13 +681,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                           type="button"
                         >
                           {sumShowAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                          Advanced
+                          {t("summarizer.advanced")}
                         </button>
 
                         {sumShowAdvanced && (
                           <div className="setup-advanced">
                             <div className="setup-field">
-                              <label className="setup-label">Base URL</label>
+                              <label className="setup-label">{t("summarizer.baseUrlLabel")}</label>
                               <input
                                 className="setup-input"
                                 value={sumBaseUrl}
@@ -694,12 +696,12 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                               />
                             </div>
                             <div className="setup-field">
-                              <label className="setup-label">Display Name</label>
+                              <label className="setup-label">{t("summarizer.displayNameLabel")}</label>
                               <input
                                 className="setup-input"
                                 value={sumDisplayName}
                                 onChange={(e) => setSumDisplayName(e.target.value)}
-                                placeholder={autoDisplayName(sumModelId) || "Fast Model"}
+                                placeholder={autoDisplayName(sumModelId) || t("summarizer.displayNamePlaceholder")}
                               />
                             </div>
                           </div>
@@ -712,23 +714,23 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             )}
 
             <div className="setup-actions">
-              <button className="setup-btn setup-btn--ghost" onClick={goBack}>Back</button>
+              <button className="setup-btn setup-btn--ghost" onClick={goBack}>{t("summarizer.back")}</button>
               <button className="setup-btn setup-btn--primary" onClick={goNext}>
-                Next <ArrowRight size={14} />
+                {t("summarizer.next")} <ArrowRight size={14} />
               </button>
             </div>
           </div>
         )}
 
-        {/* ── Step 3: Web Tools ── */}
+        {/* 鈹€鈹€ Step 3: Web Tools 鈹€鈹€ */}
         {step === "tools" && (
           <div className="setup-step">
             <div className="setup-step-header">
               <Globe size={20} className="setup-step-icon" />
               <div>
-                <h2 className="setup-title">Web search & fetch</h2>
+                <h2 className="setup-title">{t("tools.title")}</h2>
                 <p className="setup-subtitle">
-                  Let the agent search the web and read pages. Optional — you can configure these later.
+                  {t("tools.subtitle")}
                 </p>
               </div>
             </div>
@@ -740,13 +742,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
               <div className="setup-tool-group">
                 <div className="setup-tool-header">
                   <Globe size={14} />
-                  <span>Web Search</span>
+                  <span>{t("tools.webSearch")}</span>
                 </div>
                 <div className="setup-field">
-                  <label className="setup-label">Provider</label>
+                  <label className="setup-label">{t("tools.providerLabel")}</label>
                   <div className="setup-pill-group">
                     {[
-                      { id: "", label: "None" },
+                      { id: "", label: t("tools.providerNone") },
                       { id: "tavily", label: "Tavily" },
                       { id: "brave", label: "Brave" },
                     ].map((p) => (
@@ -763,14 +765,14 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 </div>
                 {searchProvider && (
                   <div className="setup-field">
-                    <label className="setup-label">API Key</label>
+                    <label className="setup-label">{t("tools.apiKeyLabel")}</label>
                     <div className="setup-key-wrap">
                       <input
                         className="setup-input setup-input--key"
                         type={showSearchKey ? "text" : "password"}
                         value={searchKey}
                         onChange={(e) => setSearchKey(e.target.value)}
-                        placeholder={`${searchProvider} API key`}
+                        placeholder={t("tools.apiKeyPlaceholder", { provider: searchProvider })}
                       />
                       <button className="setup-key-toggle" onClick={() => setShowSearchKey(!showSearchKey)} type="button">
                         {showSearchKey ? <Eye size={14} /> : <EyeOff size={14} />}
@@ -786,13 +788,13 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
               <div className="setup-tool-group">
                 <div className="setup-tool-header">
                   <ScrollText size={14} />
-                  <span>Web Fetch</span>
+                  <span>{t("tools.webFetch")}</span>
                 </div>
                 <div className="setup-field">
-                  <label className="setup-label">Provider</label>
+                  <label className="setup-label">{t("tools.providerLabel")}</label>
                   <div className="setup-pill-group">
                     {[
-                      { id: "", label: "None" },
+                      { id: "", label: t("tools.providerNone") },
                       { id: "jina", label: "Jina" },
                       { id: "firecrawl", label: "Firecrawl" },
                     ].map((p) => (
@@ -809,14 +811,14 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 </div>
                 {fetchProvider && (
                   <div className="setup-field">
-                    <label className="setup-label">API Key</label>
+                    <label className="setup-label">{t("tools.apiKeyLabel")}</label>
                     <div className="setup-key-wrap">
                       <input
                         className="setup-input setup-input--key"
                         type={showFetchKey ? "text" : "password"}
                         value={fetchKey}
                         onChange={(e) => setFetchKey(e.target.value)}
-                        placeholder={`${fetchProvider} API key`}
+                        placeholder={t("tools.apiKeyPlaceholder", { provider: fetchProvider })}
                       />
                       <button className="setup-key-toggle" onClick={() => setShowFetchKey(!showFetchKey)} type="button">
                         {showFetchKey ? <Eye size={14} /> : <EyeOff size={14} />}
@@ -828,23 +830,23 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             </div>
 
             <div className="setup-actions">
-              <button className="setup-btn setup-btn--ghost" onClick={goBack}>Back</button>
+              <button className="setup-btn setup-btn--ghost" onClick={goBack}>{t("tools.back")}</button>
               <button className="setup-btn setup-btn--primary" onClick={goNext}>
-                Next <ArrowRight size={14} />
+                {t("tools.next")} <ArrowRight size={14} />
               </button>
             </div>
           </div>
         )}
 
-        {/* ── Step 4: Compute ── */}
+        {/* 鈹€鈹€ Step 4: Compute 鈹€鈹€ */}
         {step === "compute" && (
           <div className="setup-step">
             <div className="setup-step-header">
               <Server size={20} className="setup-step-icon" />
               <div>
-                <h2 className="setup-title">Compute environments</h2>
+                <h2 className="setup-title">{t("compute.title")}</h2>
                 <p className="setup-subtitle">
-                  ClawWork uses sandboxed environments to run code safely.
+                  {t("compute.subtitle")}
                 </p>
               </div>
             </div>
@@ -857,18 +859,18 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                 <div className="setup-compute-header">
                   <Monitor size={16} />
                   <div className="setup-compute-info">
-                    <span className="setup-compute-name">Virtual Machine</span>
-                    <span className="setup-compute-badge">Required</span>
+                    <span className="setup-compute-name">{t("compute.vmName")}</span>
+                    <span className="setup-compute-badge">{t("compute.vmRequired")}</span>
                   </div>
                 </div>
                 <p className="setup-compute-desc">
-                  Local Linux VM for cowork sessions. You can skip this and set it up later in Settings.
+                  {t("compute.vmDesc")}
                 </p>
 
                 {vmSupported === false && (
                   <div className="setup-compute-status">
                     <span className="setup-compute-status-dot" />
-                    Not supported on this platform
+                    {t("compute.vmNotSupported")}
                   </div>
                 )}
 
@@ -880,24 +882,24 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                        vmPhase1 === "running" ? <Loader2 size={13} className="spin" /> :
                        vmPhase1 === "error" ? <CircleAlert size={13} className="setup-vm-icon--error" /> :
                        <span className="setup-vm-dot" />}
-                      <span className="setup-vm-label">VM Engine</span>
-                      {vmPhase1 === "done" && <span className="setup-vm-badge">Installed</span>}
+                      <span className="setup-vm-label">{t("compute.vmEngine")}</span>
+                      {vmPhase1 === "done" && <span className="setup-vm-badge">{t("compute.vmEngineInstalled")}</span>}
                       {vmPhase1 === "running" && vmPhase1Msg && <span className="setup-vm-msg">{vmPhase1Msg}</span>}
                       {vmPhase1 === "pending" && (
                         vmAutoBootstrapping ? (
-                          <span className="setup-vm-msg">Auto installing...</span>
+                          <span className="setup-vm-msg">{t("compute.vmAutoInstalling")}</span>
                         ) : (
-                          <button className="vm-phase-action" type="button" onClick={vm.installLima}>Install</button>
+                          <button className="vm-phase-action" type="button" onClick={vm.installLima}>{t("compute.vmInstall")}</button>
                         )
                       )}
                       {vmPhase1 === "error" && (
                         vmPhase1NeedsRestart ? (
                           <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.recheckVmEngine}>
-                            I've restarted, Re-check
+                            {t("compute.vmRecheck")}
                           </button>
                         ) : (
                           <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.installLima}>
-                            Retry
+                            {t("compute.vmRetry")}
                           </button>
                         )
                       )}
@@ -912,18 +914,18 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                        vmPhase2 === "running" ? <Loader2 size={13} className="spin" /> :
                        vmPhase2 === "error" ? <CircleAlert size={13} className="setup-vm-icon--error" /> :
                        <span className="setup-vm-dot" />}
-                      <span className="setup-vm-label">VM Instance</span>
-                      {vmPhase2 === "done" && <span className="setup-vm-badge">Ready</span>}
+                      <span className="setup-vm-label">{t("compute.vmInstance")}</span>
+                      {vmPhase2 === "done" && <span className="setup-vm-badge">{t("compute.vmInstanceReady")}</span>}
                       {vmPhase2 === "running" && vmPhase2Msg && <span className="setup-vm-msg">{vmPhase2Msg}</span>}
                       {vmPhase2 === "pending" && vmPhase1 === "done" && (
                         vmAutoBootstrapping ? (
-                          <span className="setup-vm-msg">Auto installing...</span>
+                          <span className="setup-vm-msg">{t("compute.vmAutoInstalling")}</span>
                         ) : (
-                          <button className="vm-phase-action" type="button" onClick={vm.buildVMInstance}>Install</button>
+                          <button className="vm-phase-action" type="button" onClick={vm.buildVMInstance}>{t("compute.vmInstall")}</button>
                         )
                       )}
                       {vmPhase2 === "error" && (
-                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.buildVMInstance}>Retry</button>
+                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={vm.buildVMInstance}>{t("compute.vmRetry")}</button>
                       )}
                     </div>
                     {vmPhase2 === "error" && vmPhase2Error && (
@@ -936,20 +938,20 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                        vmPhase3 === "running" ? <Loader2 size={13} className="spin" /> :
                        vmPhase3 === "error" ? <CircleAlert size={13} className="setup-vm-icon--error" /> :
                        <span className="setup-vm-dot" />}
-                      <span className="setup-vm-label">VM System Dependencies</span>
-                      {vmPhase3 === "done" && <span className="setup-vm-badge">Complete</span>}
-                      {vmPhase3 === "running" && <span className="setup-vm-msg">Installing...</span>}
+                      <span className="setup-vm-label">{t("compute.vmDeps")}</span>
+                      {vmPhase3 === "done" && <span className="setup-vm-badge">{t("compute.vmDepsComplete")}</span>}
+                      {vmPhase3 === "running" && <span className="setup-vm-msg">{t("compute.vmInstalling")}</span>}
                       {vmPhase3 === "pending" && vmUsable && (
-                        <button className="vm-phase-action" type="button" onClick={() => vm.startProvision()}>Install in background</button>
+                        <button className="vm-phase-action" type="button" onClick={() => vm.startProvision()}>{t("compute.vmInstallBackground")}</button>
                       )}
                       {vmPhase3 === "error" && (
-                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={() => vm.startProvision()}>Retry</button>
+                        <button className="vm-phase-action vm-phase-action--retry" type="button" onClick={() => vm.startProvision()}>{t("compute.vmRetry")}</button>
                       )}
                     </div>
 
                     {vmUsable && vmPhase3 !== "done" && (
                       <p className="setup-vm-hint">
-                        System dependencies install in the background — you can continue using ClawWork while it runs.
+                        {t("compute.vmDepsHint")}
                       </p>
                     )}
                   </div>
@@ -959,14 +961,14 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                   <>
                     <div className="setup-compute-status">
                       <span className="setup-compute-status-dot" />
-                      Skipped — you can set this up later in Settings
+                      {t("compute.vmSkipped")}
                     </div>
                     <button
                       className="setup-btn--link"
                       type="button"
                       onClick={() => { setVmSkipped(false); setShowSkipConfirm(false); }}
                     >
-                      Set up Cowork
+                      {t("compute.vmSetupCowork")}
                     </button>
                   </>
                 )}
@@ -978,23 +980,23 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             {showSkipConfirm && (
               <div className="setup-skip-overlay" onClick={() => setShowSkipConfirm(false)}>
                 <div className="setup-skip-popup" onClick={(e) => e.stopPropagation()}>
-                  <p className="setup-skip-title">Are you sure you want to skip?</p>
+                  <p className="setup-skip-title">{t("compute.skipConfirmTitle")}</p>
                   <ul className="setup-skip-list">
                     {vmSupported && !vmUsable && !vmSkipped && (
-                      <li>Without a <strong>Virtual Machine</strong>, Cowork mode will not be available.</li>
+                      <li dangerouslySetInnerHTML={{ __html: t("compute.skipConfirmVm") }} />
                     )}
                     {vmUsable && vmPhase3 !== "done" && vmPhase3 !== "running" && (
-                      <li><strong>VM System Dependencies</strong> are not installed. Cowork mode will work but the agent may lack some tools. You can install them later in Settings (runs in the background).</li>
+                      <li dangerouslySetInnerHTML={{ __html: t("compute.skipConfirmDeps") }} />
                     )}
                   </ul>
-                  <p className="setup-skip-note">You can configure these later in Settings.</p>
+                  <p className="setup-skip-note">{t("compute.skipConfirmNote")}</p>
                   <div className="setup-skip-actions">
                     <button
                       className="setup-btn setup-btn--ghost"
                       type="button"
                       onClick={() => setShowSkipConfirm(false)}
                     >
-                      Go back
+                      {t("compute.skipConfirmBack")}
                     </button>
                     <button
                       className="setup-btn setup-btn--danger"
@@ -1005,7 +1007,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                         goNext();
                       }}
                     >
-                      Skip anyway
+                      {t("compute.skipConfirmSkip")}
                     </button>
                   </div>
                 </div>
@@ -1016,13 +1018,10 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             {showDepsPrompt && (
               <div className="setup-skip-overlay" onClick={() => setShowDepsPrompt(false)}>
                 <div className="setup-skip-popup" onClick={(e) => e.stopPropagation()}>
-                  <p className="setup-skip-title setup-skip-title--recommend">Install system dependencies?</p>
+                  <p className="setup-skip-title setup-skip-title--recommend">{t("compute.depsPromptTitle")}</p>
+                  <p className="setup-deps-desc" dangerouslySetInnerHTML={{ __html: t("compute.depsPromptDesc1") }} />
                   <p className="setup-deps-desc">
-                    Installing VM system dependencies is <strong>strongly recommended</strong>. It gives the agent access
-                    to tools like Python, Node.js, LaTeX, LibreOffice, and more.
-                  </p>
-                  <p className="setup-deps-desc">
-                    The installation runs in the background — you can start using ClawWork immediately.
+                    {t("compute.depsPromptDesc2")}
                   </p>
                   <div className="setup-skip-actions">
                     <button
@@ -1030,14 +1029,14 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                       type="button"
                       onClick={() => { setShowDepsPrompt(false); goNext(); }}
                     >
-                      Continue without
+                      {t("compute.depsPromptContinueWithout")}
                     </button>
                     <button
                       className="setup-btn setup-btn--primary"
                       type="button"
                       onClick={() => { vm.startProvision(); setShowDepsPrompt(false); goNext(); }}
                     >
-                      Install & Continue
+                      {t("compute.depsPromptInstall")}
                     </button>
                   </div>
                 </div>
@@ -1055,7 +1054,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
               };
               return (
                 <div className="setup-actions">
-                  <button className="setup-btn setup-btn--ghost" onClick={goBack}>Back</button>
+                  <button className="setup-btn setup-btn--ghost" onClick={goBack}>{t("compute.back")}</button>
                   <div className="setup-actions-right">
                     {!canProceed && !showSkipConfirm && (
                       <button
@@ -1063,7 +1062,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                         type="button"
                         onClick={() => setShowSkipConfirm(true)}
                       >
-                        Skip
+                        {t("compute.skip")}
                       </button>
                     )}
                     <button
@@ -1071,7 +1070,7 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
                       onClick={handleNext}
                       disabled={!canProceed || anyVmRunning}
                     >
-                      Next <ArrowRight size={14} />
+                      {t("compute.next")} <ArrowRight size={14} />
                     </button>
                   </div>
                 </div>
@@ -1080,15 +1079,15 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
           </div>
         )}
 
-        {/* ── Step 5: Done ── */}
+        {/* 鈹€鈹€ Step 5: Done 鈹€鈹€ */}
         {step === "done" && (
           <div className="setup-step">
             <div className="setup-done-icon">
               <Check size={32} strokeWidth={2.5} />
             </div>
-            <h2 className="setup-title setup-title--center">You&rsquo;re all set!</h2>
+            <h2 className="setup-title setup-title--center">{t("done.title")}</h2>
             <p className="setup-subtitle setup-subtitle--center">
-              Here&rsquo;s what you configured:
+              {t("done.subtitle")}
             </p>
 
             {error && <div className="setup-error">{error}</div>}
@@ -1096,55 +1095,55 @@ export default function OnboardingWizard({ open, onComplete, settings, onSetting
             <div className="setup-summary">
               <div className="setup-summary-row">
                 <Sparkles size={14} />
-                <span className="setup-summary-label">AI Model</span>
+                <span className="setup-summary-label">{t("done.aiModel")}</span>
                 <span className="setup-summary-value">
                   {displayName || autoDisplayName(modelId) || modelId}
                 </span>
               </div>
               <div className="setup-summary-row">
                 <ScrollText size={14} />
-                <span className="setup-summary-label">Summarizer</span>
+                <span className="setup-summary-label">{t("done.summarizer")}</span>
                 <span className="setup-summary-value">
                   {sumSameAsMain
-                    ? "Same as main"
-                    : (sumDisplayName || autoDisplayName(sumModelId) || "Not configured")}
+                    ? t("done.summarizerSameAsMain")
+                    : (sumDisplayName || autoDisplayName(sumModelId) || t("done.summarizerNotConfigured"))}
                 </span>
               </div>
               <div className="setup-summary-row">
                 <Globe size={14} />
-                <span className="setup-summary-label">Web Search</span>
+                <span className="setup-summary-label">{t("done.webSearch")}</span>
                 <span className="setup-summary-value">
-                  {searchProvider ? searchProvider.charAt(0).toUpperCase() + searchProvider.slice(1) : "Skipped"}
+                  {searchProvider ? searchProvider.charAt(0).toUpperCase() + searchProvider.slice(1) : t("done.skipped")}
                 </span>
               </div>
               <div className="setup-summary-row">
                 <ScrollText size={14} />
-                <span className="setup-summary-label">Web Fetch</span>
+                <span className="setup-summary-label">{t("done.webFetch")}</span>
                 <span className="setup-summary-value">
-                  {fetchProvider ? fetchProvider.charAt(0).toUpperCase() + fetchProvider.slice(1) : "Skipped"}
+                  {fetchProvider ? fetchProvider.charAt(0).toUpperCase() + fetchProvider.slice(1) : t("done.skipped")}
                 </span>
               </div>
               <div className="setup-summary-row">
                 <Monitor size={14} />
-                <span className="setup-summary-label">Virtual Machine</span>
+                <span className="setup-summary-label">{t("done.virtualMachine")}</span>
                 <span className="setup-summary-value">
-                  {vmSkipped ? "Skipped" : vmUsable ? "Ready" : "Not set up"}
+                  {vmSkipped ? t("done.skipped") : vmUsable ? t("done.vmReady") : t("done.vmNotSetUp")}
                 </span>
               </div>
             </div>
 
             <p className="setup-footer">
-              You can change any of these later in Settings.
+              {t("done.footer")}
             </p>
 
             <div className="setup-actions setup-actions--center">
-              <button className="setup-btn setup-btn--ghost" onClick={goBack}>Back</button>
+              <button className="setup-btn setup-btn--ghost" onClick={goBack}>{t("done.back")}</button>
               <button
                 className="setup-btn setup-btn--primary setup-btn--finish"
                 onClick={handleFinish}
                 disabled={saving}
               >
-                {saving ? "Saving..." : "Start using ClawWork"}
+                {saving ? t("done.saving") : t("done.finish")}
               </button>
             </div>
           </div>

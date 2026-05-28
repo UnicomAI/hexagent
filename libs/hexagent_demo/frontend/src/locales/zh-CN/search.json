@@ -1,0 +1,11 @@
+{
+  "placeholder": "搜索对话...",
+  "noMatches": "没有匹配的对话",
+  "noConversations": "暂无对话",
+  "time": {
+    "justNow": "刚刚",
+    "minutesAgo": "{{count}}分钟前",
+    "hoursAgo": "{{count}}小时前",
+    "daysAgo": "{{count}}天前"
+  }
+}

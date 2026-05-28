@@ -1,0 +1,16 @@
+{
+  "brand": "ClawWork",
+  "openSidebar": "展开侧边栏",
+  "closeSidebar": "收起侧边栏",
+  "newChat": "新对话",
+  "newTask": "新任务",
+  "search": "搜索",
+  "settings": "设置",
+  "recents": "最近",
+  "noChats": "暂无对话",
+  "noTasks": "暂无任务",
+  "untitledConversation": "未命名对话",
+  "rename": "重命名",
+  "delete": "删除",
+  "user": "用户"
+}

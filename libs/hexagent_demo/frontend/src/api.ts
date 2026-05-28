@@ -1,4 +1,4 @@
-import type { Conversation } from "./types";
+﻿import type { Conversation } from "./types";
 
 const API_BASE = (() => {
   if (typeof window !== 'undefined' && window.electronAPI?.backendPort) {
@@ -34,7 +34,7 @@ export async function getConversation(id: string): Promise<Conversation> {
   return res.json();
 }
 
-// ── Warm session (pre-conversation) ──
+// 鈹€鈹€ Warm session (pre-conversation) 鈹€鈹€
 
 export interface WarmSessionResponse {
   session_id: string;
@@ -264,7 +264,7 @@ export function subscribeToStream(
   return controller;
 }
 
-// ── File upload ──
+// 鈹€鈹€ File upload 鈹€鈹€
 
 export interface UploadResult {
   filename: string;
@@ -295,7 +295,7 @@ export async function deleteChatFile(conversationId: string, filename: string): 
   }
 }
 
-// ── Folder picker ──
+// 鈹€鈹€ Folder picker 鈹€鈹€
 
 export async function browseFolder(): Promise<string | null> {
   const res = await fetch(`${API_BASE}/api/browse-folder`, { method: "POST" });
@@ -304,7 +304,7 @@ export async function browseFolder(): Promise<string | null> {
   return data.path || null;
 }
 
-// ── Server config ──
+// 鈹€鈹€ Server config 鈹€鈹€
 
 export interface ModelConfig {
   id: string;
@@ -359,13 +359,14 @@ export interface ServerConfig {
   tools: ToolsConfig;
   sandbox: SandboxConfig;
   mcp_servers: McpServerEntry[];
+  language: string;
 }
 
 export async function getServerConfig(): Promise<ServerConfig> {
   const res = await fetch(`${API_BASE}/api/config`);
   if (!res.ok) throw new Error(`Failed to get config: ${res.statusText}`);
   const data = await res.json();
-  return { agents: [], tools: { search_provider: "", search_api_key: "", fetch_provider: "jina", fetch_api_key: "" }, sandbox: { e2b_api_key: "", chat_enabled: false }, mcp_servers: [], ...data };
+  return { agents: [], tools: { search_provider: "", search_api_key: "", fetch_provider: "jina", fetch_api_key: "" }, sandbox: { e2b_api_key: "", chat_enabled: false }, mcp_servers: [], language: "en", ...data };
 }
 
 export async function updateServerConfig(config: ServerConfig): Promise<ServerConfig> {
@@ -388,7 +389,7 @@ export async function testMcpConnection(server: McpServerEntry): Promise<{ ok: b
   return res.json();
 }
 
-// ── Skills ──
+// 鈹€鈹€ Skills 鈹€鈹€
 
 export interface SkillsList {
   public: string[];
@@ -446,7 +447,7 @@ export async function toggleSkill(name: string, enabled: boolean): Promise<void>
   if (!res.ok) throw new Error(`Failed to toggle skill: ${res.statusText}`);
 }
 
-// ── Setup / VM backend ──
+// 鈹€鈹€ Setup / VM backend 鈹€鈹€
 
 export interface VMStatus {
   supported: boolean;
@@ -481,7 +482,7 @@ export function installVMBackend(
   });
 }
 
-// ── VM Build ──
+// 鈹€鈹€ VM Build 鈹€鈹€
 
 export interface VMBuildStatus {
   status: "idle" | "running" | "done" | "error";
@@ -562,7 +563,7 @@ export function buildVM(
   });
 }
 
-// ── VM Provision ──
+// 鈹€鈹€ VM Provision 鈹€鈹€
 
 export interface ProvisionStepDef {
   id: string;

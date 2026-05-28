@@ -1,0 +1,20 @@
+{
+  "save": "保存",
+  "cancel": "取消",
+  "delete": "删除",
+  "rename": "重命名",
+  "close": "关闭",
+  "open": "打开",
+  "settings": "设置",
+  "search": "搜索",
+  "loading": "加载中...",
+  "untitled": "未命名",
+  "add": "添加",
+  "remove": "移除",
+  "default": "默认",
+  "show": "显示",
+  "hide": "隐藏",
+  "mcp": "MCP",
+  "skills": "技能",
+  "subagent": "子智能体"
+}

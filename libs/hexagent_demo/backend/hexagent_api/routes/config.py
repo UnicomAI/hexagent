@@ -82,6 +82,9 @@ async def put_config(body: dict[str, Any]) -> dict[str, Any]:
     if "mcp_servers" in body:
         current.mcp_servers = [McpServerConfig(**m) for m in body["mcp_servers"]]
 
+    if "language" in body:
+        current.language = body["language"]
+
     save_config(current)
 
     # Invalidate cached agents so they pick up new config on next use

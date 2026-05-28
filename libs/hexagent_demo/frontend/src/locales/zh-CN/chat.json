@@ -1,0 +1,20 @@
+{
+  "mode": {
+    "chat": "聊天",
+    "cowork": "协作"
+  },
+  "toggleSidePanel": "切换侧边面板",
+  "askAnything": "问我任何问题...",
+  "attachFile": "添加附件",
+  "scrollToBottom": "滚动到底部",
+  "sendMessage": "发送消息",
+  "preparingRequest": "正在准备请求...",
+  "configureModel": "请先在设置中配置模型",
+  "e2bKeyRequired": "需要 E2B API 密钥",
+  "setInSettings": "前往设置",
+  "copyMessage": "复制消息",
+  "disclaimer": "AI 回复可能不准确，请仔细核实重要信息。",
+  "uploadFailed": "上传失败",
+  "failedToUpload": "上传 {{filename}} 失败：{{message}}",
+  "alreadyAttached": "\"{{filename}}\" 已添加。请重命名文件后重试。"
+}

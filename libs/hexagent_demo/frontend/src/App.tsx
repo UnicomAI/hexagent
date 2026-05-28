@@ -1,4 +1,5 @@
 import { useReducer, useEffect, useCallback, useRef, useState } from "react";
+import i18n from "./i18n";
 import { AppContext, initialState, reducer } from "./store";
 import { listConversations, createConversation, createWarmSession, deleteWarmSession, sendMessage, subscribeToStream, getServerConfig, getVMStatus, type ServerConfig } from "./api";
 import { useSettings } from "./hooks/useSettings";
@@ -86,6 +87,10 @@ function App() {
         loadedConfig = cfg;
         dispatch({ type: "SET_SERVER_CONFIG", payload: cfg });
         if (cfg.models.length === 0) setSetupNeeded(true);
+        // Sync language from backend config if it differs from local
+        if (cfg.language && cfg.language !== settings.language) {
+          setSettings((prev) => ({ ...prev, language: cfg.language }));
+        }
       })
       .catch(() => {});
     Promise.all([convP, cfgP]).then(() => {
@@ -202,7 +207,7 @@ function App() {
     warmSessionPromiseRef.current = p;
     p.catch(() => {
         dispatch({ type: "SHOW_NOTIFICATION", payload: {
-          message: "Session setup failed. You can still send messages.",
+          message: i18n.t("misc:sessionSetupFailed"),
           type: "info",
         }});
       })
@@ -418,7 +423,7 @@ function App() {
         doSendMessage(conv.id, content, options?.attachments);
       } catch {
         dispatch({ type: "REQUEST_END" });
-        dispatch({ type: "SHOW_NOTIFICATION", payload: { message: "Failed to create conversation", type: "error" } });
+        dispatch({ type: "SHOW_NOTIFICATION", payload: { message: i18n.t("misc:failedToCreateConversation"), type: "error" } });
       }
     },
     [dispatch, state.activeConversationId, state.isRequestPending, state.streamingByConversation, state.selectedModelId, state.selectedMode, state.warmSessionId, doSendMessage]

@@ -35,6 +35,15 @@ rm -f "$DMG_PATH"
 
 echo "Creating DMG: $(basename "$DMG_PATH")"
 
+# Electron Framework uses hardlinks extensively. `du` counts hardlinked inodes
+# once, causing create-dmg to underestimate the DMG size needed and fail with
+# "No space left on device". Copy the app first to break hardlinks so that
+# the size estimate matches the actual bytes written.
+STAGING_DIR=$(mktemp -d)
+APP_PATH_COPY="$STAGING_DIR/${PRODUCT_NAME}.app"
+echo "Staging app (resolving hardlinks)..."
+ditto "$APP_PATH" "$APP_PATH_COPY"
+
 create-dmg \
     --volname "$PRODUCT_NAME" \
     --background "$BACKGROUND" \
@@ -44,6 +53,8 @@ create-dmg \
     --app-drop-link 415 185 \
     --no-internet-enable \
     "$DMG_PATH" \
-    "$APP_PATH"
+    "$APP_PATH_COPY"
+
+rm -rf "$STAGING_DIR"
 
 echo "DMG created: $DMG_PATH"

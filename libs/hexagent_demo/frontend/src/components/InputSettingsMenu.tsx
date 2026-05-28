@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Settings2, Unplug, ScrollText, Bot, ChevronRight, Settings } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAppContext } from "../store";
 import { listSkills, toggleSkill, updateServerConfig, testMcpConnection } from "../api";
 import type { SkillsList, AgentConfig, McpServerEntry, ServerConfig } from "../api";
@@ -15,6 +16,7 @@ type SubmenuKey = "mcp" | "skills" | "agents";
 type McpStatus = { state: "validating" } | { state: "ok"; tools: number } | { state: "failed" };
 
 export default function InputSettingsMenu({ onOpenSettings, dropUp = false }: InputSettingsMenuProps) {
+  const { t } = useTranslation("settings");
   const { state, dispatch } = useAppContext();
   const [open, setOpen] = useState(false);
   const [submenu, setSubmenu] = useState<SubmenuKey | null>(null);
@@ -211,7 +213,7 @@ export default function InputSettingsMenu({ onOpenSettings, dropUp = false }: In
     <div className={`ism ${dirCls}`} ref={ref}>
       <button
         className="input-tool-btn"
-        title="Settings"
+        title={t("common:settings")}
         onClick={() => { if (open) close(); else setOpen(true); }}
       >
         <Settings2 />
@@ -226,7 +228,7 @@ export default function InputSettingsMenu({ onOpenSettings, dropUp = false }: In
             onClick={() => setSubmenu(submenu === "mcp" ? null : "mcp")}
           >
             <Unplug size={16} className="ism-item-icon" />
-            <span className="dd-item-label">MCP</span>
+            <span className="dd-item-label">{t("common:mcp")}</span>
             <ChevronRight size={14} className="ism-chevron" />
           </button>
 
@@ -237,7 +239,7 @@ export default function InputSettingsMenu({ onOpenSettings, dropUp = false }: In
             onClick={() => setSubmenu(submenu === "skills" ? null : "skills")}
           >
             <ScrollText size={16} className="ism-item-icon" />
-            <span className="dd-item-label">Skills</span>
+            <span className="dd-item-label">{t("common:skills")}</span>
             <ChevronRight size={14} className="ism-chevron" />
           </button>
 
@@ -248,7 +250,7 @@ export default function InputSettingsMenu({ onOpenSettings, dropUp = false }: In
             onClick={() => setSubmenu(submenu === "agents" ? null : "agents")}
           >
             <Bot size={16} className="ism-item-icon" />
-            <span className="dd-item-label">Subagent</span>
+            <span className="dd-item-label">{t("common:subagent")}</span>
             <ChevronRight size={14} className="ism-chevron" />
           </button>
 
@@ -256,7 +258,7 @@ export default function InputSettingsMenu({ onOpenSettings, dropUp = false }: In
           {submenu === "agents" &&
             renderSubmenu(
               agents.length === 0 ? (
-                <div className="ism-empty">No subagents configured</div>
+                <div className="ism-empty">{t("inputSettings.noSubagents")}</div>
               ) : (
                 agents.map((agent) => (
                   <button
@@ -264,20 +266,20 @@ export default function InputSettingsMenu({ onOpenSettings, dropUp = false }: In
                     className="dd-item ism-toggle-item"
                     onClick={() => handleToggleAgent(agent.id)}
                   >
-                    <span className="dd-item-label">{agent.name || "Untitled"}</span>
+                    <span className="dd-item-label">{agent.name || t("common:untitled")}</span>
                     <span className={`ism-switch ${agent.enabled ? "ism-switch--on" : ""}`} />
                   </button>
                 ))
               ),
               "agents",
-              "Manage Subagents..."
+              t("inputSettings.manageSubagents")
             )}
 
           {/* MCP submenu */}
           {submenu === "mcp" &&
             renderSubmenu(
               mcpServers.length === 0 ? (
-                <div className="ism-empty">No MCP servers configured</div>
+                <div className="ism-empty">{t("inputSettings.noMcpServers")}</div>
               ) : (
                 mcpServers.map((server) => (
                   <button
@@ -287,20 +289,20 @@ export default function InputSettingsMenu({ onOpenSettings, dropUp = false }: In
                     onClick={() => handleToggleMcp(server)}
                   >
                     {mcpStatusDot(server)}
-                    <span className="dd-item-label">{server.name || "Untitled"}</span>
+                    <span className="dd-item-label">{server.name || t("common:untitled")}</span>
                     <span className={mcpSwitchClass(server)} />
                   </button>
                 ))
               ),
               "mcps",
-              "Manage MCP Servers..."
+              t("inputSettings.manageMcp")
             )}
 
           {/* Skills submenu */}
           {submenu === "skills" &&
             renderSubmenu(
               allSkills.length === 0 ? (
-                <div className="ism-empty">No skills installed</div>
+                <div className="ism-empty">{t("inputSettings.noSkills")}</div>
               ) : (
                 allSkills.map(({ name, disabled }) => (
                   <button
@@ -314,7 +316,7 @@ export default function InputSettingsMenu({ onOpenSettings, dropUp = false }: In
                 ))
               ),
               "skills",
-              "Manage Skills..."
+              t("inputSettings.manageSkills")
             )}
         </div>
       )}

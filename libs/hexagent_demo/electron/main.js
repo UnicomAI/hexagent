@@ -107,6 +107,9 @@ function waitForHealth(port, retries = 30, interval = 500) {
 async function spawnBackend() {
   const port = IS_DEV ? 8000 : await findFreePort();
   backendPort = port;
+  const wslOfflineDir = IS_DEV
+    ? path.join(__dirname, "resources", "wsl")
+    : path.join(process.resourcesPath, "wsl");
 
   if (IS_DEV) {
     const backendDir = path.join(__dirname, "..", "backend");
@@ -167,6 +170,7 @@ async function spawnBackend() {
         HOST: "127.0.0.1",
         PORT: String(port),
         HEXAGENT_DATA_DIR: userDataDir,
+        HEXAGENT_WSL_OFFLINE_DIR: wslOfflineDir,
       },
     });
   }
@@ -415,9 +419,14 @@ try {
 // ── Window ───────────────────────────────────────────────────────────────────
 
 function createWindow() {
+  const winIconPath = IS_DEV
+    ? path.join(__dirname, "resources", "icon.ico")
+    : path.join(process.resourcesPath, "app-icon.ico");
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    icon: fs.existsSync(winIconPath) ? winIconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
