@@ -1,5 +1,6 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+﻿import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { PanelRight } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAppContext } from "../store";
 import { getVMStatus } from "../api";
 import WelcomeScreen from "./WelcomeScreen";
@@ -18,6 +19,7 @@ interface ChatAreaProps {
 }
 
 export default function ChatArea({ conversation, onSendMessage, onOpenSettings, rightPanel }: ChatAreaProps) {
+  const { t } = useTranslation("chat");
   const { state, dispatch } = useAppContext();
   const [editingTitle, setEditingTitle] = useState(false);
   const chatAreaRef = useRef<HTMLDivElement>(null);
@@ -89,7 +91,7 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
     [dispatch]
   );
 
-  // Keyboard shortcuts: Cmd/Ctrl+Shift+1 → Chat, Cmd/Ctrl+Shift+2 → Cowork
+  // Keyboard shortcuts: Cmd/Ctrl+Shift+1 鈫?Chat, Cmd/Ctrl+Shift+2 鈫?Cowork
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const mod = isMac ? e.metaKey : e.ctrlKey;
@@ -155,10 +157,10 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
                 onClick={() => handleModeChange(mode)}
                 type="button"
               >
-                {mode === "chat" ? "Chat" : "Cowork"}
+                {t(`mode.${mode}`)}
                 <span className="custom-tooltip">
-                  {mode === "chat" ? "Chat" : "Cowork"}
-                  <span className="custom-tooltip-shortcut">{isMac ? "⇧⌘" : "Ctrl+Shift+"}{idx + 1}</span>
+                  {t(`mode.${mode}`)}
+                  <span className="custom-tooltip-shortcut">{isMac ? "鈬р寴" : "Ctrl+Shift+"}{idx + 1}</span>
                 </span>
               </button>
             ))}
@@ -170,7 +172,7 @@ export default function ChatArea({ conversation, onSendMessage, onOpenSettings, 
             <button
               className="right-panel-toggle"
               onClick={() => dispatch({ type: "SET_RIGHT_PANEL", payload: !(state.rightPanelByConversation[conversation?.id ?? ""] ?? false) })}
-              title="Toggle side panel"
+              title={t("toggleSidePanel")}
             >
               <PanelRight />
             </button>

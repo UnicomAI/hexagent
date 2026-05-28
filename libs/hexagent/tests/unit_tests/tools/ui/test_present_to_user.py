@@ -160,6 +160,11 @@ class TestBuildCommand:
         cmd = _build_command(["/path/with spaces/file.txt"], "/out")
         assert "'/path/with spaces/file.txt'" in cmd
 
+    def test_embedded_script_normalized_to_lf(self) -> None:
+        """Command string should not carry CR characters into bash -c payload."""
+        cmd = _build_command(["/a.txt"], "/out")
+        assert "\r" not in cmd
+
 
 # ---------------------------------------------------------------------------
 # _EXT_MIME_MAP / generated script tests

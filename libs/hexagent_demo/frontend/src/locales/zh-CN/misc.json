@@ -1,0 +1,37 @@
+{
+  "folderPicker": {
+    "workInFolder": "选择工作目录",
+    "chooseNewFolder": "选择新文件夹",
+    "recent": "最近使用",
+    "permissionTitle": "允许 HexAgent 访问 \"{{folder}}\" 中的文件？",
+    "permissionBody": "此操作将授权访问该文件夹及其所有子文件夹。HexAgent 将能够读取、编辑和删除此目录中的文件。文件内容可能会与已连接的 AI 模型和工具共享。请避免选择包含敏感或私密数据的文件夹。",
+    "cancel": "取消",
+    "alwaysAllow": "始终允许",
+    "allow": "允许"
+  },
+  "modelPicker": {
+    "noModel": "未配置模型",
+    "selectModel": "选择模型"
+  },
+  "rightPanel": {
+    "progress": "进度",
+    "artifacts": "产出物"
+  },
+  "restartRequired": {
+    "title": "需要重启",
+    "wslComplete": "WSL 运行时安装已完成，但 Windows 需要重启才能继续使用 OpenAgent。",
+    "pleaseRestart": "请立即重启计算机，否则虚拟机/协作功能将无法使用。",
+    "openSandboxSettings": "打开沙盒设置",
+    "recheck": "已重启，重新检查"
+  },
+  "vmSetup": {
+    "settingUp": "正在配置虚拟机",
+    "installingEngine": "正在安装虚拟机引擎",
+    "buildingInstance": "正在构建虚拟机实例",
+    "installingDeps": "正在安装依赖",
+    "clickToView": "点击查看详情"
+  },
+  "sessionSetupFailed": "会话初始化失败，你仍然可以发送消息。",
+  "failedToCreateConversation": "创建对话失败",
+  "failedToMountFolder": "挂载文件夹失败"
+}

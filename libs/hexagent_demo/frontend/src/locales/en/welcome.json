@@ -1,0 +1,29 @@
+{
+  "heading": {
+    "chatWords": ["ClawWork,", "ready", "when", "you", "are."],
+    "coworkWords": ["ClawWork,", "here", "to", "get", "things", "done."]
+  },
+  "placeholders": {
+    "chat": [
+      "Imagine it, I'll make it happen...",
+      "What's your idea?",
+      "Describe the impossible...",
+      "Start with an idea..."
+    ],
+    "cowork": [
+      "How can I help you today?",
+      "Describe the task you'd like to accomplish...",
+      "What should we work on together?"
+    ]
+  },
+  "attachFile": "Attach file",
+  "sendMessage": "Send message",
+  "mountingDirectory": "Mounting directory...",
+  "preparingRequest": "Preparing request...",
+  "configureModel": "Configure a model in Settings first",
+  "mountingFolder": "Mounting folder...",
+  "sandboxRequired": "Sandbox setup required",
+  "e2bKeyRequired": "E2B API key required",
+  "vmSetupRequired": "VM setup required",
+  "setupInSettings": "Set up in Settings"
+}

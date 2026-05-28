@@ -184,6 +184,7 @@ _WSL_EXPORT_SOURCE = "Ubuntu"
 _WSL_PREBUILT_CANDIDATES = (
     "hexagent-prebuilt.tar",
     "hexagent.tar",
+    "ubuntu-base-24.04-amd64.tar.gz",
 )
 
 
@@ -220,6 +221,18 @@ def _combine_wsl_output(stdout_b: bytes | None, stderr_b: bytes | None) -> str:
     if err and out:
         return f"{err}\n{out}"
     return err or out
+
+
+def _looks_like_wsl_usage(msg: str) -> bool:
+    """Return True when output is the generic WSL usage/help banner."""
+    text = msg.strip()
+    low = text.lower()
+    return (
+        "usage: wsl" in low
+        or "usage: wsl.exe" in low
+        or "用法: wsl" in text
+        or "用法: wsl.exe" in text
+    )
 
 
 def _looks_like_missing_wsl_disk(msg: str) -> bool:
@@ -333,12 +346,23 @@ async def _wsl_instance_status() -> str | None:
 
 
 def _wsl_prebuilt_tar_path() -> Path | None:
-    """Return bundled prebuilt WSL rootfs tar if present."""
-    prebuilt_dir = vm_setup_dir().parent / "wsl" / "prebuilt"
-    for name in _WSL_PREBUILT_CANDIDATES:
-        candidate = prebuilt_dir / name
-        if candidate.is_file():
-            return candidate
+    """Return an offline WSL rootfs archive if present.
+
+    Search order:
+    1. Backend-bundled VM assets (PyInstaller ``sandbox/vm/wsl/prebuilt``)
+    2. Electron extraResources path from ``HEXAGENT_WSL_OFFLINE_DIR`` (if set)
+    """
+    candidate_dirs: list[Path] = [vm_setup_dir().parent / "wsl" / "prebuilt"]
+
+    offline_dir = os.environ.get("HEXAGENT_WSL_OFFLINE_DIR", "").strip()
+    if offline_dir:
+        candidate_dirs.append(Path(offline_dir))
+
+    for prebuilt_dir in candidate_dirs:
+        for name in _WSL_PREBUILT_CANDIDATES:
+            candidate = prebuilt_dir / name
+            if candidate.is_file():
+                return candidate
     return None
 
 
@@ -469,7 +493,9 @@ def _wsl_status() -> dict[str, object]:
         "installed": False,
         "path": wsl,
         "managed": False,
-        "reason": last_err or "WSL runtime is not available",
+        # Some Windows builds print only usage text for unsupported probes.
+        # Treat that as "not installed yet" (pending) instead of hard error.
+        **({} if _looks_like_wsl_usage(last_err) else {"reason": last_err or "WSL runtime is not available"}),
     }
 
 
@@ -662,6 +688,22 @@ def _vm_status() -> dict[str, object]:
     if sys.platform == "win32":
         return {"supported": True, "backend": "wsl", **_wsl_status()}
     return {"supported": False, "backend": None, "installed": False, "reason": f"No VM backend for {sys.platform}"}
+
+
+def _runtime_vm_backend() -> str:
+    """Resolve the active VM backend for branch dispatch.
+
+    Prefer the backend reported by ``_vm_status()`` so behavior stays aligned
+    with the setup API surface. Fall back to platform defaults defensively.
+    """
+    backend = str(_vm_status().get("backend") or "")
+    if backend in {"wsl", "lima"}:
+        return backend
+    if sys.platform == "win32":
+        return "wsl"
+    if sys.platform == "darwin":
+        return "lima"
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -947,10 +989,59 @@ class _BuildManager(_ProcessManager):
             self._emit("progress", {"step": step, "message": f"{message} (elapsed {elapsed}s){extra}"})
 
     async def _run(self, **kwargs: object) -> None:
-        if sys.platform == "win32":
+        backend = _runtime_vm_backend()
+        if backend == "wsl":
             await self._run_wsl()
             return
-        await self._run_lima()
+        if backend == "lima":
+            await self._run_lima()
+            return
+        self._emit("error", {"message": f"VM build is not supported on backend: {backend or sys.platform}"})
+        self._status = "error"
+        self._error = "Unsupported backend"
+
+    async def _start_wsl_instance(
+        self,
+        wsl_exe: str,
+        *,
+        step: str,
+        message: str,
+        retries_on_missing_disk: int = 0,
+    ) -> tuple[bool, str]:
+        """Start hexagent distro and optionally retry transient missing-disk errors."""
+        attempts = max(1, retries_on_missing_disk + 1)
+        for attempt in range(1, attempts + 1):
+            proc = await asyncio.create_subprocess_exec(
+                wsl_exe, "-d", _WSL_INSTANCE, "--", "echo", "ok",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            self._process = proc
+            out_b, err_b = await self._communicate_with_heartbeat(
+                proc,
+                step=step,
+                message=message,
+            )
+            if proc.returncode == 0:
+                return True, ""
+
+            err = _combine_wsl_output(out_b, err_b)
+            is_missing_disk = _looks_like_missing_wsl_disk(err)
+            if is_missing_disk and attempt < attempts:
+                wait_s = min(2 * attempt, 5)
+                self._emit(
+                    "progress",
+                    {
+                        "step": step,
+                        "message": f"WSL disk not ready yet, retrying start in {wait_s}s "
+                        f"({attempt}/{attempts - 1})...",
+                    },
+                )
+                await asyncio.sleep(wait_s)
+                continue
+
+            return False, err or f"WSL start failed (exit {proc.returncode})"
+        return False, "WSL start failed"
 
     async def _run_lima(self) -> None:
         # Ensure limactl has the virtualization entitlement before any VM
@@ -1033,23 +1124,17 @@ class _BuildManager(_ProcessManager):
 
         if _wsl_state_equals(status, _WSL_STOPPED_STATES):
             self._emit("progress", {"step": "starting", "message": "Starting existing WSL distro..."})
-            proc = await asyncio.create_subprocess_exec(
-                wsl_exe, "-d", _WSL_INSTANCE, "--", "echo", "ok",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            self._process = proc
-            stdout_b, stderr_b = await self._communicate_with_heartbeat(
-                proc,
+            ok, err = await self._start_wsl_instance(
+                wsl_exe,
                 step="starting",
                 message="Starting existing WSL distro...",
+                retries_on_missing_disk=1,
             )
-            if proc.returncode == 0:
+            if ok:
                 self._emit("done", {"message": "WSL distro started successfully"})
                 self._status = "done"
                 return
             else:
-                err = _combine_wsl_output(stdout_b, stderr_b)
                 if _looks_like_missing_wsl_disk(err):
                     self._emit("progress", {"step": "creating", "message": "Detected broken WSL distro disk. Recreating HexAgent distro..."})
                     proc_unreg = await asyncio.create_subprocess_exec(
@@ -1106,25 +1191,19 @@ class _BuildManager(_ProcessManager):
                 return
 
             self._emit("progress", {"step": "starting", "message": "Starting imported HexAgent WSL distro..."})
-            proc_start = await asyncio.create_subprocess_exec(
-                wsl_exe, "-d", _WSL_INSTANCE, "--", "echo", "ok",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            self._process = proc_start
-            out_b, err_b = await self._communicate_with_heartbeat(
-                proc_start,
+            ok, err = await self._start_wsl_instance(
+                wsl_exe,
                 step="starting",
                 message="Starting imported HexAgent WSL distro...",
+                retries_on_missing_disk=3,
             )
-            if proc_start.returncode == 0:
+            if ok:
                 self._emit("done", {"message": "WSL distro imported from bundled image and started successfully"})
                 self._status = "done"
             else:
-                err = _combine_wsl_output(out_b, err_b)
-                self._emit("error", {"message": err or f"WSL start failed (exit {proc_start.returncode})"})
+                self._emit("error", {"message": err})
                 self._status = "error"
-                self._error = f"exit {proc_start.returncode}"
+                self._error = err
             return
 
         # Fallback: bootstrap from Ubuntu export.
@@ -1209,25 +1288,19 @@ class _BuildManager(_ProcessManager):
             return
 
         self._emit("progress", {"step": "starting", "message": "Starting HexAgent WSL distro..."})
-        proc_start = await asyncio.create_subprocess_exec(
-            wsl_exe, "-d", _WSL_INSTANCE, "--", "echo", "ok",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        self._process = proc_start
-        out_b, err_b = await self._communicate_with_heartbeat(
-            proc_start,
+        ok, err = await self._start_wsl_instance(
+            wsl_exe,
             step="starting",
             message="Starting HexAgent WSL distro...",
+            retries_on_missing_disk=3,
         )
-        if proc_start.returncode == 0:
+        if ok:
             self._emit("done", {"message": "WSL distro created and started successfully"})
             self._status = "done"
         else:
-            err = _combine_wsl_output(out_b, err_b)
-            self._emit("error", {"message": err or f"WSL start failed (exit {proc_start.returncode})"})
+            self._emit("error", {"message": err})
             self._status = "error"
-            self._error = f"exit {proc_start.returncode}"
+            self._error = err
 
     async def _stream_stderr(self, proc: asyncio.subprocess.Process) -> str:
         """Read limactl stderr line-by-line and emit progress events.
@@ -1260,8 +1333,8 @@ class _BuildManager(_ProcessManager):
 # Provision Manager — runs setup.sh inside the VM
 # ---------------------------------------------------------------------------
 
-_SETUP_MARKER_DIR = "/var/lib/hexagent/setup"
-_SETUP_LOG_DIR = "/var/log/hexagent/setup"
+_SETUP_MARKER_DIRS = ("/var/lib/hexagent/setup", "/var/lib/openagent/setup")
+_SETUP_LOG_DIRS = ("/var/log/hexagent/setup", "/var/log/openagent/setup")
 _SETUP_VM_DIR = "/tmp/hexagent-setup"
 
 # Step IDs that setup.sh discovers (must match filenames in steps/)
@@ -1281,10 +1354,16 @@ class _ProvisionManager(_ProcessManager):
     """Manages setup.sh execution inside the Lima VM."""
 
     async def _run(self, **kwargs: object) -> None:
-        if sys.platform == "win32":
+        backend = _runtime_vm_backend()
+        if backend == "wsl":
             await self._run_wsl(**kwargs)
             return
-        await self._run_lima(**kwargs)
+        if backend == "lima":
+            await self._run_lima(**kwargs)
+            return
+        self._emit("error", {"message": f"VM provisioning is not supported on backend: {backend or sys.platform}"})
+        self._status = "error"
+        self._error = "Unsupported backend"
 
     async def _run_lima(self, **kwargs: object) -> None:
         force = bool(kwargs.get("force", False))
@@ -1418,7 +1497,9 @@ class _ProvisionManager(_ProcessManager):
         setup_vm_dir_quoted = shlex.quote(_SETUP_VM_DIR)
         rc, _, err = await _wsl_shell(
             f"rm -rf {setup_vm_dir_quoted} && mkdir -p {setup_vm_dir_quoted} && "
-            f"cp -r {setup_wsl_quoted}/. {setup_vm_dir_quoted}/",
+            f"cp -r {setup_wsl_quoted}/. {setup_vm_dir_quoted}/ && "
+            f"find {setup_vm_dir_quoted} -type f -name '*.sh' -exec sed -i 's/\\r$//' {{}} + && "
+            f"find {setup_vm_dir_quoted} -type f -name '*.sh' -exec chmod +x {{}} +",
             timeout=60,
             user="root",
         )
@@ -1488,19 +1569,27 @@ class _ProvisionManager(_ProcessManager):
 
     async def check_markers(self) -> dict[str, object]:
         """Read VM-side marker files to determine provision state."""
-        if sys.platform == "win32":
+        backend = _runtime_vm_backend()
+        if backend == "wsl":
             instance_status = await _wsl_instance_status()
             shell = lambda cmd: _wsl_shell(cmd, user="root")
             if not _wsl_distro_ready_for_cowork(instance_status):
                 return {"provisioned": False, "steps_done": [], "total_steps": len(_PROVISION_STEPS)}
-        else:
+        elif backend == "lima":
             instance_status = await _lima_instance_status()
             shell = _lima_shell
             if instance_status != "Running":
                 return {"provisioned": False, "steps_done": [], "total_steps": len(_PROVISION_STEPS)}
+        else:
+            return {"provisioned": False, "steps_done": [], "total_steps": len(_PROVISION_STEPS)}
 
-        rc, stdout, _ = await shell(f"ls {_SETUP_MARKER_DIR}/*.done 2>/dev/null || true")
-        if rc != 0 or not stdout.strip():
+        stdout = ""
+        for marker_dir in _SETUP_MARKER_DIRS:
+            rc, out, _ = await shell(f"ls {marker_dir}/*.done 2>/dev/null || true")
+            if rc == 0 and out.strip():
+                stdout = out
+                break
+        if not stdout.strip():
             return {"provisioned": False, "steps_done": [], "total_steps": len(_PROVISION_STEPS)}
 
         done_files = stdout.strip().splitlines()
@@ -1518,12 +1607,21 @@ class _ProvisionManager(_ProcessManager):
 
     async def get_log(self) -> str:
         """Fetch the latest setup log from the VM."""
-        shell = (lambda cmd, timeout=15: _wsl_shell(cmd, timeout=timeout, user="root")) if sys.platform == "win32" else _lima_shell
-        rc, stdout, _ = await shell(
-            f"ls -t {_SETUP_LOG_DIR}/setup-*.log 2>/dev/null | head -1 | xargs cat 2>/dev/null | tail -500",
-            timeout=15,
-        )
-        return stdout if rc == 0 else ""
+        backend = _runtime_vm_backend()
+        if backend == "wsl":
+            shell = lambda cmd, timeout=15: _wsl_shell(cmd, timeout=timeout, user="root")
+        elif backend == "lima":
+            shell = _lima_shell
+        else:
+            return ""
+        for log_dir in _SETUP_LOG_DIRS:
+            rc, stdout, _ = await shell(
+                f"ls -t {log_dir}/setup-*.log 2>/dev/null | head -1 | xargs cat 2>/dev/null | tail -500",
+                timeout=15,
+            )
+            if rc == 0 and stdout.strip():
+                return stdout
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -1573,10 +1671,13 @@ async def get_build_status() -> dict[str, object]:
     mgr = _get_build_manager()
     result = dict(mgr.status_dict())
     if mgr._status in ("idle", "done", "error"):
-        if sys.platform == "win32":
+        backend = _runtime_vm_backend()
+        if backend == "wsl":
             result["vm_state"] = await _wsl_instance_status()
-        else:
+        elif backend == "lima":
             result["vm_state"] = await _lima_instance_status()
+        else:
+            result["vm_state"] = None
     return result
 
 
