@@ -1,10 +1,10 @@
 # Security Policy
 
-HexAgent agents execute shell commands and access filesystems — security is a core architectural concern, not an afterthought.
+UniHarness agents execute shell commands and access filesystems — security is a core architectural concern, not an afterthought.
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in HexAgent, please report it responsibly.
+If you discover a security vulnerability in UniHarness, please report it responsibly.
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
@@ -24,24 +24,24 @@ Include:
 
 ## Scope
 
-This policy applies to the HexAgent codebase hosted at [github.com/an7tang/hexagent](https://github.com/an7tang/hexagent).
+This policy applies to the UniHarness codebase hosted at [github.com/UnicomAI/UniHarness](https://github.com/UnicomAI/UniHarness).
 
 ### In Scope
 
-- Vulnerabilities in the `hexagent` library code
-- Security issues in the `hexagent_demo` application
+- Vulnerabilities in the `uniharness` library code
+- Security issues in the `uniharness_demo` application
 - Sandbox escape vulnerabilities in Computer implementations
 - Injection vulnerabilities in tool execution (command injection, path traversal, etc.)
 
 ### Out of Scope
 
 - Vulnerabilities in third-party dependencies (report these to the respective maintainers)
-- Issues that require physical access to the machine running HexAgent
+- Issues that require physical access to the machine running UniHarness
 - Social engineering attacks
 
 ## Security Considerations
 
-HexAgent agents execute shell commands and file operations. When deploying HexAgent:
+UniHarness agents execute shell commands and file operations. When deploying UniHarness:
 
 - **Use sandboxed execution environments** (E2B cloud sandbox or Lima VMs) for untrusted workloads
 - **Never expose the agent API to the public internet** without authentication
