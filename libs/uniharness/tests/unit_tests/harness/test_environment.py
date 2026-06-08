@@ -76,12 +76,12 @@ class TestResolve:
         assert env.today_date == datetime(2026, 3, 13, 10, 30, 0, tzinfo=UTC)
 
     async def test_datetime_without_timezone_fallback(self) -> None:
-        """Falls back to naive datetime when timezone offset is missing."""
+        """Falls back to UTC when timezone offset cannot be parsed."""
         computer = _mock_computer(_make_stdout(date="2026-03-13T10:30:00"))
         env = await EnvironmentResolver(computer).resolve()
 
         assert env.today_date.year == 2026
-        assert env.today_date.tzinfo is None
+        assert env.today_date.tzinfo is not None
 
     async def test_empty_datetime_raises(self) -> None:
         computer = _mock_computer(_make_stdout(date=""))

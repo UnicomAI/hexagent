@@ -6,7 +6,7 @@ to populate an ``EnvironmentContext`` used by prompt section functions.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from uniharness.types import EnvironmentContext
@@ -78,7 +78,7 @@ class EnvironmentResolver:
         try:
             now = datetime.strptime(raw_dt, "%Y-%m-%dT%H:%M:%S%z")
         except ValueError:
-            now = datetime.strptime(raw_dt[:19], "%Y-%m-%dT%H:%M:%S")  # noqa: DTZ007
+            now = datetime.strptime(raw_dt[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=UTC)
 
         return EnvironmentContext(
             working_dir=values[0],
