@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
+
+if TYPE_CHECKING:
+    from uniharness.types import ApprovalCallback
 
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -57,6 +60,7 @@ def _make_runner(
     tools: list[Any] | None = None,
     definitions: dict[str, AgentDefinition] | None = None,
     resolved_models: dict[str, Any] | None = None,
+    approval_callback: ApprovalCallback | None = None,
 ) -> LangChainSubagentRunner:
     """Create a runner with minimal dependencies."""
     return LangChainSubagentRunner(
@@ -70,6 +74,7 @@ def _make_runner(
         environment_resolver=MagicMock(),
         environment=MagicMock(),
         permission_gate=MagicMock(),
+        approval_callback=approval_callback,
     )
 
 
@@ -104,3 +109,18 @@ class TestSubagentRunnerConstruction:
 
         original["b"] = AgentDefinition(description="b")
         assert "b" not in runner._definitions
+
+
+class TestSubagentRunnerApprovalCallback:
+    """approval_callback is stored and forwarded to subagent middleware."""
+
+    def test_default_approval_callback_is_none(self) -> None:
+        runner = _make_runner()
+        assert runner._approval_callback is None
+
+    def test_approval_callback_stored_when_provided(self) -> None:
+        async def my_callback(_tool_name: str, _tool_args: dict[str, Any], _prompt: str | None) -> bool:
+            return True
+
+        runner = _make_runner(approval_callback=my_callback)
+        assert runner._approval_callback is my_callback

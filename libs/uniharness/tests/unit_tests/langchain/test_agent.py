@@ -182,3 +182,21 @@ class TestAgentLifecycle:
             pass
 
         agent.aclose.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# create_agent signature
+# ---------------------------------------------------------------------------
+
+
+class TestCreateAgentSignature:
+    """create_agent() exposes all expected public parameters."""
+
+    def test_approval_callback_parameter_exists_with_none_default(self) -> None:
+        import inspect
+
+        from uniharness.langchain.agent import create_agent
+
+        sig = inspect.signature(create_agent)
+        assert "approval_callback" in sig.parameters
+        assert sig.parameters["approval_callback"].default is None

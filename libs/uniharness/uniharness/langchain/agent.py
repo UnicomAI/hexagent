@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from uniharness.mcp import McpClient
     from uniharness.tools.base import BaseAgentTool
     from uniharness.tools.web import FetchProvider, SearchProvider
-    from uniharness.types import McpServerConfig, Skill
+    from uniharness.types import ApprovalCallback, McpServerConfig, Skill
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +229,7 @@ async def create_agent(
     reminders: Sequence[Reminder] = BUILTIN_REMINDERS,
     extra_tools: Sequence[BaseAgentTool[Any]] | None = None,
     checkpointer: Checkpointer | None = None,
+    approval_callback: ApprovalCallback | None = None,
 ) -> Agent:
     """Create an UniHarness agent using LangChain.
 
@@ -271,6 +272,12 @@ async def create_agent(
             built-in set. Merged with default tools and fully visible in
             the system prompt, ``AgentContext``, and compaction rebuild.
         checkpointer: LangGraph checkpointer for conversation persistence.
+        approval_callback: Human-in-the-loop callback invoked when a
+            ``SafetyRule`` returns ``PermissionResult.NEEDS_APPROVAL``.
+            Signature: ``async (tool_name, tool_args, prompt) -> bool``.
+            When ``None`` (default), any ``NEEDS_APPROVAL`` decision is
+            treated as a denial. Applies to both the root agent and all
+            spawned subagents.
 
     Returns:
         A configured UniHarness agent. Use as an async context manager
@@ -353,6 +360,7 @@ async def create_agent(
             environment_resolver=env_resolver,
             environment=env,
             permission_gate=permission_gate,
+            approval_callback=approval_callback,
         )
 
         # 9. Create AgentTool (not a base tool — subagents cannot spawn sub-sub-agents)
@@ -388,6 +396,7 @@ async def create_agent(
             context=ctx,
             system_prompt=assembled_prompt,
             permission_gate=permission_gate,
+            approval_callback=approval_callback,
             skill_resolver=skill_resolver,
             environment_resolver=env_resolver,
             reminders=all_reminders,
