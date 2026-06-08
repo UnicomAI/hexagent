@@ -82,13 +82,12 @@ class TestSupportsToolImages:
         import importlib
         import sys
 
-        # Temporarily hide langchain_anthropic
+        import uniharness.langchain.middleware as mod
+
+        # Temporarily hide langchain_anthropic so the module re-runs its try/except
         original = sys.modules.get("langchain_anthropic")
         sys.modules["langchain_anthropic"] = None  # type: ignore[assignment]
         try:
-            # Re-import the function so it re-runs the try/except block
-            import uniharness.langchain.middleware as mod
-
             importlib.reload(mod)
             result = mod._supports_tool_images(MagicMock())
         finally:
@@ -106,7 +105,7 @@ class TestSupportsToolImages:
 
         # ChatAnthropic requires an API key; patch __init__ to avoid it.
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(ChatAnthropic, "__init__", lambda *_a, **_kw: None)
+            mp.setattr(ChatAnthropic, "__init__", lambda *_: None)
             model = ChatAnthropic.__new__(ChatAnthropic)
         assert _supports_tool_images(model) is True
 
